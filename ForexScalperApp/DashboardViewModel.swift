@@ -18,6 +18,13 @@ class DashboardViewModel: ObservableObject {
     @Published var igAutoReconnect: Bool = true
     @Published var igConnected: Bool = false
     @Published var igConnectionError: String = ""
+    
+    // MT5 Properties
+    @Published var mt5Connected: Bool = false
+    @Published var mt5Error: String = ""
+    @Published var mt5BridgeURL: String = "http://localhost:5000"
+    @Published var mt5MagicNumber: Int = 888888
+    
     @Published var isConnecting: Bool = false
     @Published var notifyOnSignal: Bool = true
     @Published var notifyOnTrade: Bool = true
@@ -57,19 +64,13 @@ class DashboardViewModel: ObservableObject {
     // Signal source metrics
     @Published var binanceLatency: TimeInterval = 0
     @Published var igLatency: TimeInterval = 0
+    @Published var mt5Latency: TimeInterval = 0
     @Published var binanceReliability: Double = 1.0
     @Published var igReliability: Double = 1.0
+    @Published var mt5Reliability: Double = 1.0
     @Published var activeSource: SignalSource = .auto
     
-    let availableSymbols = [
-        // Existing
-        "EURUSDT", "GBPUSDT", "AUDUSDT", "BTCUSDT", "ETHUSDT",
-        // New Forex
-        "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "CADCHF", "TRYJPY", "EURCZK",
-        // New Crypto
-        "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LTCUSDT", "BCHUSDT", "EOSUSDT",
-        "XLMUSDT", "NEOUSDT", "BTGUSDT"
-    ]
+    let availableSymbols = TradingPair.allCases.map { $0.rawValue }
     
     @Published var scalpingConfig = ScalpingConfig.shared
     private weak var coordinator: RefactoredAppCoordinator?
@@ -85,8 +86,10 @@ class DashboardViewModel: ObservableObject {
             self.activeSource = coordinator.selectedSignalSource
             self.binanceLatency = coordinator.sourceLatency[.binance] ?? 0
             self.igLatency = coordinator.sourceLatency[.ig] ?? 0
+            self.mt5Latency = coordinator.sourceLatency[.mt5] ?? 0
             self.binanceReliability = coordinator.sourceReliability[.binance] ?? 1.0
             self.igReliability = coordinator.sourceReliability[.ig] ?? 1.0
+            self.mt5Reliability = coordinator.sourceReliability[.mt5] ?? 1.0
         }
     }
     
@@ -134,6 +137,11 @@ class DashboardViewModel: ObservableObject {
         igAutoReconnect = UserDefaults.standard.object(forKey: "igAutoReconnect") != nil ?
             UserDefaults.standard.bool(forKey: "igAutoReconnect") : true
         
+        // Load MT5 settings
+        mt5BridgeURL = UserDefaults.standard.string(forKey: "mt5BridgeURL") ?? "http://localhost:5000"
+        mt5MagicNumber = UserDefaults.standard.integer(forKey: "mt5MagicNumber") != 0 ?
+            UserDefaults.standard.integer(forKey: "mt5MagicNumber") : 888888
+        
         // Load Active Trading Pairs
         if let savedSymbols = UserDefaults.standard.array(forKey: "activeSymbols") as? [String] {
             activeSymbols = Set(savedSymbols)
@@ -171,6 +179,10 @@ class DashboardViewModel: ObservableObject {
         UserDefaults.standard.set(igAccountID, forKey: "igAccountID")
         UserDefaults.standard.set(igEnvironment, forKey: "igEnvironment")
         UserDefaults.standard.set(igAutoReconnect, forKey: "igAutoReconnect")
+        
+        // Save MT5 settings
+        UserDefaults.standard.set(mt5BridgeURL, forKey: "mt5BridgeURL")
+        UserDefaults.standard.set(mt5MagicNumber, forKey: "mt5MagicNumber")
         
         // Save Active Trading Pairs
         UserDefaults.standard.set(Array(activeSymbols), forKey: "activeSymbols")
@@ -236,16 +248,20 @@ class DashboardViewModel: ObservableObject {
             let currentActiveSource = await MainActor.run { coordinator.getBestSignalSource() }
             let binanceLat = await MainActor.run { coordinator.sourceLatency[.binance] ?? 0 }
             let igLat = await MainActor.run { coordinator.sourceLatency[.ig] ?? 0 }
+            let mt5Lat = await MainActor.run { coordinator.sourceLatency[.mt5] ?? 0 }
             let binanceRel = await MainActor.run { coordinator.sourceReliability[.binance] ?? 1.0 }
             let igRel = await MainActor.run { coordinator.sourceReliability[.ig] ?? 1.0 }
+            let mt5Rel = await MainActor.run { coordinator.sourceReliability[.mt5] ?? 1.0 }
             
             await MainActor.run {
                 self.signals = currentSignals
                 self.activeSource = currentActiveSource
                 self.binanceLatency = binanceLat
                 self.igLatency = igLat
+                self.mt5Latency = mt5Lat
                 self.binanceReliability = binanceRel
                 self.igReliability = igRel
+                self.mt5Reliability = mt5Rel
             }
         }
     }
@@ -266,6 +282,8 @@ class DashboardViewModel: ObservableObject {
             return binanceReliability > 0.7 ? .green : (binanceReliability > 0.3 ? .orange : .red)
         case .ig:
             return igReliability > 0.7 ? .green : (igReliability > 0.3 ? .orange : .red)
+        case .mt5:
+            return mt5Reliability > 0.7 ? .green : (mt5Reliability > 0.3 ? .orange : .red)
         case .auto:
             return .accentCyan
         case .both:
@@ -293,6 +311,8 @@ class DashboardViewModel: ObservableObject {
             latency = binanceLatency
         case .ig:
             latency = igLatency
+        case .mt5:
+            latency = mt5Latency
         default:
             return "N/A"
         }
@@ -439,6 +459,31 @@ class DashboardViewModel: ObservableObject {
         }
     }
     
+    // MT5 Methods
+    func connectToMT5() async {
+        await MainActor.run {
+            mt5Connected = false
+            mt5Error = ""
+            isConnecting = true
+        }
+        
+        do {
+            let connected = try await MT5Service.shared.checkConnection()
+            await MainActor.run {
+                self.mt5Connected = connected
+                self.isConnecting = false
+                if !connected {
+                    self.mt5Error = "MT5 Bridge not reachable"
+                }
+            }
+        } catch {
+            await MainActor.run {
+                self.mt5Error = error.localizedDescription
+                self.isConnecting = false
+            }
+        }
+    }
+    
     // MARK: - Computed Properties
     
     var totalTrades: Int {
@@ -481,9 +526,16 @@ class DashboardViewModel: ObservableObject {
     }
     
     var profitFactor: Double {
-        let grossProfit = tradeHistory.filter { ($0.pnl ?? 0) > 0 }.compactMap { $0.pnl }.reduce(0, +)
-        let grossLoss = abs(tradeHistory.filter { ($0.pnl ?? 0) < 0 }.compactMap { $0.pnl }.reduce(0, +))
-        return grossLoss == 0 ? (grossProfit > 0 ? .infinity : 0) : grossProfit / grossLoss
+        let positivePnLs = tradeHistory.compactMap { $0.pnl }.filter { $0 > 0 }
+        let grossProfit = positivePnLs.reduce(0.0, +)
+        
+        let negativePnLs = tradeHistory.compactMap { $0.pnl }.filter { $0 < 0 }
+        let grossLoss = abs(negativePnLs.reduce(0.0, +))
+        
+        if grossLoss == 0 {
+            return grossProfit > 0 ? .infinity : 0
+        }
+        return grossProfit / grossLoss
     }
     
     var maxDrawdown: Double {
@@ -574,8 +626,10 @@ class DashboardViewModel: ObservableObject {
         
         self.binanceLatency = coordinator.sourceLatency[.binance] ?? 0
         self.igLatency = coordinator.sourceLatency[.ig] ?? 0
+        self.mt5Latency = coordinator.sourceLatency[.mt5] ?? 0
         self.binanceReliability = coordinator.sourceReliability[.binance] ?? 1.0
         self.igReliability = coordinator.sourceReliability[.ig] ?? 1.0
+        self.mt5Reliability = coordinator.sourceReliability[.mt5] ?? 1.0
         self.activeSource = coordinator.getBestSignalSource()
     }
     

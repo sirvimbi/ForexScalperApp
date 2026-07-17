@@ -28,6 +28,7 @@ enum SignalSource: String, Codable, Sendable, CaseIterable {
     case auto = "AUTO"
     case binance = "BINANCE"
     case ig = "IG"
+    case mt5 = "MT5"
     case both = "BOTH"
     
     var displayName: String {
@@ -35,6 +36,7 @@ enum SignalSource: String, Codable, Sendable, CaseIterable {
         case .auto: return "AUTO"
         case .binance: return "BINANCE"
         case .ig: return "IG"
+        case .mt5: return "MT5"
         case .both: return "BOTH"
         }
     }
@@ -44,6 +46,7 @@ enum SignalSource: String, Codable, Sendable, CaseIterable {
         case .auto: return "bolt.horizontal.circle.fill"
         case .binance: return "bitcoinsign.circle.fill"
         case .ig: return "network"
+        case .mt5: return "chart.bar.fill"
         case .both: return "link.circle.fill"
         }
     }
@@ -82,30 +85,16 @@ struct Signal: Identifiable, Sendable, Codable {
     var volume: Double
     var tradeId: UUID?
     var externalDealId: String?
+    
+    // MT5 Specific fields for "God Mode"
+    var magicNumber: Int?
+    var comment: String?
+    var deviation: Int?
+    var filler: String? // Type of filling (IOC, FOK, etc.)
 
     private enum CodingKeys: String, CodingKey {
-        case id
-        case type
-        case symbol
-        case price
-        case confidence
-        case timestamp
-        case timeframe
-        case expiryTime
-        case status
-        case acceptedAt
-        case acceptedPrice
-        case closedAt
-        case closedPrice
-        case pnl
-        case pnlPercent
-        case positionSize
-        case stopLoss
-        case takeProfit
-        case source
-        case volume
-        case tradeId
-        case externalDealId
+        case id, type, symbol, price, confidence, timestamp, timeframe, expiryTime, status, acceptedAt, acceptedPrice, closedAt, closedPrice, pnl, pnlPercent, positionSize, stopLoss, takeProfit, source, volume, tradeId, externalDealId
+        case magicNumber, comment, deviation, filler
     }
 
     init(from decoder: Decoder) throws {
@@ -133,6 +122,12 @@ struct Signal: Identifiable, Sendable, Codable {
         self.volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 0
         self.tradeId = try container.decodeIfPresent(UUID.self, forKey: .tradeId)
         self.externalDealId = try container.decodeIfPresent(String.self, forKey: .externalDealId)
+        
+        // MT5
+        self.magicNumber = try container.decodeIfPresent(Int.self, forKey: .magicNumber)
+        self.comment = try container.decodeIfPresent(String.self, forKey: .comment)
+        self.deviation = try container.decodeIfPresent(Int.self, forKey: .deviation)
+        self.filler = try container.decodeIfPresent(String.self, forKey: .filler)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -159,6 +154,12 @@ struct Signal: Identifiable, Sendable, Codable {
         try container.encode(volume, forKey: .volume)
         try container.encodeIfPresent(tradeId, forKey: .tradeId)
         try container.encodeIfPresent(externalDealId, forKey: .externalDealId)
+        
+        // MT5
+        try container.encodeIfPresent(magicNumber, forKey: .magicNumber)
+        try container.encodeIfPresent(comment, forKey: .comment)
+        try container.encodeIfPresent(deviation, forKey: .deviation)
+        try container.encodeIfPresent(filler, forKey: .filler)
     }
     
     init(id: UUID = UUID(),
@@ -182,7 +183,11 @@ struct Signal: Identifiable, Sendable, Codable {
          source: SignalSource = .binance,
          volume: Double = 0,
          tradeId: UUID? = nil,
-         externalDealId: String? = nil) {
+         externalDealId: String? = nil,
+         magicNumber: Int? = nil,
+         comment: String? = nil,
+         deviation: Int? = nil,
+         filler: String? = nil) {
         self.id = id
         self.type = type
         self.symbol = symbol
@@ -205,6 +210,10 @@ struct Signal: Identifiable, Sendable, Codable {
         self.volume = volume
         self.tradeId = tradeId
         self.externalDealId = externalDealId
+        self.magicNumber = magicNumber
+        self.comment = comment
+        self.deviation = deviation
+        self.filler = filler
     }
     
     var isActive: Bool {
@@ -318,66 +327,109 @@ struct TradeRecord: Identifiable, Codable, Sendable {
 
 // MARK: - Trading Pair Enum for better type safety
 enum TradingPair: String, CaseIterable {
-    // Existing
-    case eurusdt = "EURUSDT"
-    case gbpusdt = "GBPUSDT"
-    case audusdt = "AUDUSDT"
-    case btcusdt = "BTCUSDT"
-    case ethusdt = "ETHUSDT"
-    
-    // New Forex
+    // Forex Majors
     case eurusd = "EURUSD"
     case gbpusd = "GBPUSD"
     case usdjpy = "USDJPY"
     case usdchf = "USDCHF"
-    case cadchf = "CADCHF"
-    case tryjpy = "TRYJPY"
-    case eurczk = "EURCZK"
+    case audusd = "AUDUSD"
+    case usdcad = "USDCAD"
+    case nzdusd = "NZDUSD"
     
-    // New Crypto
+    // Forex Minors/Crosses
+    case eurgbp = "EURGBP"
+    case eurjpy = "EURJPY"
+    case gbpjpy = "GBPJPY"
+    case audjpy = "AUDJPY"
+    case cadjpy = "CADJPY"
+    case chfjpy = "CHFJPY"
+    case euraud = "EURAUD"
+    case eurcad = "EURCAD"
+    case gbpaud = "GBPAUD"
+    case audcad = "AUDCAD"
+    
+    // Forex Exotics
+    case usdmxn = "USDMXN"
+    case usdzar = "USDZAR"
+    case usdtry = "USDTRY"
+    case usdhkd = "USDHKD"
+    case usdsgd = "USDSGD"
+    case usdnok = "USDNOK"
+    case usdsek = "USDSEK"
+    case usddkk = "USDDKK"
+    case usdpln = "USDPLN"
+    case usdcnh = "USDCNH"
+    case eurczk = "EURCZK"
+    case eurhuf = "EURHUF"
+    case eurpln = "EURPLN"
+    case eurtry = "EURTRY"
+    
+    // Crypto
+    case btcusdt = "BTCUSDT"
+    case ethusdt = "ETHUSDT"
     case xrpusdt = "XRPUSDT"
     case adausdt = "ADAUSDT"
+    case solusdt = "SOLUSDT"
+    case dotusdt = "DOTUSDT"
     case dogeusdt = "DOGEUSDT"
+    case avaxusdt = "AVAXUSDT"
+    case linkusdt = "LINKUSDT"
     case ltcusdt = "LTCUSDT"
-    case bchusdt = "BCHUSDT"
-    case eosusdt = "EOSUSDT"
-    case xlmusdt = "XLMUSDT"
-    case neousdt = "NEOUSDT"
-    case btgusdt = "BTGUSDT"
     
     var displayName: String {
         switch self {
-        case .eurusdt: return "EUR/USDT"
-        case .gbpusdt: return "GBP/USDT"
-        case .audusdt: return "AUD/USDT"
-        case .btcusdt: return "BTC/USDT"
-        case .ethusdt: return "ETH/USDT"
         case .eurusd: return "EUR/USD"
         case .gbpusd: return "GBP/USD"
         case .usdjpy: return "USD/JPY"
         case .usdchf: return "USD/CHF"
-        case .cadchf: return "CAD/CHF"
-        case .tryjpy: return "TRY/JPY"
+        case .audusd: return "AUD/USD"
+        case .usdcad: return "USD/CAD"
+        case .nzdusd: return "NZD/USD"
+        case .eurgbp: return "EUR/GBP"
+        case .eurjpy: return "EUR/JPY"
+        case .gbpjpy: return "GBP/JPY"
+        case .audjpy: return "AUD/JPY"
+        case .cadjpy: return "CAD/JPY"
+        case .chfjpy: return "CHF/JPY"
+        case .euraud: return "EUR/AUD"
+        case .eurcad: return "EUR/CAD"
+        case .gbpaud: return "GBP/AUD"
+        case .audcad: return "AUD/CAD"
+        case .usdmxn: return "USD/MXN"
+        case .usdzar: return "USD/ZAR"
+        case .usdtry: return "USD/TRY"
+        case .usdhkd: return "USD/HKD"
+        case .usdsgd: return "USD/SGD"
+        case .usdnok: return "USD/NOK"
+        case .usdsek: return "USD/SEK"
+        case .usddkk: return "USD/DKK"
+        case .usdpln: return "USD/PLN"
+        case .usdcnh: return "USD/CNH"
         case .eurczk: return "EUR/CZK"
+        case .eurhuf: return "EUR/HUF"
+        case .eurpln: return "EUR/PLN"
+        case .eurtry: return "EUR/TRY"
+        case .btcusdt: return "BTC/USDT"
+        case .ethusdt: return "ETH/USDT"
         case .xrpusdt: return "XRP/USDT"
         case .adausdt: return "ADA/USDT"
+        case .solusdt: return "SOL/USDT"
+        case .dotusdt: return "DOT/USDT"
         case .dogeusdt: return "DOGE/USDT"
+        case .avaxusdt: return "AVAX/USDT"
+        case .linkusdt: return "LINK/USDT"
         case .ltcusdt: return "LTC/USDT"
-        case .bchusdt: return "BCH/USDT"
-        case .eosusdt: return "EOS/USDT"
-        case .xlmusdt: return "XLM/USDT"
-        case .neousdt: return "NEO/USDT"
-        case .btgusdt: return "BTG/USDT"
         }
     }
     
     var category: String {
         switch self {
-        case .eurusdt, .gbpusdt, .audusdt:
+        case .eurusd, .gbpusd, .usdjpy, .usdchf, .audusd, .usdcad, .nzdusd,
+             .eurgbp, .eurjpy, .gbpjpy, .audjpy, .cadjpy, .chfjpy, .euraud, .eurcad, .gbpaud, .audcad,
+             .usdmxn, .usdzar, .usdtry, .usdhkd, .usdsgd, .usdnok, .usdsek, .usddkk, .usdpln, .usdcnh,
+             .eurczk, .eurhuf, .eurpln, .eurtry:
             return "Forex"
-        case .eurusd, .gbpusd, .usdjpy, .usdchf, .cadchf, .tryjpy, .eurczk:
-            return "Forex"
-        case .btcusdt, .ethusdt, .xrpusdt, .adausdt, .dogeusdt, .ltcusdt, .bchusdt, .eosusdt, .xlmusdt, .neousdt, .btgusdt:
+        case .btcusdt, .ethusdt, .xrpusdt, .adausdt, .solusdt, .dotusdt, .dogeusdt, .avaxusdt, .linkusdt, .ltcusdt:
             return "Crypto"
         }
     }
@@ -523,6 +575,45 @@ struct APIResponse<T: Codable>: Codable {
     let message: String?
 }
 
+// MARK: - MT5 Types
+struct MT5AccountInfo: Codable {
+    let login: Int
+    let balance: Double
+    let equity: Double
+    let margin: Double
+    let marginFree: Double
+    let profit: Double
+    let currency: String
+    let server: String
+}
+
+struct MT5Position: Codable {
+    let ticket: Int
+    let symbol: String
+    let type: String
+    let volume: Double
+    let priceOpen: Double
+    let sl: Double
+    let tp: Double
+    let priceCurrent: Double
+    let profit: Double
+    let magic: Int?
+    let comment: String?
+}
+
+struct MT5TradeResult: Codable {
+    let retcode: Int
+    let order: Int?
+    let deal: Int?
+    let volume: Double
+    let price: Double
+    let bid: Double
+    let ask: Double
+    let comment: String?
+    let request_id: Int?
+    let retcode_external: Int?
+}
+
 // MARK: - Notification Names
 extension Notification.Name {
     static let acceptSignal = Notification.Name("acceptSignal")
@@ -532,6 +623,8 @@ extension Notification.Name {
     static let tradeUpdated = Notification.Name("tradeUpdated")
     static let igAccountUpdated = Notification.Name("igAccountUpdated")
     static let igTradeExecuted = Notification.Name("igTradeExecuted")
+    static let mt5AccountUpdated = Notification.Name("mt5AccountUpdated")
+    static let mt5TradeExecuted = Notification.Name("mt5TradeExecuted")
     static let signalSourceChanged = Notification.Name("signalSourceChanged")
     static let sourceMetricsUpdated = Notification.Name("sourceMetricsUpdated")
 }

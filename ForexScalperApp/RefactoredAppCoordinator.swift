@@ -28,8 +28,9 @@ class RefactoredAppCoordinator: ObservableObject {
     private let signalComparator = SignalComparator()
     private var lastBinanceSignal: [String: Signal] = [:]
     private var lastIGSignal: [String: Signal] = [:]
-    var sourceLatency: [SignalSource: TimeInterval] = [.binance: 0, .ig: 0]
-    var sourceReliability: [SignalSource: Double] = [.binance: 1.0, .ig: 1.0]
+    private var lastMT5Signal: [String: Signal] = [:]
+    var sourceLatency: [SignalSource: TimeInterval] = [.binance: 0, .ig: 0, .mt5: 0]
+    var sourceReliability: [SignalSource: Double] = [.binance: 1.0, .ig: 1.0, .mt5: 1.0]
     private var lastSourceSwitch: Date = Date()
     private let minSwitchInterval: TimeInterval = 60
     
@@ -51,15 +52,7 @@ class RefactoredAppCoordinator: ObservableObject {
         case scalping
     }
     
-    init(symbols: [String] = [
-        // Existing pairs
-        "EURUSDT", "GBPUSDT", "AUDUSDT", "BTCUSDT", "ETHUSDT",
-        // New Forex pairs
-        "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "CADCHF", "TRYJPY", "EURCZK",
-        // New Crypto pairs
-        "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LTCUSDT", "BCHUSDT", "EOSUSDT",
-        "XLMUSDT", "NEOUSDT", "BTGUSDT"
-    ], useDebugData: Bool = false) {
+    init(symbols: [String] = TradingPair.allCases.map { $0.rawValue }, useDebugData: Bool = false) {
         // Keep all symbols - don't filter to only USDT
         self.symbols = symbols
         
@@ -79,8 +72,7 @@ class RefactoredAppCoordinator: ObservableObject {
         self.scalpingEngine = ScalpingSignalEngine(
             marketData: marketData,
             tradeHistory: tradeHistory,
-            riskManager: scalpingRiskManager,
-            config: ScalpingConfig.shared
+            riskManager: scalpingRiskManager
         )
         
         self.scalpingTradeMonitor = ScalpingTradeMonitor(
@@ -119,15 +111,15 @@ class RefactoredAppCoordinator: ObservableObject {
     
     private func connectToDataSources() async {
         await MainActor.run {
-            status = "Connecting to Binance..."
+            status = "Connecting to Data Sources..."
             connectionStatus = "Connecting..."
         }
         
-        // Connect to Binance WebSocket for real-time data
+        // 1. Connect to Binance WebSocket for real-time data
         await binanceService.connect(
             symbols: symbols,
             timeframes: tradingMode == .scalping ?
-                ["1m", "5m", "15m", "1h"] : // More timeframes for scalping
+                ["1m", "5m", "15m", "1h"] : 
                 ["1m", "5m", "1h"],
             onKline: { [weak self] symbol, timeframe, kline in
                 Task { [weak self] in
@@ -136,15 +128,55 @@ class RefactoredAppCoordinator: ObservableObject {
             }
         )
         
-        // Wait for initial data to arrive
-        try? await Task.sleep(nanoseconds: 5_000_000_000)
-        
-        await MainActor.run {
-            connectionStatus = "Connected to Binance"
-            status = "Running in \(tradingMode == .scalping ? "SCALPING" : "STANDARD") mode..."
+        // 2. Connect/Check MT5 (God Mode)
+        do {
+            let mt5Connected = try await MT5Service.shared.checkConnection()
+            if mt5Connected {
+                print("✅ MT5 Connected")
+                await syncMT5Data() // Fetch history and charts
+            }
+        } catch {
+            print("⚠️ MT5 connection failed: \(error.localizedDescription)")
         }
         
-        print("✅ Historical data fetch complete for \(symbols.count) symbols")
+        // Wait for initial data to arrive
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        
+        await MainActor.run {
+            connectionStatus = "Multi-Source Connected"
+            status = "Running in \(tradingMode == .scalping ? "SCALPING" : "STANDARD") mode..."
+        }
+    }
+    
+    private func syncMT5Data() async {
+        print("🔄 Syncing MT5 Data (Deep History Charts)...")
+        let deepHistoryCount = 2000 // Deep history for indicators and "God Mode" analysis
+        
+        for symbol in symbols {
+            do {
+                // Fetch deep history from MT5
+                let candles = try await MT5Service.shared.getCandles(symbol: symbol, timeframe: "1m", count: deepHistoryCount)
+                if let marketDataActor = marketData as? RefactoredMarketDataActor {
+                    for candle in candles {
+                        await marketDataActor.addCandle(symbol: symbol, timeframe: "1m", candle: candle)
+                    }
+                    print("📊 \(symbol): Loaded \(candles.count) historical candles from MT5")
+                }
+            } catch {
+                print("⚠️ Failed to sync deep history for \(symbol): \(error)")
+            }
+        }
+        
+        // Fetch open positions to sync state
+        do {
+            let positions = try await MT5Service.shared.getOpenPositions()
+            for pos in positions {
+                print("📋 Found MT5 Position: \(pos.symbol) \(pos.type) @ \(pos.priceOpen)")
+                // Optionally map to TradeRecord and add to monitor
+            }
+        } catch {
+            print("⚠️ Failed to sync MT5 positions: \(error)")
+        }
     }
     
     private func startMetricsUpdates() async {
@@ -180,7 +212,7 @@ class RefactoredAppCoordinator: ObservableObject {
                 // Create display model for UI
                 let displaySignal = ScalpingSignalDisplay(
                     symbol: scalpingSignal.symbol,
-                    type: mapScalpingTypeToSignalType(scalpingSignal.type),
+                    type: scalpingSignal.type,
                     price: scalpingSignal.price,
                     confidence: scalpingSignal.confidence,
                     score: scalpingSignal.score,
@@ -441,34 +473,12 @@ class RefactoredAppCoordinator: ObservableObject {
         NotificationManager.shared.sendSignalNotification(signal)
     }
     
-    private func mapScalpingTypeToSignalType(_ type: ScalpingSignalType) -> SignalType {
-        switch type {
-        case .buy:
-            return .buy
-        case .sell:
-            return .sell
-        default:
-            return .none
-        }
-    }
-
     private func createSignal(from scalpingSignal: ScalpingSignal) -> Signal {
         let expiryDuration: TimeInterval = tradingMode == .scalping ? 180 : 300 // 3 minutes for scalping, 5 for standard
         
-        // Map scalping signal type to general SignalType to avoid type mismatch
-        let mappedType: SignalType
-        switch scalpingSignal.type {
-        case .buy:
-            mappedType = .buy
-        case .sell:
-            mappedType = .sell
-        default:
-            mappedType = .none
-        }
-        
         return Signal(
             id: UUID(),
-            type: mappedType,
+            type: scalpingSignal.type,
             symbol: scalpingSignal.symbol,
             price: scalpingSignal.price,
             confidence: scalpingSignal.confidence,
@@ -512,33 +522,53 @@ class RefactoredAppCoordinator: ObservableObject {
                 return
             }
             
-            // Execute trade on IG if source is IG or we're using IG
+            // Execute trade on appropriate service
             var externalDealId: String?
             var tradeStatus: TradeRecord.TradeStatus = .active
-            var igExecutionSuccess = false
             
-            if signal.source == .ig || selectedSignalSource == .ig || selectedSignalSource == .both {
+            // MT5 Execution (God Mode)
+            if signal.source == .mt5 || selectedSignalSource == .mt5 || selectedSignalSource == .both {
+                do {
+                    print("📤 Executing trade on MT5 for \(signal.symbol)...")
+                    var mt5Signal = signal
+                    mt5Signal.positionSize = positionSize.units
+                    mt5Signal.stopLoss = positionSize.stopLoss
+                    mt5Signal.takeProfit = positionSize.takeProfit
+                    mt5Signal.magicNumber = 888888 // God Mode Magic Number
+                    mt5Signal.comment = "GOD_MODE_SCALP"
+                    
+                    let tradeResult = try await MT5Service.shared.executeTrade(signal: mt5Signal)
+                    externalDealId = tradeResult.deal != nil ? String(tradeResult.deal!) : String(tradeResult.order ?? 0)
+                    print("✅ MT5 trade executed successfully. Ticket/Deal: \(externalDealId ?? "N/A")")
+                    
+                    await MainActor.run {
+                        NotificationCenter.default.post(name: .mt5TradeExecuted, object: tradeResult)
+                    }
+                } catch {
+                    print("❌ Failed to execute MT5 trade: \(error)")
+                    if signal.source == .mt5 {
+                        print("⚠️ MT5 execution failed - aborting")
+                        await MainActor.run {
+                            self.signals.removeAll { $0.id == signal.id }
+                        }
+                        return
+                    }
+                }
+            } 
+            // IG Execution
+            else if signal.source == .ig || selectedSignalSource == .ig {
                 do {
                     print("📤 Executing trade on IG for \(signal.symbol)...")
                     let tradeResult = try await IGTradingService.shared.executeTrade(signal: signal)
                     externalDealId = tradeResult.dealId
-                    igExecutionSuccess = true
                     print("✅ IG trade executed successfully. Deal ID: \(tradeResult.dealId ?? "N/A")")
                     
-                    // Post notification for UI
                     await MainActor.run {
                         NotificationCenter.default.post(name: .igTradeExecuted, object: tradeResult)
                     }
                 } catch {
                     print("❌ Failed to execute IG trade: \(error)")
-                    
-                    // IMPORTANT: For IG signals, we still want to save locally if execution fails
-                    // This way the trade appears in history
                     if signal.source == .ig {
-                        print("⚠️ IG execution failed but will save trade locally")
-                        // Continue with local trade creation
-                    } else {
-                        // For other sources, abort if IG execution is required
                         await MainActor.run {
                             self.signals.removeAll { $0.id == signal.id }
                         }
@@ -713,28 +743,35 @@ class RefactoredAppCoordinator: ObservableObject {
         // Don't switch too frequently
         guard Date().timeIntervalSince(lastSourceSwitch) > minSwitchInterval else {
             // Return current best guess without switching
-            if sourceReliability[.binance] ?? 0 > sourceReliability[.ig] ?? 0 {
-                return .binance
-            } else {
-                return .ig
-            }
+            let bRel = sourceReliability[.binance] ?? 0
+            let iRel = sourceReliability[.ig] ?? 0
+            let mRel = sourceReliability[.mt5] ?? 0
+            
+            if bRel >= iRel && bRel >= mRel { return .binance }
+            if iRel >= bRel && iRel >= mRel { return .ig }
+            return .mt5
         }
         
         // Compare reliability and latency
         let binanceReliability = sourceReliability[.binance] ?? 1.0
         let igReliability = sourceReliability[.ig] ?? 1.0
+        let mt5Reliability = sourceReliability[.mt5] ?? 1.0
         let binanceLatency = sourceLatency[.binance] ?? 0
         let igLatency = sourceLatency[.ig] ?? 0
+        let mt5Latency = sourceLatency[.mt5] ?? 0
         
         // Calculate combined score
         let binanceScore = binanceReliability * (1.0 / max(binanceLatency, 0.1))
         let igScore = igReliability * (1.0 / max(igLatency, 0.1))
+        let mt5Score = mt5Reliability * (1.0 / max(mt5Latency, 0.1))
         
         let bestSource: SignalSource
-        if binanceScore > igScore {
+        if binanceScore >= igScore && binanceScore >= mt5Score {
             bestSource = .binance
-        } else {
+        } else if igScore >= binanceScore && igScore >= mt5Score {
             bestSource = .ig
+        } else {
+            bestSource = .mt5
         }
         
         print("📊 Auto source selection - Binance score: \(String(format: "%.2f", binanceScore)), IG score: \(String(format: "%.2f", igScore)) - Selected: \(bestSource.displayName)")
@@ -754,6 +791,8 @@ class RefactoredAppCoordinator: ObservableObject {
             lastBinanceSignal[signal.symbol] = signal
         case .ig:
             lastIGSignal[signal.symbol] = signal
+        case .mt5:
+            lastMT5Signal[signal.symbol] = signal
         default:
             break
         }
@@ -772,7 +811,8 @@ class RefactoredAppCoordinator: ObservableObject {
         } else if selectedSignalSource == .both {
             // In both mode, process all signals and let comparator decide
             if let binanceSig = lastBinanceSignal[signal.symbol],
-               let igSig = lastIGSignal[signal.symbol] {
+               let igSig = lastIGSignal[signal.symbol],
+               let mt5Sig = lastMT5Signal[signal.symbol] {
                 let comparison = signalComparator.compareSignals(
                     binanceSignal: binanceSig,
                     igSignal: igSig,

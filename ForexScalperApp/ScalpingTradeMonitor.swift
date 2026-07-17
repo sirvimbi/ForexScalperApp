@@ -27,9 +27,8 @@ actor ScalpingTradeMonitor {
         self.signalEngine = signalEngine
         self.config = config
         
-        // Initialize with current config values - we need to do this synchronously
-        // but we can't access MainActor properties directly, so we use a task
-        self.trailActivationPips = 5.0 // Default values
+        // Initialize with current config values
+        self.trailActivationPips = 5.0 
         self.trailDistance = 3.0
         self.maxHoldTime = 30 * 60
         self.enableTrailingStop = true
@@ -313,19 +312,9 @@ actor ScalpingTradeMonitor {
         
         // Update signal engine with result for adaptive learning
         if let indicators = indicators {
-            // Map trade type to engine ScalpingSignalType
-            let engineType: ScalpingSignalType
-            switch trade.type {
-            case .buy:
-                engineType = .buy
-            case .sell:
-                engineType = .sell
-            default:
-                engineType = .none
-            }
             await signalEngine.updateSignalQuality(
                 symbol: trade.symbol,
-                type: engineType,
+                type: trade.type,
                 confidence: trade.confidence,
                 wasWin: pnl > 0
             )

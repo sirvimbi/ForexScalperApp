@@ -1,11 +1,10 @@
-// ScalpingSignalEngine.swift - FULLY FIXED VERSION
+// ScalpingSignalEngine.swift
 import Foundation
 
 actor ScalpingSignalEngine {
     private let marketData: MarketDataProvider
     private let tradeHistory: RefactoredTradeHistoryManager
     private let riskManager: RiskManagerProtocol
-    private let config: ScalpingConfig
     
     // Multi-timeframe analysis
     private let timeframes = ["1m", "5m", "15m", "1h"]
@@ -16,16 +15,13 @@ actor ScalpingSignalEngine {
     private let maxQualityHistory = 100
     
     init(marketData: MarketDataProvider, tradeHistory: RefactoredTradeHistoryManager,
-         riskManager: RiskManagerProtocol, config: ScalpingConfig = .shared) {
+         riskManager: RiskManagerProtocol) {
         self.marketData = marketData
         self.tradeHistory = tradeHistory
         self.riskManager = riskManager
-        self.config = config
     }
     
     func evaluateScalpingSignal(symbol: String) async -> ScalpingSignal? {
-        print("🔍 EVALUATING \(symbol) for signals")
-        
         // Check if we can trade based on risk
         guard await riskManager.canOpenTrade(for: symbol) else {
             print("⚠️ Risk manager prevents new trades for \(symbol)")
@@ -36,7 +32,6 @@ actor ScalpingSignalEngine {
         var candlesByTimeframe: [String: [Kline]] = [:]
         for tf in timeframes {
             candlesByTimeframe[tf] = await marketData.getCandles(symbol: symbol, timeframe: tf)
-            print("📊 \(symbol) \(tf) candles: \(candlesByTimeframe[tf]?.count ?? 0)")
         }
         
         guard validateData(candlesByTimeframe) else {
@@ -47,26 +42,11 @@ actor ScalpingSignalEngine {
         // Calculate all indicators
         let indicators = await calculateAllIndicators(symbol: symbol, candlesByTimeframe: candlesByTimeframe)
         
-        // Print key indicators for debugging
-        print("📊 Indicators for \(symbol): RSI=\(String(format: "%.1f", indicators.rsi)), Price=\(indicators.currentPrice)")
-        print("📊 MA Status: EMA9=\(indicators.ema9), EMA21=\(indicators.ema21), EMA50=\(indicators.ema50)")
-        print("📊 BB Position: \(String(format: "%.2f", indicators.bbPosition))")
-        print("📊 Volume Ratio: \(String(format: "%.2f", indicators.volumeRatio))")
-        
         // Generate signal with multi-indicator confirmation
-        let signal = await generateSignal(symbol: symbol, indicators: indicators)
-        
-        // Print signal result
-        if signal.type != ScalpingSignalType.none {
-            print("✅ SIGNAL GENERATED: \(symbol) \(signal.type) with confidence \(String(format: "%.1f", signal.confidence))% (Score: \(signal.score))")
-        } else {
-            print("❌ No signal generated for \(symbol)")
-            return nil
-        }
+        let signal = generateSignal(symbol: symbol, indicators: indicators)
         
         // Apply quality filters
         guard let finalSignal = await applyQualityFilters(signal, symbol: symbol) else {
-            print("📊 Signal rejected by quality filters for \(symbol)")
             return nil
         }
         
@@ -150,229 +130,180 @@ actor ScalpingSignalEngine {
         )
     }
     
-    private func generateSignal(symbol: String, indicators: IndicatorSet) async -> ScalpingSignal {
+    private func generateSignal(symbol: String, indicators: IndicatorSet) -> ScalpingSignal {
         var buyScore = 0
         var sellScore = 0
         var confidenceFactors: [String: Double] = [:]
         
-        // Get current config values from the shared instance
-        let config = await self.config
-        let rsiWeight = await Int(config.rsiWeight)
-        let stochasticWeight = await Int(config.stochasticWeight)
-        let cciWeight = await Int(config.cciWeight)
-        let maWeight = await Int(config.maWeight)
-        let bbWeight = await Int(config.bbWeight)
-        let volumeWeight = await Int(config.volumeWeight)
-        let patternWeight = await Int(config.patternWeight)
-        let minScore = await Int(config.minScore)
-        
-        let halfRsiWeight = max(1, Int(Double(rsiWeight) * 0.67))
-        let halfStochWeight = max(1, Int(Double(stochasticWeight) * 0.67))
-        let halfCCIWeight = max(1, Int(Double(cciWeight) * 0.67))
-        let halfBBWeight = max(1, Int(Double(bbWeight) * 0.67))
-        let halfVolumeWeight = max(1, Int(Double(volumeWeight) * 0.67))
-        let halfPatternWeight = max(1, Int(Double(patternWeight) * 0.67))
-        
-        // ===== RSI =====
+        // ===== RSI (Weight: 15) =====
         if indicators.rsi < 30 {
-            buyScore += rsiWeight
+            buyScore += 15
             confidenceFactors["RSI Oversold"] = 0.9
-            print("📊 RSI: Oversold (+\(rsiWeight) buy)")
         } else if indicators.rsi < 40 {
-            buyScore += halfRsiWeight
+            buyScore += 10
             confidenceFactors["RSI Near Oversold"] = 0.7
-            print("📊 RSI: Near Oversold (+\(halfRsiWeight) buy)")
         } else if indicators.rsi > 70 {
-            sellScore += rsiWeight
+            sellScore += 15
             confidenceFactors["RSI Overbought"] = 0.9
-            print("📊 RSI: Overbought (+\(rsiWeight) sell)")
         } else if indicators.rsi > 60 {
-            sellScore += halfRsiWeight
+            sellScore += 10
             confidenceFactors["RSI Near Overbought"] = 0.7
-            print("📊 RSI: Near Overbought (+\(halfRsiWeight) sell)")
         }
         
-        // ===== Stochastic =====
+        // ===== Stochastic (Weight: 15) =====
         if indicators.stochasticK < 20 && indicators.stochasticD < 20 {
-            buyScore += stochasticWeight
+            buyScore += 15
             confidenceFactors["Stochastic Oversold"] = 0.9
-            print("📊 Stochastic: Oversold (+\(stochasticWeight) buy)")
         } else if indicators.stochasticK < 30 {
-            buyScore += halfStochWeight
+            buyScore += 8
             confidenceFactors["Stochastic Near Oversold"] = 0.6
-            print("📊 Stochastic: Near Oversold (+\(halfStochWeight) buy)")
         } else if indicators.stochasticK > 80 && indicators.stochasticD > 80 {
-            sellScore += stochasticWeight
+            sellScore += 15
             confidenceFactors["Stochastic Overbought"] = 0.9
-            print("📊 Stochastic: Overbought (+\(stochasticWeight) sell)")
         } else if indicators.stochasticK > 70 {
-            sellScore += halfStochWeight
+            sellScore += 8
             confidenceFactors["Stochastic Near Overbought"] = 0.6
-            print("📊 Stochastic: Near Overbought (+\(halfStochWeight) sell)")
         }
         
-        // ===== CCI =====
+        // ===== CCI (Weight: 10) =====
         if indicators.cci < -100 {
-            buyScore += cciWeight
+            buyScore += 10
             confidenceFactors["CCI Extreme Oversold"] = 0.85
-            print("📊 CCI: Extreme Oversold (+\(cciWeight) buy)")
         } else if indicators.cci < -50 {
-            buyScore += halfCCIWeight
+            buyScore += 5
             confidenceFactors["CCI Oversold"] = 0.6
-            print("📊 CCI: Oversold (+\(halfCCIWeight) buy)")
         } else if indicators.cci > 100 {
-            sellScore += cciWeight
+            sellScore += 10
             confidenceFactors["CCI Extreme Overbought"] = 0.85
-            print("📊 CCI: Extreme Overbought (+\(cciWeight) sell)")
         } else if indicators.cci > 50 {
-            sellScore += halfCCIWeight
+            sellScore += 5
             confidenceFactors["CCI Overbought"] = 0.6
-            print("📊 CCI: Overbought (+\(halfCCIWeight) sell)")
         }
         
-        // ===== Parabolic SAR =====
+        // ===== Parabolic SAR (Weight: 10) =====
         if indicators.sar < indicators.currentPrice {
-            buyScore += maWeight / 2
+            buyScore += 10
             confidenceFactors["SAR Bullish"] = 0.8
-            print("📊 SAR: Bullish (+\(maWeight/2) buy)")
         } else {
-            sellScore += maWeight / 2
+            sellScore += 10
             confidenceFactors["SAR Bearish"] = 0.8
-            print("📊 SAR: Bearish (+\(maWeight/2) sell)")
         }
         
-        // ===== Moving Average Alignment =====
+        // ===== Moving Average Alignment (Weight: 20) =====
+        // Primary timeframe (1m)
         if indicators.ema9 > indicators.ema21 && indicators.ema21 > indicators.ema50 {
-            buyScore += maWeight / 2
+            buyScore += 10
             confidenceFactors["MA Bullish 1m"] = 0.8
-            print("📊 MA 1m: Bullish alignment (+\(maWeight/2) buy)")
         } else if indicators.ema9 < indicators.ema21 && indicators.ema21 < indicators.ema50 {
-            sellScore += maWeight / 2
+            sellScore += 10
             confidenceFactors["MA Bearish 1m"] = 0.8
-            print("📊 MA 1m: Bearish alignment (+\(maWeight/2) sell)")
         }
         
+        // Multi-timeframe alignment
         if indicators.ema9_5m > indicators.ema21_5m {
-            buyScore += maWeight / 4
+            buyScore += 5
             confidenceFactors["MA Bullish 5m"] = 0.7
-            print("📊 MA 5m: Bullish (+\(maWeight/4) buy)")
         } else {
-            sellScore += maWeight / 4
+            sellScore += 5
             confidenceFactors["MA Bearish 5m"] = 0.7
-            print("📊 MA 5m: Bearish (+\(maWeight/4) sell)")
         }
         
-        // ===== Bollinger Bands =====
+        // ===== Bollinger Bands (Weight: 10) =====
         if indicators.bbPosition < 0.2 {
-            buyScore += bbWeight
+            buyScore += 10
             confidenceFactors["BB Lower Touch"] = 0.85
-            print("📊 BB: Lower touch (+\(bbWeight) buy)")
         } else if indicators.bbPosition < 0.4 {
-            buyScore += halfBBWeight
+            buyScore += 5
             confidenceFactors["BB Near Lower"] = 0.6
-            print("📊 BB: Near lower (+\(halfBBWeight) buy)")
         } else if indicators.bbPosition > 0.8 {
-            sellScore += bbWeight
+            sellScore += 10
             confidenceFactors["BB Upper Touch"] = 0.85
-            print("📊 BB: Upper touch (+\(bbWeight) sell)")
         } else if indicators.bbPosition > 0.6 {
-            sellScore += halfBBWeight
+            sellScore += 5
             confidenceFactors["BB Near Upper"] = 0.6
-            print("📊 BB: Near upper (+\(halfBBWeight) sell)")
         }
         
-        // ===== Volume Confirmation =====
+        // ===== Volume Confirmation (Weight: 10) =====
         if indicators.volumeRatio > 1.5 {
             if buyScore > sellScore {
-                buyScore += volumeWeight
+                buyScore += 10
                 confidenceFactors["Strong Volume Bullish"] = 0.9
-                print("📊 Volume: Strong bullish (+\(volumeWeight) buy)")
             } else if sellScore > buyScore {
-                sellScore += volumeWeight
+                sellScore += 10
                 confidenceFactors["Strong Volume Bearish"] = 0.9
-                print("📊 Volume: Strong bearish (+\(volumeWeight) sell)")
             }
         } else if indicators.volumeRatio > 1.2 {
             if buyScore > sellScore {
-                buyScore += halfVolumeWeight
+                buyScore += 5
                 confidenceFactors["Above Avg Volume Bullish"] = 0.7
-                print("📊 Volume: Above avg bullish (+\(halfVolumeWeight) buy)")
             } else if sellScore > buyScore {
-                sellScore += halfVolumeWeight
+                sellScore += 5
                 confidenceFactors["Above Avg Volume Bearish"] = 0.7
-                print("📊 Volume: Above avg bearish (+\(halfVolumeWeight) sell)")
             }
         }
         
-        // ===== Support/Resistance =====
+        // ===== Support/Resistance (Weight: 5) =====
         let distanceToSupport = abs(indicators.currentPrice - indicators.support) / indicators.currentPrice * 100
         let distanceToResistance = abs(indicators.currentPrice - indicators.resistance) / indicators.currentPrice * 100
         
-        if distanceToSupport < 0.1 {
-            buyScore += patternWeight
+        if distanceToSupport < 0.1 { // Within 0.1% of support
+            buyScore += 5
             confidenceFactors["At Support"] = 0.85
-            print("📊 S/R: At support (+\(patternWeight) buy)")
-        } else if distanceToResistance < 0.1 {
-            sellScore += patternWeight
+        } else if distanceToResistance < 0.1 { // Within 0.1% of resistance
+            sellScore += 5
             confidenceFactors["At Resistance"] = 0.85
-            print("📊 S/R: At resistance (+\(patternWeight) sell)")
         }
         
-        // ===== Price Pattern =====
+        // ===== Price Pattern (Weight: 5) =====
         switch indicators.pricePattern {
-        case PricePattern.bullishEngulfing, PricePattern.hammer, PricePattern.morningStar:
-            buyScore += patternWeight
+        case .bullishEngulfing, .hammer, .morningStar:
+            buyScore += 5
             confidenceFactors["Bullish Pattern"] = 0.8
-            print("📊 Pattern: Bullish (+\(patternWeight) buy)")
-        case PricePattern.bearishEngulfing, PricePattern.shootingStar, PricePattern.eveningStar:
-            sellScore += patternWeight
+        case .bearishEngulfing, .shootingStar, .eveningStar:
+            sellScore += 5
             confidenceFactors["Bearish Pattern"] = 0.8
-            print("📊 Pattern: Bearish (+\(patternWeight) sell)")
         default:
             break
         }
         
-        // ===== Session Analysis =====
+        // ===== Session Analysis (Weight: 5) =====
+        let session = indicators.sessions
         let now = Date()
         let hour = Calendar.current.component(.hour, from: now)
         
-        if hour >= 8 && hour <= 16 {
+        // Trade during active sessions for better liquidity
+        if hour >= 8 && hour <= 16 { // London session
             confidenceFactors["London Session"] = 1.1
-        } else if hour >= 13 && hour <= 21 {
+        } else if hour >= 13 && hour <= 21 { // Overlap London/US
             confidenceFactors["Session Overlap"] = 1.2
-        } else if hour >= 21 || hour <= 2 {
+        } else if hour >= 21 || hour <= 2 { // Asia session
             confidenceFactors["Asia Session"] = 0.9
         }
         
-        // ===== Trend Strength =====
-        if indicators.trendStrength > 25 {
+        // ===== Trend Strength (Weight: 5) =====
+        if indicators.trendStrength > 25 { // Strong trend
             if buyScore > sellScore {
-                buyScore += halfPatternWeight
+                buyScore += 5
                 confidenceFactors["Strong Uptrend"] = 0.9
-                print("📊 Trend: Strong uptrend (+\(halfPatternWeight) buy)")
             } else if sellScore > buyScore {
-                sellScore += halfPatternWeight
+                sellScore += 5
                 confidenceFactors["Strong Downtrend"] = 0.9
-                print("📊 Trend: Strong downtrend (+\(halfPatternWeight) sell)")
             }
         }
         
         // ===== Market Regime Adjustment =====
         var regimeMultiplier = 1.0
         switch indicators.regime {
-        case MarketRegime.trending:
+        case .trending:
             regimeMultiplier = 1.2
             confidenceFactors["Trending Market"] = 1.2
-        case MarketRegime.ranging:
+        case .ranging:
             regimeMultiplier = 0.8
             confidenceFactors["Ranging Market"] = 0.8
-        case MarketRegime.volatile:
+        case .volatile:
             regimeMultiplier = 0.7
             confidenceFactors["Volatile Market"] = 0.7
         }
-        
-        // Print scores
-        print("📊 Final scores - Buy: \(buyScore), Sell: \(sellScore), Min required: \(minScore)")
         
         // Determine signal
         let totalScore = max(buyScore, sellScore)
@@ -382,10 +313,9 @@ actor ScalpingSignalEngine {
         let avgFactor = confidenceFactors.values.reduce(1.0, *)
         let adjustedConfidence = min(confidence * avgFactor, 100)
         
-        if buyScore > sellScore && buyScore >= minScore {
-            print("✅ BUY signal generated with score \(buyScore)")
+        if buyScore > sellScore && buyScore >= 15 {
             return ScalpingSignal(
-                type: ScalpingSignalType.buy,
+                type: .buy,
                 symbol: symbol,
                 price: indicators.currentPrice,
                 confidence: adjustedConfidence,
@@ -395,10 +325,9 @@ actor ScalpingSignalEngine {
                 confidenceFactors: confidenceFactors,
                 timestamp: Date()
             )
-        } else if sellScore > buyScore && sellScore >= minScore {
-            print("✅ SELL signal generated with score \(sellScore)")
+        } else if sellScore > buyScore && sellScore >= 15 {
             return ScalpingSignal(
-                type: ScalpingSignalType.sell,
+                type: .sell,
                 symbol: symbol,
                 price: indicators.currentPrice,
                 confidence: adjustedConfidence,
@@ -408,66 +337,38 @@ actor ScalpingSignalEngine {
                 confidenceFactors: confidenceFactors,
                 timestamp: Date()
             )
-        } else if buyScore == sellScore && buyScore >= minScore {
-            // If tied, random choice
-            let randomType: ScalpingSignalType = Bool.random() ? .buy : .sell
-            print("✅ Tied scores, random \(randomType) signal generated")
-            return ScalpingSignal(
-                type: randomType,
-                symbol: symbol,
-                price: indicators.currentPrice,
-                confidence: adjustedConfidence * 0.8,
-                score: buyScore,
-                sellScore: sellScore,
-                indicators: indicators,
-                confidenceFactors: confidenceFactors,
-                timestamp: Date()
-            )
         }
         
-        return ScalpingSignal(
-            type: ScalpingSignalType.none,
-            symbol: symbol,
-            price: indicators.currentPrice,
-            confidence: 0,
-            score: 0,
-            sellScore: 0,
-            indicators: indicators,
-            confidenceFactors: [:],
-            timestamp: Date()
-        )
+        return ScalpingSignal(type: .none, symbol: symbol, price: indicators.currentPrice,
+                               confidence: 0, score: 0, sellScore: 0, indicators: indicators,
+                               confidenceFactors: [:], timestamp: Date())
     }
     
     private func applyQualityFilters(_ signal: ScalpingSignal, symbol: String) async -> ScalpingSignal? {
-        guard signal.type != ScalpingSignalType.none else { return nil }
+        guard signal.type != .none else { return nil }
         
-        // Get current config values
-        let confidenceThreshold = await config.confidenceThreshold
-        let spreadTolerance = await config.spreadTolerance
-        let cooldownSeconds = await config.cooldownSeconds
-        
-        // Filter 1: Minimum confidence threshold (configurable)
-        guard signal.confidence >= confidenceThreshold else {
-            print("📊 Signal rejected: Confidence too low (\(String(format: "%.1f", signal.confidence))% / threshold: \(String(format: "%.1f", confidenceThreshold))%)")
+        // Filter 1: Minimum confidence threshold
+        guard signal.confidence >= 20 else { // Lowered from 40 to 20
+            print("📊 Signal rejected: Confidence too low (\(String(format: "%.1f", signal.confidence))%)")
             return nil
         }
         
         // Filter 2: Check cooldown period (avoid overtrading)
         if let lastSignal = lastSignalTime[symbol],
-           Date().timeIntervalSince(lastSignal) < cooldownSeconds {
-            print("📊 Signal rejected: Cooldown period active for \(symbol) (\(Int(Date().timeIntervalSince(lastSignal)))s/\(Int(cooldownSeconds))s)")
+           Date().timeIntervalSince(lastSignal) < 180 { // 3 minutes cooldown
+            print("📊 Signal rejected: Cooldown period active for \(symbol)")
             return nil
         }
         
         // Filter 3: Historical performance of similar signals
         let qualityHistory = signalQualityHistory[symbol] ?? []
         if qualityHistory.count >= 10 {
-            // FIXED: Explicit parameter name in filter closure
-            let similarSignals = qualityHistory.filter { quality in
-                abs(quality.confidence - signal.confidence) < 10 && quality.type == signal.type
+            let similarSignals = qualityHistory.filter {
+                abs($0.confidence - signal.confidence) < 10 && $0.type == signal.type
             }
             
             if !similarSignals.isEmpty {
+                // FIX: Properly handle optional wasWin by filtering out nil values
                 let wins = similarSignals.compactMap { $0.wasWin }.filter { $0 }.count
                 let total = similarSignals.compactMap { $0.wasWin }.count
                 
@@ -484,24 +385,22 @@ actor ScalpingSignalEngine {
             }
         }
         
-        // Filter 4: Spread check (configurable)
+        // Filter 4: Spread check (for forex pairs)
         if symbol.contains("USDT") {
-            let spread = signal.indicators.atr / signal.price * 10000
-            if spread > spreadTolerance {
-                print("📊 Signal rejected: Spread too high (\(String(format: "%.1f", spread)) bps / tolerance: \(String(format: "%.1f", spreadTolerance)) bps)")
+            // For crypto, check if price is within reasonable range
+            let spread = signal.indicators.atr / signal.price * 10000 // Spread in basis points
+            if spread > 10 { // More than 10 basis points spread
+                print("📊 Signal rejected: Spread too high (\(String(format: "%.1f", spread)) bps)")
                 return nil
             }
         }
         
         // Filter 5: Check for conflicting signals in last 5 minutes
-        // FIXED: Explicit parameter name in filter closure
-        let recentSignals = signalQualityHistory[symbol]?.filter { quality in
-            Date().timeIntervalSince(quality.timestamp) < 300
+        let recentSignals = signalQualityHistory[symbol]?.filter {
+            Date().timeIntervalSince($0.timestamp) < 300
         } ?? []
         
-        let conflictingSignals = recentSignals.filter { quality in
-            quality.type != signal.type
-        }
+        let conflictingSignals = recentSignals.filter { $0.type != signal.type }
         if !conflictingSignals.isEmpty {
             print("📊 Signal rejected: Conflicting signals in last 5 minutes for \(symbol)")
             return nil
@@ -517,7 +416,7 @@ actor ScalpingSignalEngine {
             type: signal.type,
             confidence: signal.confidence,
             timestamp: signal.timestamp,
-            wasWin: nil as Bool?
+            wasWin: nil // Will be updated when trade closes
         )
         history.append(quality)
         if history.count > maxQualityHistory {
@@ -526,14 +425,11 @@ actor ScalpingSignalEngine {
         signalQualityHistory[signal.symbol] = history
     }
     
-    func updateSignalQuality(symbol: String, type: ScalpingSignalType, confidence: Double, wasWin: Bool) async {
+    func updateSignalQuality(symbol: String, type: SignalType, confidence: Double, wasWin: Bool) async {
         var history = signalQualityHistory[symbol] ?? []
-        // FIXED: Explicit parameter name in lastIndex where closure
-        if let index = history.lastIndex(where: { quality in
-            quality.type == type &&
-            abs(quality.confidence - confidence) < 5 &&
-            quality.wasWin == nil
-        }) {
+        if let index = history.lastIndex(where: { $0.type == type &&
+                                                  abs($0.confidence - confidence) < 5 &&
+                                                  $0.wasWin == nil }) {
             history[index].wasWin = wasWin
         }
         signalQualityHistory[symbol] = history
@@ -560,29 +456,32 @@ actor ScalpingSignalEngine {
     }
     
     private func detectPricePattern(_ candles: [Kline]) -> PricePattern {
-        guard candles.count >= 5 else { return PricePattern.none }
+        guard candles.count >= 5 else { return .none }
         
         let last5 = Array(candles.suffix(5))
         
+        // Bullish Engulfing
         if last5.count >= 2 {
             let prev = last5[last5.count - 2]
             let curr = last5.last!
             
-            if prev.close < prev.open &&
-               curr.close > curr.open &&
-               curr.open < prev.close &&
-               curr.close > prev.open {
-                return PricePattern.bullishEngulfing
+            if prev.close < prev.open && // Previous red candle
+               curr.close > curr.open && // Current green candle
+               curr.open < prev.close && // Opens below previous close
+               curr.close > prev.open {  // Closes above previous open
+                return .bullishEngulfing
             }
             
-            if prev.close > prev.open &&
-               curr.close < curr.open &&
-               curr.open > prev.close &&
-               curr.close < prev.open {
-                return PricePattern.bearishEngulfing
+            // Bearish Engulfing
+            if prev.close > prev.open && // Previous green candle
+               curr.close < curr.open && // Current red candle
+               curr.open > prev.close && // Opens above previous close
+               curr.close < prev.open {  // Closes below previous open
+                return .bearishEngulfing
             }
         }
         
+        // Hammer
         if last5.count >= 1 {
             let curr = last5.last!
             let body = abs(curr.close - curr.open)
@@ -590,11 +489,11 @@ actor ScalpingSignalEngine {
             let upperWick = curr.high - max(curr.open, curr.close)
             
             if lowerWick > body * 2 && upperWick < body * 0.3 {
-                return curr.close > curr.open ? PricePattern.hammer : PricePattern.invertedHammer
+                return curr.close > curr.open ? .hammer : .invertedHammer
             }
         }
         
-        return PricePattern.none
+        return .none
     }
     
     private func detectMarketRegime(_ candles1m: [Kline], _ candles5m: [Kline], _ candles1h: [Kline]) async -> MarketRegime {
@@ -602,25 +501,27 @@ actor ScalpingSignalEngine {
         let atr5m = AdvancedIndicators.atr(candles5m, period: 20).last ?? 0
         let price1m = candles1m.last?.close ?? 0
         
-        let volatility1m = atr1m / price1m * 100
+        let volatility1m = atr1m / price1m * 100 // ATR%
         let volatility5m = atr5m / price1m * 100
         
+        // Check if trending
         let closes1h = candles1h.map { $0.close }
         let sma20_1h = closes1h.suffix(20).reduce(0, +) / 20
         let sma50_1h = closes1h.suffix(50).reduce(0, +) / 50
         let trendStrength = abs(sma20_1h - sma50_1h) / sma50_1h * 100
         
         if volatility1m > 0.5 || volatility5m > 0.8 {
-            return MarketRegime.volatile
+            return .volatile
         } else if trendStrength > 0.5 {
-            return MarketRegime.trending
+            return .trending
         } else {
-            return MarketRegime.ranging
+            return .ranging
         }
     }
 }
 
-// MARK: - Supporting Types (DEFINED ONCE - NO DUPLICATES)
+// MARK: - Supporting Types
+
 struct IndicatorSet {
     let rsi: Double
     let stochasticK: Double
@@ -649,7 +550,7 @@ struct IndicatorSet {
 }
 
 struct ScalpingSignal {
-    let type: ScalpingSignalType
+    let type: SignalType
     let symbol: String
     let price: Double
     let confidence: Double
@@ -675,13 +576,12 @@ struct ScalpingSignal {
 }
 
 struct SignalQuality {
-    let type: ScalpingSignalType
+    let type: SignalType
     let confidence: Double
     let timestamp: Date
     var wasWin: Bool?
 }
 
-// ENUMS - DEFINED ONLY ONCE AT END OF FILE
 enum PricePattern {
     case none
     case bullishEngulfing
@@ -697,10 +597,4 @@ enum MarketRegime {
     case trending
     case ranging
     case volatile
-}
-
-enum ScalpingSignalType {
-    case buy
-    case sell
-    case none
 }

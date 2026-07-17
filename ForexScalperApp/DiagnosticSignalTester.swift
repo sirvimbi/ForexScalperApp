@@ -139,16 +139,8 @@ class DiagnosticSignalTester: ObservableObject {
             await resetAllTradingLimits()
             await addResult("✅ Trading limits reset")
             
-            // Test each symbol - updated with all trading pairs
-            let symbols = [
-                // Existing
-                "EURUSDT", "GBPUSDT", "AUDUSDT", "BTCUSDT", "ETHUSDT",
-                // New Forex
-                "EURUSD", "GBPUSD", "USDJPY", "USDCHF", "CADCHF", "TRYJPY", "EURCZK",
-                // New Crypto
-                "XRPUSDT", "ADAUSDT", "DOGEUSDT", "LTCUSDT", "BCHUSDT", "EOSUSDT",
-                "XLMUSDT", "NEOUSDT", "BTGUSDT"
-            ]
+            // Test each symbol - updated with all trading pairs (Forex, Exotics, and Crypto)
+            let symbols = TradingPair.allCases.map { $0.rawValue }
             
             for symbol in symbols {
                 await testSymbol(symbol: symbol, coordinator: coordinator)

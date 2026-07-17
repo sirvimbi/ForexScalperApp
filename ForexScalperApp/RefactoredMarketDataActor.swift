@@ -4,7 +4,7 @@ import Foundation
 actor RefactoredMarketDataActor: MarketDataProvider {
     private var candles: [String: [String: [Kline]]] = [:]
     private var latestPrices: [String: Double] = [:]
-    private let maxCandles = 500 // Increased for better analysis
+    private let maxCandles = 3000 // Deep memory for long-term indicators and God Mode patterns
     private let priceCache = NSCache<NSString, NSNumber>() // For quick price lookups
     
     func addCandle(symbol: String, timeframe: String, candle: Kline) {

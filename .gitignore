@@ -1,0 +1,39 @@
+# Xcode
+#
+# gitignore contributors: code safely!
+build/
+DerivedData/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData
+*.hmap
+*.ipa
+*.xcuserstate
+**/.DS_Store
+
+# Android Studio / IntelliJ
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+forex_env/
+venv/
+ENV/
+env/
+
+# Project specific
+build_log.txt
+temp_model.pkl
+temp_model.onnx
+*.backup

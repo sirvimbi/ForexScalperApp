@@ -515,9 +515,7 @@ struct DashboardView: View {
                         .buttonStyle(.plain)
                         
                         Button {
-                            Task {
-                                await diagnosticTester.runFullDiagnostic(coordinator: coordinator)
-                            }
+                            diagnosticTester.runFullDiagnostic(coordinator: coordinator)
                         } label: {
                             HStack {
                                 Image(systemName: "stethoscope")
@@ -2442,6 +2440,66 @@ struct DashboardView: View {
                                 .padding(16)
                             }
                             
+                            // MT5 API CONNECTION CARD (God Mode)
+                            GlassCard(borderColor: viewModel.mt5Connected ? Color.accentCyan.opacity(0.4) : Color.borderSubtle) {
+                                VStack(alignment: .leading, spacing: 14) {
+                                    HStack {
+                                        sectionHeader("MT5 GOD MODE CONNECTION", icon: "chart.bar.fill", color: .accentCyan)
+                                        Spacer()
+                                        HStack(spacing: 5) {
+                                            PulsingDot(color: viewModel.mt5Connected ? .accentGreen : .accentRed)
+                                            Text(viewModel.mt5Connected ? "MT5 READY" : "MT5 OFFLINE")
+                                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                                .foregroundColor(viewModel.mt5Connected ? .accentGreen : .accentRed)
+                                                .tracking(1)
+                                        }
+                                        .padding(.horizontal, 10).padding(.vertical, 5)
+                                        .background((viewModel.mt5Connected ? Color.accentGreen : Color.accentRed).opacity(0.1))
+                                        .cornerRadius(12)
+                                        .overlay(RoundedRectangle(cornerRadius: 12)
+                                            .strokeBorder((viewModel.mt5Connected ? Color.accentGreen : Color.accentRed).opacity(0.3), lineWidth: 1))
+                                    }
+                                    Divider().background(Color.borderSubtle)
+                                    
+                                    settingsRow("Bridge URL") {
+                                        TextField("http://localhost:5000", text: $viewModel.mt5BridgeURL)
+                                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                                            .frame(width: 200)
+                                    }
+                                    settingsRow("Magic Number") {
+                                        TextField("888888", value: $viewModel.mt5MagicNumber, format: .number)
+                                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                                            .frame(width: 100)
+                                    }
+                                    
+                                    HStack(spacing: 10) {
+                                        Button(action: {
+                                            Task {
+                                                await viewModel.connectToMT5()
+                                            }
+                                        }) {
+                                            HStack(spacing: 6) {
+                                                Image(systemName: "bolt.fill")
+                                                Text(viewModel.mt5Connected ? "RECHECK MT5" : "CONNECT MT5")
+                                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 8)
+                                            .background(Color.accentCyan)
+                                            .foregroundColor(.bgPrimary)
+                                            .cornerRadius(7)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                    
+                                    if !viewModel.mt5Error.isEmpty {
+                                        Text(viewModel.mt5Error)
+                                            .font(.caption2).foregroundColor(.accentRed)
+                                    }
+                                }
+                                .padding(16)
+                            }
+
                             // IG API CONNECTION CARD
                             GlassCard(borderColor: viewModel.igConnected ? Color.accentGreen.opacity(0.4) : Color.borderSubtle) {
                                 VStack(alignment: .leading, spacing: 14) {
@@ -2564,13 +2622,8 @@ struct DashboardView: View {
                                     sectionHeader("ACTIVE TRADING PAIRS", icon: "chart.line.uptrend.xyaxis", color: .accentCyan)
                                     Divider().background(Color.borderSubtle)
                                     
-                                    let forexPairs = viewModel.availableSymbols.filter {
-                                        $0.hasSuffix("USD") || $0.contains("JPY") || $0.contains("CHF") || $0.contains("TRY") || $0.contains("CZK")
-                                    }.sorted()
-                                    
-                                    let cryptoPairs = viewModel.availableSymbols.filter {
-                                        $0.hasSuffix("USDT") && !forexPairs.contains($0)
-                                    }.sorted()
+                                    let forexPairs = TradingPair.allCases.filter { $0.category == "Forex" }.map { $0.rawValue }.sorted()
+                                    let cryptoPairs = TradingPair.allCases.filter { $0.category == "Crypto" }.map { $0.rawValue }.sorted()
                                     
                                     if !forexPairs.isEmpty {
                                         Text("FOREX")
