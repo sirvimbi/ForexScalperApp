@@ -5,505 +5,267 @@ struct TradeExecutionView: View {
     let signal: Signal
     @ObservedObject var viewModel: DashboardViewModel
     @Environment(\.dismiss) var dismiss
-    @State private var positionSizeText: String = "1000"
-    @State private var positionSize: Double = 1000
+    
+    @State private var positionSize: Double = 0.1
     @State private var stopLoss: Double = 0
     @State private var takeProfit: Double = 0
-    @State private var isIGConnected: Bool = false
-    @State private var showIGError: Bool = false
-    @State private var igErrorMessage: String = ""
+    @State private var orderType: MT5OrderType = .buy
+    @State private var fillingType: MT5FillingType = .ioc
+    @State private var executionMode: MT5ExecutionMode = .market
+    @State private var deviation: Int = 10
+    @State private var comment: String = "ELITE_SCALPER"
+    
     @State private var isExecuting: Bool = false
+    @State private var showError: Bool = false
+    @State private var errorMessage: String = ""
     
     var body: some View {
         #if os(iOS)
         NavigationView {
             Form {
-                Section("Signal Details") {
+                Section("God Mode Execution") {
                     HStack {
-                        Text("Symbol"); Spacer()
-                        Text(signal.symbol).bold()
-                    }
-                    HStack {
-                        Text("Direction"); Spacer()
-                        Text(signal.type.displayName)
-                            .foregroundColor(signal.type == .buy ? .green : .red)
-                            .bold()
-                    }
-                    HStack {
-                        Text("Entry Price"); Spacer()
-                        Text(String(format: "$%.5f", signal.price)).monospacedDigit()
-                    }
-                    HStack {
-                        Text("Confidence"); Spacer()
-                        Text("\(Int(signal.confidence))%")
-                            .foregroundColor(confidenceColor)
-                            .bold()
+                        Text("Asset"); Spacer()
+                        Text(signal.symbol).font(.headline).foregroundColor(.accentCyan)
                     }
                     
-                    // Show source info
-                    HStack {
-                        Text("Source"); Spacer()
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(signal.source == .binance ? Color.yellow :
-                                      signal.source == .ig ? Color.purple :
-                                      viewModel.activeSource == .ig ? Color.purple : Color.accentCyan)
-                                .frame(width: 6, height: 6)
-                            Text(sourceDisplayName)
-                                .font(.caption.bold())
-                        }
+                    Picker("Order Type", selection: $orderType) {
+                        Text("Buy").tag(MT5OrderType.buy)
+                        Text("Sell").tag(MT5OrderType.sell)
+                        Text("Buy Limit").tag(MT5OrderType.buyLimit)
+                        Text("Sell Limit").tag(MT5OrderType.sellLimit)
                     }
                     
-                    // Show IG connection status if applicable
-                    if shouldExecuteOnIG {
-                        HStack {
-                            Text("IG Status"); Spacer()
-                            HStack(spacing: 5) {
-                                Circle()
-                                    .fill(viewModel.igConnected ? Color.green : Color.red)
-                                    .frame(width: 8, height: 8)
-                                Text(viewModel.igConnected ? "CONNECTED" : "DISCONNECTED")
-                                    .font(.caption)
-                                    .foregroundColor(viewModel.igConnected ? .green : .red)
-                            }
-                        }
+                    Picker("Execution", selection: $executionMode) {
+                        Text("Market").tag(MT5ExecutionMode.market)
+                        Text("Instant").tag(MT5ExecutionMode.instant)
                     }
-                }
-                
-                Section("Position Sizing") {
+                    
                     HStack {
-                        Text("Position Size"); Spacer()
-                        TextField("Amount", text: $positionSizeText)
+                        Text("Volume (Lots)"); Spacer()
+                        TextField("0.1", value: $positionSize, format: .number)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
-                            .onChange(of: positionSizeText) { newValue in
-                                if let v = Double(newValue) { positionSize = v; calculateRisk() }
-                            }
-                    }
-                    HStack {
-                        ForEach(["500", "1000", "5000", "10000"], id: \.self) { amount in
-                            Button(action: {
-                                positionSizeText = amount
-                                positionSize = Double(amount) ?? 1000
-                                calculateRisk()
-                            }) {
-                                let k = (Int(amount) ?? 0) / 1000
-                                Text(k == 1 ? "$1k" : "$\(k)k")
-                                    .font(.caption)
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
-                                    .background(Color.blue.opacity(0.2))
-                                    .cornerRadius(4)
-                            }
-                        }
+                            .frame(width: 80)
                     }
                 }
                 
-                Section("Risk Management") {
+                Section("Risk (Automatic Elite Levels)") {
+                    HStack {
+                        Text("Price"); Spacer()
+                        Text(String(format: "%.5f", signal.price)).monospacedDigit()
+                    }
                     HStack {
                         Text("Stop Loss"); Spacer()
-                        Text(String(format: "$%.5f", stopLoss))
-                            .foregroundColor(.red)
-                            .monospacedDigit()
+                        TextField("S/L", value: $stopLoss, format: .number)
+                            .foregroundColor(.accentRed)
+                            .multilineTextAlignment(.trailing)
                     }
                     HStack {
                         Text("Take Profit"); Spacer()
-                        Text(String(format: "$%.5f", takeProfit))
-                            .foregroundColor(.green)
-                            .monospacedDigit()
-                    }
-                    HStack {
-                        Text("Risk Amount"); Spacer()
-                        Text(String(format: "$%.2f", riskAmount))
-                            .foregroundColor(.red)
-                            .bold()
-                    }
-                    HStack {
-                        Text("Potential Reward"); Spacer()
-                        Text(String(format: "$%.2f", potentialReward))
-                            .foregroundColor(.green)
-                            .bold()
-                    }
-                    HStack {
-                        Text("Risk/Reward Ratio"); Spacer()
-                        Text("1:\(String(format: "%.1f", rewardRatio))")
-                            .foregroundColor(rewardRatio >= 2 ? .green : .orange)
-                            .bold()
+                        TextField("T/P", value: $takeProfit, format: .number)
+                            .foregroundColor(.accentGreen)
+                            .multilineTextAlignment(.trailing)
                     }
                 }
                 
-                if shouldExecuteOnIG && !viewModel.igConnected {
-                    Section {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.yellow)
-                            Text("IG is not connected. Trade will only be saved locally.")
-                                .font(.caption)
-                                .foregroundColor(.yellow)
-                        }
+                Section("Advanced MT5 Config") {
+                    Picker("Filling Mode", selection: $fillingType) {
+                        Text("IOC").tag(MT5FillingType.ioc)
+                        Text("FOK").tag(MT5FillingType.fok)
+                        Text("Return").tag(MT5FillingType.any)
                     }
-                }
-                
-                if isExecuting {
-                    Section {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                                .padding()
-                            Spacer()
-                        }
-                    }
+                    Stepper("Deviation: \(deviation)", value: $deviation, in: 0...50)
+                    TextField("Comment", text: $comment)
                 }
             }
-            .navigationTitle("Execute Trade")
+            .navigationTitle("MT5 EXECUTION")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Abort") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Execute") { executeTrade() }
+                    Button("EXECUTE") { executeTrade() }
                         .bold()
-                        .disabled(isExecuting || (shouldExecuteOnIG && !viewModel.igConnected))
+                        .foregroundColor(.accentGreen)
+                        .disabled(isExecuting)
                 }
-            }
-            .alert("IG Trading Error", isPresented: $showIGError) {
-                Button("OK", role: .cancel) { }
-                Button("View Settings") {
-                    // Switch to settings tab
-                    NotificationCenter.default.post(name: .switchToSettingsTab, object: nil)
-                    dismiss()
-                }
-            } message: {
-                Text(igErrorMessage)
             }
         }
         .onAppear {
-            calculateRisk()
-            checkIGConnection()
+            setupInitialValues()
         }
         #else
-        // macOS version
-        VStack(spacing: 20) {
-            HStack {
-                Text("Execute Trade").font(.title2.bold())
-                Spacer()
-                Button("Cancel") { dismiss() }.foregroundColor(.secondary)
-            }
-            .padding(.horizontal)
-            .padding(.top)
-            
-            Divider()
+        // macOS God Mode UI
+        VStack(spacing: 0) {
+            header
             
             ScrollView {
-                VStack(spacing: 20) {
-                    // Signal Details
-                    HStack {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(signal.symbol).font(.title.bold())
-                            HStack {
-                                Text(signal.type.displayName)
-                                    .font(.caption.bold())
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
-                                    .background(signal.type == .buy ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
-                                    .foregroundColor(signal.type == .buy ? .green : .red)
-                                    .cornerRadius(4)
-                                Text("\(Int(signal.confidence))% Confidence")
-                                    .font(.caption.bold())
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
-                                    .background(Color.orange.opacity(0.2))
-                                    .foregroundColor(.orange)
-                                    .cornerRadius(4)
-                                Text(signal.timeframe.uppercased())
-                                    .font(.caption.bold())
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
-                                    .background(Color.purple.opacity(0.2))
-                                    .foregroundColor(.purple)
-                                    .cornerRadius(4)
-                                
-                                // Source badge
-                                HStack(spacing: 4) {
-                                    Circle()
-                                        .fill(signal.source == .binance ? Color.yellow :
-                                              signal.source == .ig ? Color.purple :
-                                              viewModel.activeSource == .ig ? Color.purple : Color.accentCyan)
-                                        .frame(width: 6, height: 6)
-                                    Text(sourceDisplayName)
-                                        .font(.caption.bold())
-                                }
-                                .padding(.horizontal, 8).padding(.vertical, 4)
-                                .background(Color.gray.opacity(0.2))
-                                .cornerRadius(4)
-                            }
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing) {
-                            Text("Entry Price").font(.caption).foregroundColor(.secondary)
-                            Text(String(format: "$%.5f", signal.price))
-                                .font(.title3.monospacedDigit())
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    // IG Connection Status (if applicable)
-                    if shouldExecuteOnIG {
-                        HStack {
-                            Image(systemName: viewModel.igConnected ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                .foregroundColor(viewModel.igConnected ? .green : .yellow)
-                            Text(viewModel.igConnected ? "IG Connected" : "IG Disconnected - Local only")
-                                .font(.caption)
-                                .foregroundColor(viewModel.igConnected ? .green : .yellow)
-                            Spacer()
-                        }
-                        .padding(.horizontal)
-                        .padding(.vertical, 8)
-                        .background(viewModel.igConnected ? Color.green.opacity(0.1) : Color.yellow.opacity(0.1))
-                        .cornerRadius(8)
-                        .padding(.horizontal)
-                    }
-                    
-                    Divider()
-                    
-                    // Position Size
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Position Size").font(.headline)
-                        HStack {
-                            Text("$").font(.title3).foregroundColor(.secondary)
-                            TextField("Amount", text: $positionSizeText)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                .frame(width: 150)
-                                .onChange(of: positionSizeText) { newValue in
-                                    if let v = Double(newValue) {
-                                        positionSize = v
-                                        calculateRisk()
-                                    }
-                                }
-                        }
-                        HStack(spacing: 8) {
-                            ForEach(["500", "1000", "5000", "10000"], id: \.self) { amount in
-                                Button(action: {
-                                    positionSizeText = amount
-                                    positionSize = Double(amount) ?? 1000
-                                    calculateRisk()
-                                }) {
-                                    let k = (Int(amount) ?? 0) / 1000
-                                    Text(k == 1 ? "$1k" : "$\(k)k")
-                                        .font(.caption)
-                                        .padding(.horizontal, 12).padding(.vertical, 6)
-                                        .background(Color.blue.opacity(0.2))
-                                        .foregroundColor(.blue)
-                                        .cornerRadius(6)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    Divider()
-                    
-                    // Risk Analysis
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Risk Analysis").font(.headline)
-                        
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text("Stop Loss").font(.caption).foregroundColor(.secondary)
-                                Text(String(format: "$%.5f", stopLoss))
-                                    .font(.body.monospacedDigit()).foregroundColor(.red)
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing) {
-                                Text("Take Profit").font(.caption).foregroundColor(.secondary)
-                                Text(String(format: "$%.5f", takeProfit))
-                                    .font(.body.monospacedDigit()).foregroundColor(.green)
-                            }
-                        }
-                        
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text("Risk Amount").font(.caption).foregroundColor(.secondary)
-                                Text(String(format: "$%.2f", riskAmount))
-                                    .font(.body.monospacedDigit()).foregroundColor(.red)
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing) {
-                                Text("Potential Reward").font(.caption).foregroundColor(.secondary)
-                                Text(String(format: "$%.2f", potentialReward))
-                                    .font(.body.monospacedDigit()).foregroundColor(.green)
-                            }
-                        }
-                        
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text("Risk/Reward").font(.caption).foregroundColor(.secondary)
-                                Text("1:\(String(format: "%.1f", rewardRatio))")
-                                    .font(.body.bold())
-                                    .foregroundColor(rewardRatio >= 2 ? .green : .orange)
-                            }
-                            Spacer()
-                        }
-                    }
-                    .padding(.horizontal)
+                VStack(spacing: 16) {
+                    executionCard
+                    riskCard
+                    advancedCard
                 }
-                .padding(.vertical)
+                .padding()
             }
             
-            Divider()
-            
-            // Action Buttons
-            HStack(spacing: 12) {
-                Button("Decline") {
-                    viewModel.denySignal(signal)
-                    dismiss()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .foregroundColor(.red)
-                
-                Spacer()
-                
-                if isExecuting {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                        .padding(.trailing)
-                }
-                
-                Button("Execute Trade") { executeTrade() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .tint(.green)
-                    .disabled(isExecuting || (shouldExecuteOnIG && !viewModel.igConnected))
-            }
-            .padding()
+            footer
         }
-        .frame(width: 550, height: 650)
-        .background(Color(.windowBackgroundColor))
+        .frame(width: 500, height: 600)
+        .background(Color.bgPrimary)
         .onAppear {
-            calculateRisk()
-            checkIGConnection()
-        }
-        .alert("IG Trading Error", isPresented: $showIGError) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(igErrorMessage)
+            setupInitialValues()
         }
         #endif
     }
     
-    // MARK: - Computed Properties
+    // MARK: - Components
     
-    private var riskAmount: Double {
-        let max = viewModel.accountBalance * viewModel.riskPerTrade
-        return min(positionSize * 0.01, max)
-    }
-    
-    private var potentialReward: Double { riskAmount * 2 }
-    
-    private var rewardRatio: Double {
-        guard riskAmount > 0 else { return 0 }
-        return potentialReward / riskAmount
-    }
-    
-    private var confidenceColor: Color {
-        signal.confidence >= 80 ? .green : signal.confidence >= 60 ? .orange : .red
-    }
-    
-    private var sourceDisplayName: String {
-        if signal.source != .auto && signal.source != .both {
-            return signal.source.displayName
+    #if os(macOS)
+    var header: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("GOD MODE EXECUTION").font(.system(size: 14, weight: .black, design: .monospaced)).foregroundColor(.accentGold)
+                Text(signal.symbol).font(.title.bold()).foregroundColor(.white)
+            }
+            Spacer()
+            TagBadge(text: signal.type.displayName, color: signal.type == .buy ? .accentGreen : .accentRed)
         }
-        return viewModel.activeSource.displayName
+        .padding()
+        .background(Color.bgSecondary)
     }
     
-    private var shouldExecuteOnIG: Bool {
-        return signal.source == .ig ||
-               viewModel.activeSource == .ig ||
-               (signal.source == .auto && viewModel.activeSource == .ig)
-    }
-    
-    // MARK: - Methods
-    
-    private func checkIGConnection() {
-        isIGConnected = viewModel.igConnected
-    }
-    
-    private func calculateRisk() {
-        let riskPerUnit = riskAmount / positionSize
-        let priceMove = signal.price * riskPerUnit
-        
-        if signal.type == .buy {
-            stopLoss = signal.price - priceMove
-            takeProfit = signal.price + priceMove * 2
-        } else {
-            stopLoss = signal.price + priceMove
-            takeProfit = signal.price - priceMove * 2
+    var executionCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("ORDER CONFIGURATION").font(.caption.bold()).foregroundColor(.textMuted)
+                
+                HStack {
+                    Text("Type").frame(width: 100, alignment: .leading)
+                    Picker("", selection: $orderType) {
+                        Text("BUY").tag(MT5OrderType.buy)
+                        Text("SELL").tag(MT5OrderType.sell)
+                    }.pickerStyle(.segmented)
+                }
+                
+                HStack {
+                    Text("Volume").frame(width: 100, alignment: .leading)
+                    TextField("", value: $positionSize, format: .number)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                    Text("LOTS").font(.caption).foregroundColor(.textMuted)
+                }
+            }
+            .padding()
         }
+    }
+    
+    var riskCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("ELITE RISK LEVELS").font(.caption.bold()).foregroundColor(.textMuted)
+                
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text("STOP LOSS").font(.caption2).foregroundColor(.accentRed)
+                        TextField("", value: $stopLoss, format: .number)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing) {
+                        Text("TAKE PROFIT").font(.caption2).foregroundColor(.accentGreen)
+                        TextField("", value: $takeProfit, format: .number)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .font(.system(size: 18, weight: .bold, design: .monospaced))
+                            .multilineTextAlignment(.trailing)
+                    }
+                }
+            }
+            .padding()
+        }
+    }
+    
+    var advancedCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("MT5 ENGINE OPTIMIZATION").font(.caption.bold()).foregroundColor(.textMuted)
+                
+                HStack {
+                    Text("Execution").frame(width: 100, alignment: .leading)
+                    Picker("", selection: $executionMode) {
+                        Text("Market").tag(MT5ExecutionMode.market)
+                        Text("Instant").tag(MT5ExecutionMode.instant)
+                    }.pickerStyle(.menu)
+                }
+                
+                HStack {
+                    Text("Filling").frame(width: 100, alignment: .leading)
+                    Picker("", selection: $fillingType) {
+                        Text("IOC").tag(MT5FillingType.ioc)
+                        Text("FOK").tag(MT5FillingType.fok)
+                    }.pickerStyle(.menu)
+                }
+            }
+            .padding()
+        }
+    }
+    
+    var footer: some View {
+        HStack {
+            Button("ABORT") { dismiss() }
+                .buttonStyle(.plain)
+                .foregroundColor(.textSecondary)
+            
+            Spacer()
+            
+            Button { executeTrade() } label: {
+                HStack {
+                    if isExecuting { ProgressView().scaleEffect(0.5).tint(.bgPrimary) }
+                    Text("EXECUTE TRADE")
+                }
+                .font(.headline.bold())
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+                .background(Color.accentGreen)
+                .foregroundColor(.bgPrimary)
+                .cornerRadius(8)
+            }
+            .buttonStyle(.plain)
+            .disabled(isExecuting)
+        }
+        .padding()
+        .background(Color.bgSecondary)
+    }
+    #endif
+    
+    private func setupInitialValues() {
+        positionSize = signal.positionSize ?? 0.1
+        stopLoss = signal.stopLoss ?? 0
+        takeProfit = signal.takeProfit ?? 0
+        orderType = signal.orderType ?? (signal.type == .buy ? .buy : .sell)
+        fillingType = signal.filler ?? .ioc
+        executionMode = signal.executionMode ?? .market
+        deviation = signal.deviation ?? 10
+        comment = signal.comment ?? "GOD_MODE"
     }
     
     private func executeTrade() {
-        // Prevent double execution
-        guard !isExecuting else { return }
         isExecuting = true
         
-        // Validate position size
-        guard positionSize > 0 else {
-            showIGError = true
-            igErrorMessage = "Please enter a valid position size"
-            isExecuting = false
-            return
-        }
+        var finalSignal = signal
+        finalSignal.positionSize = positionSize
+        finalSignal.stopLoss = stopLoss
+        finalSignal.takeProfit = takeProfit
+        finalSignal.orderType = orderType
+        finalSignal.filler = fillingType
+        finalSignal.executionMode = executionMode
+        finalSignal.deviation = deviation
+        finalSignal.comment = comment
         
-        // Check IG connection if needed
-        if shouldExecuteOnIG && !viewModel.igConnected {
-            showIGError = true
-            igErrorMessage = "IG is not connected. Please connect to IG in Settings or switch to local trading mode."
-            isExecuting = false
-            return
-        }
+        viewModel.acceptSignal(finalSignal)
         
-        // Create a copy of the signal with updated values
-        var updatedSignal = signal
-        updatedSignal.status = .accepted
-        updatedSignal.acceptedAt = Date()
-        updatedSignal.acceptedPrice = signal.price
-        updatedSignal.positionSize = positionSize
-        updatedSignal.stopLoss = stopLoss
-        updatedSignal.takeProfit = takeProfit
-        updatedSignal.expiryTime = Date().addingTimeInterval(signal.expiryDuration * 2)
-        
-        // Set the source based on user selection and connection status
-        if viewModel.activeSource == .ig && viewModel.igConnected {
-            updatedSignal.source = .ig
-            print("📤 Setting signal source to IG for execution")
-        } else if viewModel.activeSource == .binance {
-            updatedSignal.source = .binance
-        } else if viewModel.activeSource == .auto {
-            // In auto mode, prefer IG if connected and confidence is high
-            if viewModel.igConnected && signal.confidence >= 75 {
-                updatedSignal.source = .ig
-                print("📤 Auto mode: Using IG for execution (connected, confidence \(Int(signal.confidence))%)")
-            } else {
-                updatedSignal.source = .binance
-                print("📤 Auto mode: Using Binance for execution")
-            }
-        }
-        
-        print("📊 Executing trade: \(updatedSignal.symbol) \(updatedSignal.type) on \(updatedSignal.source.displayName)")
-        print("   Position Size: $\(String(format: "%.2f", positionSize))")
-        print("   Stop Loss: $\(String(format: "%.5f", stopLoss))")
-        print("   Take Profit: $\(String(format: "%.5f", takeProfit))")
-        
-        if shouldExecuteOnIG && viewModel.igConnected {
-            print("   ⚡ This trade will be sent to IG")
-        } else {
-            print("   📋 This trade will be saved locally only")
-        }
-        
-        // Pass to view model for execution
-        viewModel.acceptSignal(updatedSignal)
-        
-        // Small delay to allow for execution before dismissing
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             isExecuting = false
             dismiss()
         }
@@ -537,16 +299,6 @@ struct TradeDetailView: View {
                             .foregroundColor(trade.status == .active ? .blue : .gray)
                             .bold()
                     }
-                    
-                    // Show IG Deal ID if available
-                    if let dealId = trade.externalDealId {
-                        HStack {
-                            Text("IG Deal ID"); Spacer()
-                            Text(dealId)
-                                .font(.caption)
-                                .foregroundColor(.purple)
-                        }
-                    }
                 }
                 
                 Section("Prices") {
@@ -569,35 +321,6 @@ struct TradeDetailView: View {
                             Text(String(format: "%@$%.2f", pnl >= 0 ? "+" : "", pnl))
                                 .foregroundColor(pnl >= 0 ? .green : .red)
                                 .bold()
-                        }
-                        if let pct = trade.pnlPercent {
-                            HStack {
-                                Text("Percentage"); Spacer()
-                                Text(String(format: "%.2f%%", pct))
-                                    .foregroundColor(pnl >= 0 ? .green : .red)
-                                    .bold()
-                            }
-                        }
-                    }
-                }
-                
-                Section("Timeline") {
-                    HStack {
-                        Text("Entry Time"); Spacer()
-                        Text(formatDate(trade.entryTime))
-                            .font(.caption)
-                    }
-                    if let exitTime = trade.exitTime {
-                        HStack {
-                            Text("Exit Time"); Spacer()
-                            Text(formatDate(exitTime))
-                                .font(.caption)
-                        }
-                        let duration = exitTime.timeIntervalSince(trade.entryTime)
-                        HStack {
-                            Text("Duration"); Spacer()
-                            Text(String(format: "%d:%02d", Int(duration)/60, Int(duration)%60))
-                                .font(.caption)
                         }
                     }
                 }
@@ -634,36 +357,6 @@ struct TradeDetailView: View {
                                     .background(trade.type == .buy ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
                                     .foregroundColor(trade.type == .buy ? .green : .red)
                                     .cornerRadius(4)
-                                Text(trade.status.rawValue.uppercased())
-                                    .font(.caption.bold())
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
-                                    .background(trade.status == .active ? Color.blue.opacity(0.2) : Color.gray.opacity(0.2))
-                                    .foregroundColor(trade.status == .active ? .blue : .gray)
-                                    .cornerRadius(4)
-                                Text("\(Int(trade.confidence))% Confidence")
-                                    .font(.caption.bold())
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
-                                    .background(Color.orange.opacity(0.2))
-                                    .foregroundColor(.orange)
-                                    .cornerRadius(4)
-                                
-                                // Show IG badge if applicable
-                                if trade.externalDealId != nil {
-                                    Text("IG")
-                                        .font(.caption.bold())
-                                        .padding(.horizontal, 8).padding(.vertical, 4)
-                                        .background(Color.purple.opacity(0.2))
-                                        .foregroundColor(.purple)
-                                        .cornerRadius(4)
-                                }
-                            }
-                            
-                            // Show IG Deal ID
-                            if let dealId = trade.externalDealId {
-                                Text("IG Deal ID: \(dealId)")
-                                    .font(.caption)
-                                    .foregroundColor(.purple)
-                                    .padding(.top, 4)
                             }
                         }
                         Spacer()
@@ -677,14 +370,6 @@ struct TradeDetailView: View {
                                 Text(String(format: "$%.5f", trade.entryPrice))
                                     .font(.title3.monospacedDigit())
                             }
-                            Spacer()
-                            if let exitPrice = trade.exitPrice {
-                                VStack(alignment: .trailing) {
-                                    Text("Exit Price").font(.caption).foregroundColor(.secondary)
-                                    Text(String(format: "$%.5f", exitPrice))
-                                        .font(.title3.monospacedDigit())
-                                }
-                            }
                         }
                         Divider()
                         if let pnl = trade.pnl {
@@ -695,95 +380,12 @@ struct TradeDetailView: View {
                                         .font(.title2.bold())
                                         .foregroundColor(pnl >= 0 ? .green : .red)
                                 }
-                                Spacer()
-                                if let pct = trade.pnlPercent {
-                                    VStack(alignment: .trailing) {
-                                        Text("P&L %").font(.caption).foregroundColor(.secondary)
-                                        Text(String(format: "%.2f%%", pct))
-                                            .font(.title3.bold())
-                                            .foregroundColor(pnl >= 0 ? .green : .red)
-                                    }
-                                }
                             }
                         }
                     }
                     .padding()
-                    .background(Color(.windowBackgroundColor).opacity(0.5))
+                    .background(Color.bgSecondary)
                     .cornerRadius(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                    )
-                    .padding(.horizontal)
-                    
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Position Details").font(.headline)
-                        Divider()
-                        if let ps = trade.positionSize {
-                            HStack {
-                                Text("Position Size").font(.subheadline).foregroundColor(.secondary)
-                                Spacer()
-                                Text(String(format: "$%.2f", ps)).font(.subheadline.monospacedDigit())
-                            }
-                        }
-                        if let sl = trade.stopLoss {
-                            HStack {
-                                Text("Stop Loss").font(.subheadline).foregroundColor(.secondary)
-                                Spacer()
-                                Text(String(format: "$%.5f", sl))
-                                    .font(.subheadline.monospacedDigit())
-                                    .foregroundColor(.red)
-                            }
-                        }
-                        if let tp = trade.takeProfit {
-                            HStack {
-                                Text("Take Profit").font(.subheadline).foregroundColor(.secondary)
-                                Spacer()
-                                Text(String(format: "$%.5f", tp))
-                                    .font(.subheadline.monospacedDigit())
-                                    .foregroundColor(.green)
-                            }
-                        }
-                    }
-                    .padding()
-                    .background(Color(.windowBackgroundColor).opacity(0.5))
-                    .cornerRadius(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                    )
-                    .padding(.horizontal)
-                    
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Timeline").font(.headline)
-                        Divider()
-                        HStack {
-                            Text("Entry Time").font(.subheadline).foregroundColor(.secondary)
-                            Spacer()
-                            Text(formatDate(trade.entryTime)).font(.subheadline)
-                        }
-                        if let exitTime = trade.exitTime {
-                            HStack {
-                                Text("Exit Time").font(.subheadline).foregroundColor(.secondary)
-                                Spacer()
-                                Text(formatDate(exitTime)).font(.subheadline)
-                            }
-                            let duration = exitTime.timeIntervalSince(trade.entryTime)
-                            HStack {
-                                Text("Duration").font(.subheadline).foregroundColor(.secondary)
-                                Spacer()
-                                Text(String(format: "%d:%02d", Int(duration)/60, Int(duration)%60))
-                                    .font(.subheadline.monospacedDigit())
-                            }
-                        }
-                    }
-                    .padding()
-                    .background(Color(.windowBackgroundColor).opacity(0.5))
-                    .cornerRadius(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                    )
                     .padding(.horizontal)
                 }
                 .padding(.vertical)
@@ -798,7 +400,7 @@ struct TradeDetailView: View {
                 .padding()
         }
         .frame(width: 500, height: 600)
-        .background(Color(.windowBackgroundColor))
+        .background(Color.bgPrimary)
         #endif
     }
     

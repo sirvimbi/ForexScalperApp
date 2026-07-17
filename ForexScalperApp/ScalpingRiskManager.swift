@@ -91,36 +91,35 @@ actor ScalpingRiskManager: RiskManagerProtocol {
     }
     
     func calculatePositionSize(for signal: Signal) async -> PositionSize? {
-        let riskAmount = parameters.accountBalance * parameters.riskPerTrade
+        let balance = parameters.accountBalance
+        let riskAmount = balance * parameters.riskPerTrade
         
-        // Adjust for consecutive losses
-        let losses = consecutiveLosses[signal.symbol] ?? 0
-        let lossMultiplier = max(1.0 - Double(losses) * 0.25, 0.25) // Reduce by 25% per loss, minimum 25%
-        let adjustedRiskAmount = riskAmount * lossMultiplier
+        // 1. Calculate Stop Loss distance based on ATR or recent volatility
+        // Default to a tight scalping stop if ATR is not available
+        let atr = signal.volume > 0 ? (signal.volume / 1000) : (signal.price * 0.001)
+        let slDistance = max(atr * 1.5, signal.price * 0.0005) // Tight stop for scalping
         
-        // Dynamic stop loss based on ATR
-        let atr = signal.volume > 0 ? signal.volume / 1000 : 0.001 // Use volume as ATR proxy
-        let stopLossPips = atr * 0.5 // 0.5 ATR stop loss for scalping
-        let takeProfitPips = stopLossPips * 2 // 2:1 reward ratio
+        // 2. Calculate Volume (Lot Size)
+        // Formula: Lot Size = Risk Amount / (SL Distance * Tick Value)
+        // For simplicity, we'll assume 1 lot = 100,000 units and calculate accordingly
+        let tickValue = 10.0 // Approximate for Major pairs
+        let lotSize = (riskAmount / (slDistance / 0.0001 * tickValue))
+        let finalLotSize = max(0.01, min(lotSize, 10.0)) // Cap between 0.01 and 10 lots
         
-        // Calculate position size based on stop loss distance
-        let stopLossDistance = signal.price * stopLossPips
-        let units = adjustedRiskAmount / stopLossDistance
+        // 3. Calculate Take Profit (aim for 2:1 or 3:1)
+        let tpDistance = slDistance * 2.5
         
-        let stopLoss = signal.type == .buy ?
-            signal.price - stopLossDistance :
-            signal.price + stopLossDistance
-            
-        let takeProfit = signal.type == .buy ?
-            signal.price + (stopLossDistance * 2) :
-            signal.price - (stopLossDistance * 2)
+        let sl = signal.type == .buy ? signal.price - slDistance : signal.price + slDistance
+        let tp = signal.type == .buy ? signal.price + tpDistance : signal.price - tpDistance
+        
+        print("📐 GOD MODE POSITION: Lot=\(String(format: "%.2f", finalLotSize)), SL=\(String(format: "%.5f", sl)), TP=\(String(format: "%.5f", tp))")
         
         return PositionSize(
-            units: units,
-            stopLoss: stopLoss,
-            takeProfit: takeProfit,
-            riskAmount: adjustedRiskAmount,
-            potentialReward: adjustedRiskAmount * 2
+            units: finalLotSize,
+            stopLoss: sl,
+            takeProfit: tp,
+            riskAmount: riskAmount,
+            potentialReward: riskAmount * 2.5
         )
     }
     

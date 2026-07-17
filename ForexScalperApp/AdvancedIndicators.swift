@@ -4,7 +4,7 @@ import Foundation
 struct AdvancedIndicators {
     
     // MARK: - Commodity Channel Index (CCI)
-    static func cci(_ candles: [Kline], period: Int = 20) -> [Double] {
+    nonisolated static func cci(_ candles: [Kline], period: Int = 20) -> [Double] {
         guard candles.count > period else { return [] }
         
         var cciValues: [Double] = []
@@ -23,7 +23,7 @@ struct AdvancedIndicators {
     }
     
     // MARK: - Parabolic SAR
-    static func parabolicSAR(_ candles: [Kline], acceleration: Double = 0.02, maxAcceleration: Double = 0.2) -> [Double] {
+    nonisolated static func parabolicSAR(_ candles: [Kline], acceleration: Double = 0.02, maxAcceleration: Double = 0.2) -> [Double] {
         guard candles.count > 2 else { return [] }
         
         var sarValues: [Double] = []
@@ -73,7 +73,7 @@ struct AdvancedIndicators {
     }
     
     // MARK: - Stochastic Oscillator
-    static func stochastic(_ candles: [Kline], periodK: Int = 14, periodD: Int = 3) -> (k: [Double], d: [Double]) {
+    nonisolated static func stochastic(_ candles: [Kline], periodK: Int = 14, periodD: Int = 3) -> (k: [Double], d: [Double]) {
         guard candles.count > periodK else { return ([], []) }
         
         var kValues: [Double] = []
@@ -94,7 +94,7 @@ struct AdvancedIndicators {
     }
     
     // MARK: - ATR (Average True Range) for volatility-based stops
-    static func atr(_ candles: [Kline], period: Int = 14) -> [Double] {
+    nonisolated static func atr(_ candles: [Kline], period: Int = 14) -> [Double] {
         guard candles.count > period else { return [] }
         
         var trValues: [Double] = []
@@ -121,7 +121,7 @@ struct AdvancedIndicators {
     }
     
     // MARK: - Volume Profile
-    static func volumeProfile(_ candles: [Kline], levels: Int = 12) -> (valueArea: Double, poc: Double) {
+    nonisolated static func volumeProfile(_ candles: [Kline], levels: Int = 12) -> (valueArea: Double, poc: Double) {
         guard !candles.isEmpty else { return (0, 0) }
         
         let closes = candles.map { $0.close }
@@ -170,7 +170,7 @@ struct AdvancedIndicators {
     }
     
     // MARK: - Support/Resistance Levels
-    static func supportResistance(_ candles: [Kline], lookback: Int = 50) -> (support: Double, resistance: Double) {
+    nonisolated static func supportResistance(_ candles: [Kline], lookback: Int = 50) -> (support: Double, resistance: Double) {
         guard candles.count > lookback else { return (0, 0) }
         
         let recentCandles = Array(candles.suffix(lookback))
@@ -204,7 +204,7 @@ struct AdvancedIndicators {
     }
     
     // MARK: - Market Profile (Trading sessions)
-    static func sessionAnalysis(_ candles: [Kline]) -> (asiaRange: (high: Double, low: Double),
+    nonisolated static func sessionAnalysis(_ candles: [Kline]) -> (asiaRange: (high: Double, low: Double),
                                                           londonRange: (high: Double, low: Double),
                                                           usRange: (high: Double, low: Double)) {
         let calendar = Calendar.current
@@ -239,7 +239,7 @@ struct AdvancedIndicators {
         )
     }
     
-    private static func sma(_ values: [Double], period: Int) -> [Double] {
+    nonisolated private static func sma(_ values: [Double], period: Int) -> [Double] {
         guard values.count >= period else { return [] }
         var result: [Double] = []
         for i in (period - 1)..<values.count {

@@ -61,6 +61,31 @@ enum SignalStatus: String, Codable {
     case completed
 }
 
+// MARK: - MT5 Execution Types
+enum MT5OrderType: String, Codable, Sendable {
+    case buy = "BUY"
+    case sell = "SELL"
+    case buyLimit = "BUY_LIMIT"
+    case sellLimit = "SELL_LIMIT"
+    case buyStop = "BUY_STOP"
+    case sellStop = "SELL_STOP"
+    case buyStopLimit = "BUY_STOP_LIMIT"
+    case sellStopLimit = "SELL_STOP_LIMIT"
+}
+
+enum MT5FillingType: String, Codable, Sendable {
+    case fok = "FOK"
+    case ioc = "IOC"
+    case any = "RETURN"
+}
+
+enum MT5ExecutionMode: String, Codable, Sendable {
+    case request = "REQUEST"
+    case instant = "INSTANT"
+    case market = "MARKET"
+    case exchange = "EXCHANGE"
+}
+
 // MARK: - Signal struct with Codable conformance
 struct Signal: Identifiable, Sendable, Codable {
     let id: UUID
@@ -90,11 +115,13 @@ struct Signal: Identifiable, Sendable, Codable {
     var magicNumber: Int?
     var comment: String?
     var deviation: Int?
-    var filler: String? // Type of filling (IOC, FOK, etc.)
+    var filler: MT5FillingType?
+    var orderType: MT5OrderType?
+    var executionMode: MT5ExecutionMode?
 
     private enum CodingKeys: String, CodingKey {
         case id, type, symbol, price, confidence, timestamp, timeframe, expiryTime, status, acceptedAt, acceptedPrice, closedAt, closedPrice, pnl, pnlPercent, positionSize, stopLoss, takeProfit, source, volume, tradeId, externalDealId
-        case magicNumber, comment, deviation, filler
+        case magicNumber, comment, deviation, filler, orderType, executionMode
     }
 
     init(from decoder: Decoder) throws {
@@ -127,7 +154,9 @@ struct Signal: Identifiable, Sendable, Codable {
         self.magicNumber = try container.decodeIfPresent(Int.self, forKey: .magicNumber)
         self.comment = try container.decodeIfPresent(String.self, forKey: .comment)
         self.deviation = try container.decodeIfPresent(Int.self, forKey: .deviation)
-        self.filler = try container.decodeIfPresent(String.self, forKey: .filler)
+        self.filler = try container.decodeIfPresent(MT5FillingType.self, forKey: .filler)
+        self.orderType = try container.decodeIfPresent(MT5OrderType.self, forKey: .orderType)
+        self.executionMode = try container.decodeIfPresent(MT5ExecutionMode.self, forKey: .executionMode)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -160,6 +189,8 @@ struct Signal: Identifiable, Sendable, Codable {
         try container.encodeIfPresent(comment, forKey: .comment)
         try container.encodeIfPresent(deviation, forKey: .deviation)
         try container.encodeIfPresent(filler, forKey: .filler)
+        try container.encodeIfPresent(orderType, forKey: .orderType)
+        try container.encodeIfPresent(executionMode, forKey: .executionMode)
     }
     
     init(id: UUID = UUID(),
@@ -187,7 +218,9 @@ struct Signal: Identifiable, Sendable, Codable {
          magicNumber: Int? = nil,
          comment: String? = nil,
          deviation: Int? = nil,
-         filler: String? = nil) {
+         filler: MT5FillingType? = .ioc,
+         orderType: MT5OrderType? = nil,
+         executionMode: MT5ExecutionMode? = .market) {
         self.id = id
         self.type = type
         self.symbol = symbol
@@ -214,6 +247,8 @@ struct Signal: Identifiable, Sendable, Codable {
         self.comment = comment
         self.deviation = deviation
         self.filler = filler
+        self.orderType = orderType ?? (type == .buy ? .buy : .sell)
+        self.executionMode = executionMode
     }
     
     var isActive: Bool {

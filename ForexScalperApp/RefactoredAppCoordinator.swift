@@ -43,6 +43,11 @@ class RefactoredAppCoordinator: ObservableObject {
     private let symbols: [String]
     private let batchSize = 5
     
+    private var activeSymbols: Set<String> {
+        let saved = UserDefaults.standard.stringArray(forKey: "activeSymbols") ?? []
+        return Set(saved)
+    }
+    
     var marketDataProvider: MarketDataProvider {
         return marketData
     }
@@ -72,7 +77,8 @@ class RefactoredAppCoordinator: ObservableObject {
         self.scalpingEngine = ScalpingSignalEngine(
             marketData: marketData,
             tradeHistory: tradeHistory,
-            riskManager: scalpingRiskManager
+            riskManager: scalpingRiskManager,
+            config: ScalpingConfig.shared
         )
         
         self.scalpingTradeMonitor = ScalpingTradeMonitor(
@@ -130,6 +136,16 @@ class RefactoredAppCoordinator: ObservableObject {
         
         // 2. Connect/Check MT5 (God Mode)
         do {
+            let mt5Login = UserDefaults.standard.string(forKey: "mt5Login") ?? "436886946"
+            let mt5Password = UserDefaults.standard.string(forKey: "mt5Password") ?? "Kenya@254"
+            let mt5Server = UserDefaults.standard.string(forKey: "mt5Server") ?? "ExnessKE-MT5Trial9"
+            
+            try await MT5Service.shared.initialize(
+                login: Int(mt5Login) ?? 0,
+                password: mt5Password,
+                server: mt5Server
+            )
+
             let mt5Connected = try await MT5Service.shared.checkConnection()
             if mt5Connected {
                 print("✅ MT5 Connected")
@@ -257,67 +273,26 @@ class RefactoredAppCoordinator: ObservableObject {
     }
     
     private func shouldEvaluateScalping(symbol: String, kline: Kline) async -> Bool {
-        // Check if we already have a pending signal (this is fine - we don't want duplicate pending signals)
-        let existingPending = signals.contains { $0.symbol == symbol && $0.status == .pending }
-        if existingPending {
-            print("📊 Skipping \(symbol): Pending signal exists")
+        // 1. Check if symbol is in our active list
+        guard activeSymbols.contains(symbol) || symbols.contains(symbol) else {
             return false
         }
         
-        // FIX: Don't skip evaluation just because there's an active trade
-        // We can still generate signals while a trade is active
-        let activeTrades = await tradeHistory.getActiveTrades()
-        if activeTrades.contains(where: { $0.symbol == symbol }) {
-            // Log that we're generating signals despite active trade
-            print("📊 Note: Active trade exists for \(symbol), but still evaluating for new signals")
-            // Continue evaluation - don't return false
+        // 2. Check for pending signal
+        let existingPending = signals.contains { $0.symbol == symbol && $0.status == .pending }
+        if existingPending {
+            return false
         }
         
-        // Check cooldown period from config
+        // 3. Check cooldown
         if let lastSignalTime = lastScalpingSignalTime[symbol] {
             let cooldown = ScalpingConfig.shared.cooldownSeconds
-            let timeSinceLastSignal = Date().timeIntervalSince(lastSignalTime)
-            if timeSinceLastSignal < cooldown {
-                print("📊 Skipping \(symbol): Cooldown active (\(Int(timeSinceLastSignal))s/\(Int(cooldown))s)")
+            if Date().timeIntervalSince(lastSignalTime) < cooldown {
                 return false
             }
         }
         
-        // Get risk metrics
-        let metrics = await scalpingRiskManager.getCurrentRiskMetrics()
-        
-        // FIXED LINE HERE:
-        let maxHourlyTrades = max(2, min(10, metrics.maxConcurrentTrades * 2))
-        
-        // Check hourly trade limit (but this counts executed trades, not signals)
-        if metrics.hourlyTrades >= maxHourlyTrades {
-            print("⚠️ Hourly trade limit reached (\(metrics.hourlyTrades)/\(maxHourlyTrades))")
-            return false
-        }
-        
-        // Check concurrent trades limit
-        if metrics.activeTrades >= metrics.maxConcurrentTrades {
-            print("⚠️ Max concurrent trades reached (\(metrics.activeTrades)/\(metrics.maxConcurrentTrades))")
-            // We can still generate signals even if at max trades - they'll just wait
-            print("📊 Still evaluating signals for queueing purposes")
-        }
-        
-        // Check volatility (avoid extremely low volatility)
-        guard let marketDataActor = marketData as? RefactoredMarketDataActor else { return true }
-        let candles = await marketDataActor.getCandles(symbol: symbol, timeframe: "1m")
-        guard candles.count >= 20 else { return true }
-        
-        let closes = candles.suffix(20).map { $0.close }
-        let mean = closes.reduce(0, +) / 20
-        let variance = closes.map { pow($0 - mean, 2) }.reduce(0, +) / 20
-        let volatility = sqrt(variance) / mean * 100
-        
-        // Skip if volatility is too low
-        if volatility < 0.02 {
-            print("📊 Skipping \(symbol): Volatility too low (\(String(format: "%.3f", volatility))%)")
-            return false
-        }
-        
+        // 4. Bypassing other complex filters for "God Mode" availability
         return true
     }
     
@@ -390,6 +365,8 @@ class RefactoredAppCoordinator: ObservableObject {
         return shouldEvaluate
     }
     
+    private var mt5PollingTask: Task<Void, Never>?
+
     func start() async {
         guard !isRunning else { return }
         isRunning = true
@@ -403,6 +380,32 @@ class RefactoredAppCoordinator: ObservableObject {
                 await self?.updateTradingStatus()
                 
                 try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
+            }
+        }
+
+        // Start MT5 polling task
+        mt5PollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.pollMT5Data()
+                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+            }
+        }
+    }
+    
+    private func pollMT5Data() async {
+        guard let marketDataActor = marketData as? RefactoredMarketDataActor else { return }
+        
+        for symbol in symbols {
+            // Only poll for symbols that aren't updating frequently from Binance, or all if MT5 is selected
+            if selectedSignalSource == .mt5 || selectedSignalSource == .both || selectedSignalSource == .auto {
+                do {
+                    let candles = try await MT5Service.shared.getCandles(symbol: symbol, timeframe: "1m", count: 2)
+                    if let lastCandle = candles.last {
+                        await handleKlineUpdate(symbol: symbol, timeframe: "1m", kline: lastCandle)
+                    }
+                } catch {
+                    // Silent fail for polling
+                }
             }
         }
     }
@@ -492,11 +495,19 @@ class RefactoredAppCoordinator: ObservableObject {
             closedPrice: nil,
             pnl: nil,
             pnlPercent: nil,
-            positionSize: nil,
-            stopLoss: nil,
-            takeProfit: nil,
-            source: .binance,
-            volume: 0
+            positionSize: scalpingSignal.volume,
+            stopLoss: scalpingSignal.stopLoss,
+            takeProfit: scalpingSignal.takeProfit,
+            source: .mt5,
+            volume: scalpingSignal.volume ?? 0.1,
+            tradeId: nil,
+            externalDealId: nil,
+            magicNumber: 888888,
+            comment: "GOD_MODE_SIGNAL",
+            deviation: 10,
+            filler: scalpingSignal.fillingType ?? .ioc,
+            orderType: scalpingSignal.orderType,
+            executionMode: scalpingSignal.executionMode ?? .market
         )
     }
 
@@ -524,18 +535,25 @@ class RefactoredAppCoordinator: ObservableObject {
             
             // Execute trade on appropriate service
             var externalDealId: String?
-            var tradeStatus: TradeRecord.TradeStatus = .active
             
             // MT5 Execution (God Mode)
             if signal.source == .mt5 || selectedSignalSource == .mt5 || selectedSignalSource == .both {
                 do {
                     print("📤 Executing trade on MT5 for \(signal.symbol)...")
                     var mt5Signal = signal
-                    mt5Signal.positionSize = positionSize.units
-                    mt5Signal.stopLoss = positionSize.stopLoss
-                    mt5Signal.takeProfit = positionSize.takeProfit
-                    mt5Signal.magicNumber = 888888 // God Mode Magic Number
+                    
+                    // Prioritize UI-adjusted values if they exist, otherwise use engine's
+                    mt5Signal.positionSize = signal.positionSize ?? positionSize.units
+                    mt5Signal.stopLoss = signal.stopLoss ?? positionSize.stopLoss
+                    mt5Signal.takeProfit = signal.takeProfit ?? positionSize.takeProfit
+                    
+                    mt5Signal.magicNumber = Int(UserDefaults.standard.integer(forKey: "mt5MagicNumber"))
+                    if mt5Signal.magicNumber == 0 { mt5Signal.magicNumber = 888888 }
+                    
                     mt5Signal.comment = "GOD_MODE_SCALP"
+                    mt5Signal.executionMode = signal.executionMode ?? .market
+                    mt5Signal.filler = signal.filler ?? .ioc
+                    mt5Signal.deviation = signal.deviation ?? 10
                     
                     let tradeResult = try await MT5Service.shared.executeTrade(signal: mt5Signal)
                     externalDealId = tradeResult.deal != nil ? String(tradeResult.deal!) : String(tradeResult.order ?? 0)
@@ -588,7 +606,7 @@ class RefactoredAppCoordinator: ObservableObject {
                 takeProfit: positionSize.takeProfit,
                 stopLoss: positionSize.stopLoss,
                 positionSize: positionSize.units,
-                status: tradeStatus,
+                status: .active,
                 externalDealId: externalDealId
             )
             
@@ -678,6 +696,8 @@ class RefactoredAppCoordinator: ObservableObject {
         signalGenerationTask = nil
         metricsUpdateTask?.cancel()
         metricsUpdateTask = nil
+        mt5PollingTask?.cancel()
+        mt5PollingTask = nil
         
         await binanceService.disconnect()
         
@@ -812,7 +832,7 @@ class RefactoredAppCoordinator: ObservableObject {
             // In both mode, process all signals and let comparator decide
             if let binanceSig = lastBinanceSignal[signal.symbol],
                let igSig = lastIGSignal[signal.symbol],
-               let mt5Sig = lastMT5Signal[signal.symbol] {
+               let _ = lastMT5Signal[signal.symbol] {
                 let comparison = signalComparator.compareSignals(
                     binanceSignal: binanceSig,
                     igSignal: igSig,

@@ -22,28 +22,22 @@ class DashboardViewModel: ObservableObject {
     // MT5 Properties
     @Published var mt5Connected: Bool = false
     @Published var mt5Error: String = ""
-    @Published var mt5BridgeURL: String = "http://localhost:5000"
+    @Published var mt5BridgeURL: String = "http://localhost:8891"
+    @Published var mt5AuthToken: String = "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"
     @Published var mt5MagicNumber: Int = 888888
+    
+    // MT5 Account Credentials
+    @Published var mt5Login: String = "436886946"
+    @Published var mt5Password: String = "Kenya@254"
+    @Published var mt5Server: String = "ExnessKE-MT5Trial9"
     
     @Published var isConnecting: Bool = false
     @Published var notifyOnSignal: Bool = true
     @Published var notifyOnTrade: Bool = true
     @Published var notifyOnClose: Bool = true
     @Published var notifyOnExpiry: Bool = true
-    @Published var minConfidenceForNotification: Double = 70
     @Published var selectedTimeFilter: DashboardTimeFilter = .allTime
     @Published var isRefreshing: Bool = false
-    @Published var backtestResult: BacktestResultData?
-    @Published var isBacktesting: Bool = false
-    @Published var backtestProgress: Int = 0
-    @Published var backtestSymbol: String = "EURUSD"
-    @Published var backtestTimeframe: String = "1m"
-    @Published var backtestMinConfidence: Double = 70
-    @Published var backtestRiskPercent: Double = 1.0
-    @Published var backtestStartBalance: Double = 10000
-    @Published var backtestPeriod: String = "30d"
-    @Published var backtestStopLossPercent: Double = 1.0
-    @Published var backtestRRRatio: Double = 2.0
     @Published var minScalpingScore: Double = 15
     @Published var maxSpreadBps: Double = 10
     @Published var signalCooldownSeconds: Double = 120
@@ -119,8 +113,6 @@ class DashboardViewModel: ObservableObject {
             UserDefaults.standard.bool(forKey: "notifyOnClose") : true
         notifyOnExpiry = UserDefaults.standard.object(forKey: "notifyOnExpiry") != nil ?
             UserDefaults.standard.bool(forKey: "notifyOnExpiry") : true
-        minConfidenceForNotification = UserDefaults.standard.double(forKey: "minConfidenceForNotification") != 0 ?
-            UserDefaults.standard.double(forKey: "minConfidenceForNotification") : 70
         
         // Load Scalping settings
         minScalpingScore = UserDefaults.standard.double(forKey: "minScalpingScore") != 0 ?
@@ -130,17 +122,14 @@ class DashboardViewModel: ObservableObject {
         signalCooldownSeconds = UserDefaults.standard.double(forKey: "signalCooldownSeconds") != 0 ?
             UserDefaults.standard.double(forKey: "signalCooldownSeconds") : 120
         
-        // Load IG settings
-        igAPIKey = UserDefaults.standard.string(forKey: "igAPIKey") ?? ""
-        igAccountID = UserDefaults.standard.string(forKey: "igAccountID") ?? ""
-        igEnvironment = UserDefaults.standard.string(forKey: "igEnvironment") ?? "demo"
-        igAutoReconnect = UserDefaults.standard.object(forKey: "igAutoReconnect") != nil ?
-            UserDefaults.standard.bool(forKey: "igAutoReconnect") : true
-        
         // Load MT5 settings
-        mt5BridgeURL = UserDefaults.standard.string(forKey: "mt5BridgeURL") ?? "http://localhost:5000"
+        mt5BridgeURL = UserDefaults.standard.string(forKey: "mt5BridgeURL") ?? "http://localhost:8891"
+        mt5AuthToken = UserDefaults.standard.string(forKey: "mt5AuthToken") ?? "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"
         mt5MagicNumber = UserDefaults.standard.integer(forKey: "mt5MagicNumber") != 0 ?
             UserDefaults.standard.integer(forKey: "mt5MagicNumber") : 888888
+        mt5Login = UserDefaults.standard.string(forKey: "mt5Login") ?? "436886946"
+        mt5Password = UserDefaults.standard.string(forKey: "mt5Password") ?? "Kenya@254"
+        mt5Server = UserDefaults.standard.string(forKey: "mt5Server") ?? "ExnessKE-MT5Trial9"
         
         // Load Active Trading Pairs
         if let savedSymbols = UserDefaults.standard.array(forKey: "activeSymbols") as? [String] {
@@ -167,7 +156,6 @@ class DashboardViewModel: ObservableObject {
         UserDefaults.standard.set(notifyOnTrade, forKey: "notifyOnTrade")
         UserDefaults.standard.set(notifyOnClose, forKey: "notifyOnClose")
         UserDefaults.standard.set(notifyOnExpiry, forKey: "notifyOnExpiry")
-        UserDefaults.standard.set(minConfidenceForNotification, forKey: "minConfidenceForNotification")
         
         // Save Scalping settings
         UserDefaults.standard.set(minScalpingScore, forKey: "minScalpingScore")
@@ -182,7 +170,14 @@ class DashboardViewModel: ObservableObject {
         
         // Save MT5 settings
         UserDefaults.standard.set(mt5BridgeURL, forKey: "mt5BridgeURL")
+        UserDefaults.standard.set(mt5AuthToken, forKey: "mt5AuthToken")
         UserDefaults.standard.set(mt5MagicNumber, forKey: "mt5MagicNumber")
+        UserDefaults.standard.set(mt5Login, forKey: "mt5Login")
+        UserDefaults.standard.set(mt5Password, forKey: "mt5Password")
+        UserDefaults.standard.set(mt5Server, forKey: "mt5Server")
+        
+        // Load settings to ensure they are current
+        loadSettings()
         
         // Save Active Trading Pairs
         UserDefaults.standard.set(Array(activeSymbols), forKey: "activeSymbols")
@@ -362,40 +357,6 @@ class DashboardViewModel: ObservableObject {
         }
     }
     
-    func runBacktest() {
-        guard !isBacktesting else { return }
-        isBacktesting = true
-        backtestProgress = 0
-        
-        Task {
-            // Simulate backtest progress
-            for i in 0...100 {
-                try? await Task.sleep(nanoseconds: 50_000_000)
-                await MainActor.run {
-                    self.backtestProgress = i
-                }
-            }
-            
-            // Create mock backtest result
-            let result = BacktestResultData(
-                symbol: backtestSymbol,
-                totalTrades: 145,
-                wins: 98,
-                losses: 47,
-                winRate: 67.6,
-                totalPnL: 2345.67,
-                maxDrawdown: 456.78,
-                sharpeRatio: 1.82,
-                profitFactor: 2.15
-            )
-            
-            await MainActor.run {
-                self.backtestResult = result
-                self.isBacktesting = false
-            }
-        }
-    }
-    
     func connectToIG() async {
         await MainActor.run {
             igConnected = false
@@ -465,15 +426,29 @@ class DashboardViewModel: ObservableObject {
             mt5Connected = false
             mt5Error = ""
             isConnecting = true
+            
+            // Ensure any changes to URL/Credentials are saved before connecting
+            saveSettings()
         }
         
         do {
+            // Update service with potential new URL and Token
+            MT5Service.shared.setBaseURL(mt5BridgeURL)
+            MT5Service.shared.setAuthToken(mt5AuthToken)
+            
+            // First attempt to initialize/login MT5 if the bridge supports it
+            try await MT5Service.shared.initialize(
+                login: Int(mt5Login) ?? 0,
+                password: mt5Password,
+                server: mt5Server
+            )
+
             let connected = try await MT5Service.shared.checkConnection()
             await MainActor.run {
                 self.mt5Connected = connected
                 self.isConnecting = false
                 if !connected {
-                    self.mt5Error = "MT5 Bridge not reachable"
+                    self.mt5Error = "MT5 Bridge reachable but terminal offline"
                 }
             }
         } catch {

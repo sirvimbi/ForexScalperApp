@@ -6,8 +6,8 @@ import Combine
 class ScalpingConfig: ObservableObject {
     static let shared = ScalpingConfig()
     
-    // Core settings - RAISED THRESHOLDS FOR QUALITY
-    @Published var confidenceThreshold: Double = 75.0 { didSet { saveConfig() } } // Must be >75% confidence
+    // Core settings - BALANCED FOR FREQUENCY AND QUALITY
+    @Published var confidenceThreshold: Double = 65.0 { didSet { saveConfig() } } // Lowered from 75 to 65
     @Published var spreadTolerance: Double = 10.0 { didSet { saveConfig() } }
     @Published var rsiWeight: Double = 15.0 { didSet { saveConfig() } }
     
@@ -17,17 +17,17 @@ class ScalpingConfig: ObservableObject {
     @Published var maWeight: Double = 20.0 { didSet { saveConfig() } }
     @Published var bbWeight: Double = 10.0 { didSet { saveConfig() } }
     @Published var volumeWeight: Double = 10.0 { didSet { saveConfig() } }
-    @Published var patternWeight: Double = 5.0 { didSet { saveConfig() } }
+    @Published var patternWeight: Double = 10.0 { didSet { saveConfig() } } // Increased from 5
     
     // Exit strategy settings
     @Published var enableTrailingStop: Bool = true { didSet { saveConfig() } }
-    @Published var trailActivationPips: Double = 3.0 { didSet { saveConfig() } } // Activate sooner
-    @Published var trailDistance: Double = 2.0 { didSet { saveConfig() } } // Tighter trail
+    @Published var trailActivationPips: Double = 3.0 { didSet { saveConfig() } }
+    @Published var trailDistance: Double = 2.0 { didSet { saveConfig() } }
     @Published var maxHoldMinutes: Double = 30.0 { didSet { saveConfig() } }
     @Published var enableIndicatorExit: Bool = true { didSet { saveConfig() } }
     
     // Risk settings
-    @Published var minScore: Double = 50.0 { didSet { saveConfig() } } // Higher bar for entry
+    @Published var minScore: Double = 40.0 { didSet { saveConfig() } } // Lowered from 50 to 40
     @Published var maxSpreadBps: Double = 10.0 { didSet { saveConfig() } }
     @Published var cooldownSeconds: Double = 300.0 { didSet { saveConfig() } } // 5 min cooldown to prevent overtrading
     @Published var maxDailyTrades: Int = 10 { didSet { saveConfig() } } // Limit trades to only best ones
@@ -92,10 +92,10 @@ class ScalpingConfig: ObservableObject {
     }
     
     func resetToDefaults() {
-        confidenceThreshold = 75.0
-        minScore = 50.0
-        cooldownSeconds = 300.0
-        maxDailyTrades = 10
+        confidenceThreshold = 65.0
+        minScore = 40.0
+        cooldownSeconds = 120.0 // Reduced from 300
+        maxDailyTrades = 20 // Increased from 10
         saveConfig()
     }
     

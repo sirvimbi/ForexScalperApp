@@ -3,7 +3,7 @@ import Foundation
 struct Indicators {
     
     // MARK: - Exponential Moving Average
-    static func ema(_ values: [Double], period: Int) -> [Double] {
+    nonisolated static func ema(_ values: [Double], period: Int) -> [Double] {
         guard values.count >= period else { return [] }
         var emaValues = [Double]()
         let multiplier = 2.0 / Double(period + 1)
@@ -18,7 +18,7 @@ struct Indicators {
     }
     
     // MARK: - Simple Moving Average
-    static func sma(_ values: [Double], period: Int) -> [Double] {
+    nonisolated static func sma(_ values: [Double], period: Int) -> [Double] {
         guard values.count >= period else { return [] }
         var smaValues = [Double]()
         for i in (period - 1)..<values.count {
@@ -29,7 +29,7 @@ struct Indicators {
     }
     
     // MARK: - RSI
-    static func rsi(_ values: [Double], period: Int = 14) -> [Double] {
+    nonisolated static func rsi(_ values: [Double], period: Int = 14) -> [Double] {
         guard values.count > period else { return [] }
         var gains = [Double]()
         var losses = [Double]()
@@ -59,7 +59,7 @@ struct Indicators {
     }
     
     // MARK: - Bollinger Bands
-    static func bollingerBands(_ values: [Double], period: Int = 20, stdDev: Double = 2.0) -> (middle: [Double], upper: [Double], lower: [Double]) {
+    nonisolated static func bollingerBands(_ values: [Double], period: Int = 20, stdDev: Double = 2.0) -> (middle: [Double], upper: [Double], lower: [Double]) {
         guard values.count >= period else { return ([], [], []) }
         let middle = sma(values, period: period)
         var upper = [Double]()
@@ -76,7 +76,7 @@ struct Indicators {
     }
     
     // MARK: - MACD
-    static func macd(_ values: [Double], fast: Int = 12, slow: Int = 26, signal: Int = 9) -> (macd: [Double], signal: [Double], histogram: [Double]) {
+    nonisolated static func macd(_ values: [Double], fast: Int = 12, slow: Int = 26, signal: Int = 9) -> (macd: [Double], signal: [Double], histogram: [Double]) {
         let emaFast = ema(values, period: fast)
         let emaSlow = ema(values, period: slow)
         // Align lengths
@@ -89,7 +89,7 @@ struct Indicators {
     }
     
     // MARK: - ATR
-    static func atr(_ candles: [Kline], period: Int = 14) -> [Double] {
+    nonisolated static func atr(_ candles: [Kline], period: Int = 14) -> [Double] {
         guard candles.count > period else { return [] }
         var trs: [Double] = []
         for i in 1..<candles.count {
