@@ -3,5 +3,6 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/mt5-bridge" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/mt5-bridge/MQL5/Experts/MQL5" vcs="Git" />
   </component>
 </project>

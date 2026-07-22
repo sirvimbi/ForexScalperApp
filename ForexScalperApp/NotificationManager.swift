@@ -11,17 +11,82 @@ class NotificationManager: NSObject, ObservableObject {
         super.init()
         UNUserNotificationCenter.current().delegate = self
         requestAuthorization()
+        
+        // Refresh status when app returns to foreground
+        #if os(iOS)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(refreshStatus),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+        #else
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(refreshStatus),
+            name: NSApplication.willBecomeActiveNotification,
+            object: nil
+        )
+        #endif
+    }
+    
+    @objc func refreshStatus() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                var authorized = settings.authorizationStatus == .authorized || 
+                               settings.authorizationStatus == .provisional
+                
+                #if os(iOS)
+                if settings.authorizationStatus == .ephemeral {
+                    authorized = true
+                }
+                #endif
+                
+                if self.isAuthorized != authorized {
+                    self.isAuthorized = authorized
+                    print("🔔 Notification status updated: \(authorized ? "Authorized" : "Not Authorized")")
+                }
+            }
+        }
     }
     
     func requestAuthorization() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            DispatchQueue.main.async {
-                self.isAuthorized = granted
-                if granted {
-                    print("✅ Notification permission granted")
-                } else if let error = error {
-                    print("❌ Notification permission error: \(error)")
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .notDetermined:
+                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+                    DispatchQueue.main.async {
+                        self.isAuthorized = granted
+                        if granted {
+                            print("✅ Notification permission granted")
+                        } else if let error = error {
+                            print("❌ Notification permission error: \(error.localizedDescription)")
+                        } else {
+                            print("⚠️ Notification permission denied by user")
+                        }
+                    }
                 }
+            case .denied:
+                DispatchQueue.main.async {
+                    self.isAuthorized = false
+                    print("⚠️ Notifications are DENIED. User must enable them in System Settings.")
+                }
+            case .authorized, .provisional:
+                DispatchQueue.main.async {
+                    self.isAuthorized = true
+                    print("✅ Notifications are already authorized")
+                }
+            default:
+                #if os(iOS)
+                if settings.authorizationStatus == .ephemeral {
+                    DispatchQueue.main.async {
+                        self.isAuthorized = true
+                        print("✅ Notifications are already authorized (ephemeral)")
+                    }
+                    return
+                }
+                #endif
+                break
             }
         }
     }
@@ -68,7 +133,7 @@ class NotificationManager: NSObject, ObservableObject {
         let pnlEmoji = (trade.pnl ?? 0) >= 0 ? "✅" : "❌"
         content.title = "\(pnlEmoji) \(trade.symbol) Trade Closed"
         content.body = String(
-            format: "P&L: %@$%.2f (%.2f%%)",
+            format: "P&L: %@KES %.2f (%.2f%%)",
             (trade.pnl ?? 0) >= 0 ? "+" : "",
             trade.pnl ?? 0,
             trade.pnlPercent ?? 0

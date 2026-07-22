@@ -288,46 +288,4 @@ actor RefactoredSignalEngine {
         }
         signalQuality[symbol] = quality
     }
-    
-    // Add this method to RefactoredSignalEngine.swift
-    func debugEvaluateSymbol(_ symbol: String) async {
-        print("\n🔍 DEBUG: Evaluating \(symbol)")
-        
-        // Check market data
-        let candles1m = await marketData.getCandles(symbol: symbol, timeframe: "1m")
-        let candles5m = await marketData.getCandles(symbol: symbol, timeframe: "5m")
-        let candles1h = await marketData.getCandles(symbol: symbol, timeframe: "1h")
-        
-        print("📊 Data counts: 1m: \(candles1m.count), 5m: \(candles5m.count), 1h: \(candles1h.count)")
-        
-        guard candles1m.count >= 100 else {
-            print("❌ Not enough 1m data")
-            return
-        }
-        
-        // Check regime
-        let regime = await regimeDetector.currentRegime(symbol: symbol)
-        print("📊 Regime: \(regime)")
-        
-        // Check risk
-        let canTrade = await riskManager.canOpenTrade(for: symbol)
-        print("📊 Can trade: \(canTrade)")
-        
-        // Extract features
-        let features = await mlModel.extractFeatures(
-            symbol: symbol,
-            candles1m: candles1m,
-            candles5m: candles5m,
-            candles1h: candles1h
-        )
-        print("📊 Features extracted: \(features.keys.count)")
-        
-        // Get prediction
-        let prediction = await mlModel.predictSignal(features: features)
-        if let (signal, confidence) = prediction {
-            print("✅ Prediction: \(signal) with confidence: \(confidence)")
-        } else {
-            print("❌ No prediction")
-        }
-    }
 }

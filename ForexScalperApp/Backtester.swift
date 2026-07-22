@@ -24,7 +24,6 @@ actor Backtester {
             let windowCandles = Array(candles[i-100...i])
             
             // Extract features
-            let closes = windowCandles.map { $0.close }
             let features = await extractFeatures(candles: windowCandles)
             
             // Get ML prediction

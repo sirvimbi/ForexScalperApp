@@ -17,7 +17,6 @@ class RefactoredAppCoordinator: ObservableObject {
     
     // Published properties for SwiftUI
     @Published var signals: [Signal] = []
-    @Published var scalpingSignals: [ScalpingSignalDisplay] = []
     @Published var lastSignal: String = "No signal yet"
     @Published var status: String = "Starting..."
     @Published var connectionStatus: String = "Disconnected"
@@ -44,20 +43,35 @@ class RefactoredAppCoordinator: ObservableObject {
     private let batchSize = 5
     
     private var activeSymbols: Set<String> {
+        // PRODUCTION SANITIZATION: Strictly only allow symbols from the TradingPair enum
         let saved = UserDefaults.standard.stringArray(forKey: "activeSymbols") ?? []
-        return Set(saved)
+        let validSymbols = Set(TradingPair.allCases.map { $0.rawValue })
+        let filtered = saved.filter { validSymbols.contains($0) }
+        
+        // If everything was filtered out but we need something to monitor
+        if filtered.isEmpty {
+            return Set(["EURUSD", "GBPUSD", "USDJPY"])
+        }
+        return Set(filtered)
     }
     
     var marketDataProvider: MarketDataProvider {
         return marketData
     }
+
+    // MARK: - Symbol Whitelist for Scalping
+    private let allowedScalpingSymbols = Set([
+        "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD",  // Majors
+        "EURJPY", "GBPJPY", "AUDJPY", "NZDJPY", "EURGBP", "EURCHF",  // Minors with tight spreads
+        "GBPCHF", "CADJPY", "CHFJPY", "AUDCHF", "NZDCAD", "AUDNZD"   // Additional tight spreads
+    ])
     
     enum TradingMode {
         case standard
         case scalping
     }
     
-    init(symbols: [String] = TradingPair.allCases.map { $0.rawValue }, useDebugData: Bool = false) {
+    init(symbols: [String] = TradingPair.allCases.map { $0.rawValue }) {
         // Keep all symbols - don't filter to only USDT
         self.symbols = symbols
         
@@ -125,8 +139,8 @@ class RefactoredAppCoordinator: ObservableObject {
         await binanceService.connect(
             symbols: symbols,
             timeframes: tradingMode == .scalping ?
-                ["1m", "5m", "15m", "1h"] : 
-                ["1m", "5m", "1h"],
+                ["1m", "5m", "15m", "30m", "1h", "4h", "D1", "W1"] : 
+                ["1m", "5m", "1h", "4h", "D1"],
             onKline: { [weak self] symbol, timeframe, kline in
                 Task { [weak self] in
                     await self?.handleKlineUpdate(symbol: symbol, timeframe: timeframe, kline: kline)
@@ -165,34 +179,46 @@ class RefactoredAppCoordinator: ObservableObject {
     }
     
     private func syncMT5Data() async {
-        print("🔄 Syncing MT5 Data (Deep History Charts)...")
-        let deepHistoryCount = 2000 // Deep history for indicators and "God Mode" analysis
+        print("🔄 Syncing MT5 Data (Deep Context)...")
         
-        for symbol in symbols {
+        // 1. PUSH WATCHLIST: Ensure EA knows which symbols we care about
+        let symbolsArray = Array(activeSymbols)
+        if !symbolsArray.isEmpty {
             do {
-                // Fetch deep history from MT5
-                let candles = try await MT5Service.shared.getCandles(symbol: symbol, timeframe: "1m", count: deepHistoryCount)
-                if let marketDataActor = marketData as? RefactoredMarketDataActor {
-                    for candle in candles {
-                        await marketDataActor.addCandle(symbol: symbol, timeframe: "1m", candle: candle)
-                    }
-                    print("📊 \(symbol): Loaded \(candles.count) historical candles from MT5")
-                }
+                _ = try await MT5Service.shared.setTrackedSymbols(symbolsArray)
+                print("✅ MT5: Watchlist pushed to EA (\(symbolsArray.count) symbols)")
             } catch {
-                print("⚠️ Failed to sync deep history for \(symbol): \(error)")
+                print("⚠️ MT5: Failed to push watchlist: \(error)")
+            }
+        }
+
+        // 2. FETCH HISTORY: Serial sync to prevent socket saturation
+        for symbol in symbolsArray.prefix(15) { // Limit initial deep sync to top 15 pairs
+            let tfs = ["1m", "5m", "15m", "30m", "1h", "4h", "D1", "W1"]
+            
+            for tf in tfs {
+                // Check if already cancelled
+                if Task.isCancelled { return }
+                
+                let depth = (tf == "1m" || tf == "5m") ? 1000 : 300 // Slightly reduced depth for minor TFs
+                
+                do {
+                    let candles = try await MT5Service.shared.getCandles(symbol: symbol, timeframe: tf, count: depth)
+                    if let marketDataActor = marketData as? RefactoredMarketDataActor {
+                        for candle in candles {
+                            await marketDataActor.addCandle(symbol: symbol, timeframe: tf, candle: candle)
+                        }
+                        print("📊 \(symbol) [\(tf)]: Loaded \(candles.count) bars")
+                    }
+                    // CRITICAL: Small sleep to let MT5 socket breathe
+                    try? await Task.sleep(nanoseconds: 100_000_000) 
+                } catch {
+                    print("⚠️ Failed to sync \(symbol) \(tf): \(error.localizedDescription)")
+                }
             }
         }
         
-        // Fetch open positions to sync state
-        do {
-            let positions = try await MT5Service.shared.getOpenPositions()
-            for pos in positions {
-                print("📋 Found MT5 Position: \(pos.symbol) \(pos.type) @ \(pos.priceOpen)")
-                // Optionally map to TradeRecord and add to monitor
-            }
-        } catch {
-            print("⚠️ Failed to sync MT5 positions: \(error)")
-        }
+        await syncMT5Trades()
     }
     
     private func startMetricsUpdates() async {
@@ -214,36 +240,9 @@ class RefactoredAppCoordinator: ObservableObject {
     private func handleScalpingUpdate(symbol: String, timeframe: String, kline: Kline) async {
         // For scalping, we evaluate on every 1m candle
         if timeframe == "1m" {
-            // Check if we should evaluate
-            guard await shouldEvaluateScalping(symbol: symbol, kline: kline) else { return }
-            
+            // ELITE EXECUTION FLOW: No extra guard here, let the Engine handle internal risk logic
             // Evaluate scalping signal
             if let scalpingSignal = await scalpingEngine.evaluateScalpingSignal(symbol: symbol) {
-                // Set cooldown AFTER successful signal generation
-                await MainActor.run {
-                    self.lastScalpingSignalTime[symbol] = Date()
-                    print("📊 Cooldown set for \(symbol) - next signal allowed after 120s")
-                }
-                
-                // Create display model for UI
-                let displaySignal = ScalpingSignalDisplay(
-                    symbol: scalpingSignal.symbol,
-                    type: scalpingSignal.type,
-                    price: scalpingSignal.price,
-                    confidence: scalpingSignal.confidence,
-                    score: scalpingSignal.score,
-                    factors: scalpingSignal.confidenceFactors,
-                    timestamp: scalpingSignal.timestamp
-                )
-                
-                await MainActor.run {
-                    self.scalpingSignals.append(displaySignal)
-                    // Keep only last 50 signals
-                    if self.scalpingSignals.count > 50 {
-                        self.scalpingSignals.removeFirst()
-                    }
-                }
-                
                 // Convert to regular signal for acceptance flow
                 let signal = createSignal(from: scalpingSignal)
                 await handleNewSignal(signal)
@@ -273,8 +272,15 @@ class RefactoredAppCoordinator: ObservableObject {
     }
     
     private func shouldEvaluateScalping(symbol: String, kline: Kline) async -> Bool {
-        // 1. Check if symbol is in our active list
-        guard activeSymbols.contains(symbol) || symbols.contains(symbol) else {
+        // 0. Check if market data is ready (has sufficient history for all timeframes)
+        if let marketDataActor = marketData as? RefactoredMarketDataActor {
+            guard await marketDataActor.isReadyForSignals(symbol: symbol) else {
+                return false
+            }
+        }
+        
+        // 1. Check if symbol is strictly in our active list
+        guard activeSymbols.contains(symbol) else {
             return false
         }
         
@@ -292,7 +298,6 @@ class RefactoredAppCoordinator: ObservableObject {
             }
         }
         
-        // 4. Bypassing other complex filters for "God Mode" availability
         return true
     }
     
@@ -301,8 +306,12 @@ class RefactoredAppCoordinator: ObservableObject {
         
         let candles1m = await marketDataActor.getCandles(symbol: symbol, timeframe: "1m")
         let candles5m = await marketDataActor.getCandles(symbol: symbol, timeframe: "5m")
-        let candles15m = await marketDataActor.getCandles(symbol: symbol, timeframe: "15m")
-        let candles1h = await marketDataActor.getCandles(symbol: symbol, timeframe: "1h")
+        let _ = await marketDataActor.getCandles(symbol: symbol, timeframe: "15m")
+        let _ = await marketDataActor.getCandles(symbol: symbol, timeframe: "30m")
+        let _ = await marketDataActor.getCandles(symbol: symbol, timeframe: "1h")
+        let candles4h = await marketDataActor.getCandles(symbol: symbol, timeframe: "4h")
+        let candlesD1 = await marketDataActor.getCandles(symbol: symbol, timeframe: "D1")
+        let candlesW1 = await marketDataActor.getCandles(symbol: symbol, timeframe: "W1")
         
         guard candles1m.count >= 100 else { return nil }
         
@@ -314,19 +323,34 @@ class RefactoredAppCoordinator: ObservableObject {
         let bbPosition = (currentPrice - (bb.lower.last ?? 0)) /
                          max((bb.upper.last ?? 1) - (bb.lower.last ?? 0), 0.0001)
         
+        let ema9 = Indicators.ema(candles1m.map { $0.close }, period: 9).last ?? currentPrice
+        let ema21 = Indicators.ema(candles1m.map { $0.close }, period: 21).last ?? currentPrice
+        let ema50 = Indicators.ema(candles1m.map { $0.close }, period: 50).last ?? currentPrice
+        let ema9_5m = Indicators.ema(candles5m.map { $0.close }, period: 9).last ?? currentPrice
+        let ema21_5m = Indicators.ema(candles5m.map { $0.close }, period: 21).last ?? currentPrice
+        let ema50_5m = Indicators.ema(candles5m.map { $0.close }, period: 50).last ?? currentPrice
+        
+        let cci = AdvancedIndicators.cci(candles1m, period: 20).last ?? 0
+        let sar = AdvancedIndicators.parabolicSAR(candles1m).last ?? currentPrice
+        let atr = AdvancedIndicators.atr(candles1m, period: 14).last ?? 0
+        
+        let h4TrendVal = calculateTrend(candles: Array(candles4h.suffix(20)))
+        let d1TrendVal = calculateTrend(candles: Array(candlesD1.suffix(10)))
+        let w1TrendVal = calculateTrend(candles: Array(candlesW1.suffix(5)))
+
         return IndicatorSet(
             rsi: rsi,
             stochasticK: stoch.k.last ?? 50,
             stochasticD: stoch.d.last ?? 50,
-            cci: AdvancedIndicators.cci(candles1m, period: 20).last ?? 0,
-            sar: AdvancedIndicators.parabolicSAR(candles1m).last ?? currentPrice,
-            atr: AdvancedIndicators.atr(candles1m, period: 14).last ?? 0,
-            ema9: Indicators.ema(candles1m.map { $0.close }, period: 9).last ?? currentPrice,
-            ema21: Indicators.ema(candles1m.map { $0.close }, period: 21).last ?? currentPrice,
-            ema50: Indicators.ema(candles1m.map { $0.close }, period: 50).last ?? currentPrice,
-            ema9_5m: Indicators.ema(candles5m.map { $0.close }, period: 9).last ?? currentPrice,
-            ema21_5m: Indicators.ema(candles5m.map { $0.close }, period: 21).last ?? currentPrice,
-            ema50_5m: Indicators.ema(candles5m.map { $0.close }, period: 50).last ?? currentPrice,
+            cci: cci,
+            sar: sar,
+            atr: atr,
+            ema9: ema9,
+            ema21: ema21,
+            ema50: ema50,
+            ema9_5m: ema9_5m,
+            ema21_5m: ema21_5m,
+            ema50_5m: ema50_5m,
             bbPosition: bbPosition,
             volumeRatio: 1.0,
             volumeProfilePOC: 0,
@@ -336,11 +360,37 @@ class RefactoredAppCoordinator: ObservableObject {
             trendStrength: 0,
             pricePattern: .none,
             regime: .ranging,
-            currentPrice: currentPrice
+            currentPrice: currentPrice,
+            h4Trend: h4TrendVal,
+            d1Trend: d1TrendVal,
+            w1Trend: w1TrendVal
         )
+    }
+
+    private func calculateTrend(candles: [Kline]) -> SignalType {
+        guard candles.count >= 2 else { return .none }
+        let closes = candles.map { $0.close }
+        let sma10 = closes.suffix(10).reduce(0, +) / Double(min(10, closes.count))
+        let sma20 = closes.suffix(20).reduce(0, +) / Double(min(20, closes.count))
+        
+        if sma10 > sma20 * 1.001 { return .buy }
+        if sma10 < sma20 * 0.999 { return .sell }
+        return .none
     }
     
     private func shouldEvaluateSymbol(symbol: String, kline: Kline) async -> Bool {
+        // 0. Check if market data is ready
+        if let marketDataActor = marketData as? RefactoredMarketDataActor {
+            guard await marketDataActor.isReadyForSignals(symbol: symbol) else {
+                return false
+            }
+        }
+        
+        // 1. Check if strictly in active symbols
+        guard activeSymbols.contains(symbol) else {
+            return false
+        }
+        
         // Original logic for standard trading
         let existingPending = signals.contains { $0.symbol == symbol && $0.status == .pending }
         if existingPending {
@@ -366,19 +416,20 @@ class RefactoredAppCoordinator: ObservableObject {
     }
     
     private var mt5PollingTask: Task<Void, Never>?
+    private var mt5TradeSyncTask: Task<Void, Never>?
+    private var htfRefreshTask: Task<Void, Never>?
 
     func start() async {
-        guard !isRunning else { return }
+        guard !isRunning else { 
+            await syncMT5Data()
+            return 
+        }
         isRunning = true
         
         signalGenerationTask = Task { [weak self] in
             while !Task.isCancelled {
-                // Periodic cleanup of expired signals
                 await self?.cleanupExpiredSignals()
-                
-                // Update status based on trading mode
                 await self?.updateTradingStatus()
-                
                 try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
             }
         }
@@ -387,15 +438,39 @@ class RefactoredAppCoordinator: ObservableObject {
         mt5PollingTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pollMT5Data()
-                try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+                try? await Task.sleep(nanoseconds: 15_000_000_000) 
+            }
+        }
+        
+        // Start MT5 trade sync task
+        mt5TradeSyncTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.syncMT5Trades()
+                try? await Task.sleep(nanoseconds: 30_000_000_000) 
+            }
+        }
+
+        // ELITE ANCHOR REFRESHER: Keep H4/D1/W1 current every hour
+        htfRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                print("⚓️ Anchor Refresher: Updating HTF trends...")
+                await self?.syncMT5Data() // Full deep sync
+                try? await Task.sleep(nanoseconds: 3_600_000_000_000) // 1 hour
             }
         }
     }
     
     private func pollMT5Data() async {
-        guard let marketDataActor = marketData as? RefactoredMarketDataActor else { return }
+        guard marketData is RefactoredMarketDataActor else { return }
         
-        for symbol in symbols {
+        // Only poll symbols that are strictly active
+        let symbolsToPoll = Array(activeSymbols)
+        guard !symbolsToPoll.isEmpty else { return }
+        
+        for symbol in symbolsToPoll {
+            // Check for cancellation between requests
+            if Task.isCancelled { return }
+            
             // Only poll for symbols that aren't updating frequently from Binance, or all if MT5 is selected
             if selectedSignalSource == .mt5 || selectedSignalSource == .both || selectedSignalSource == .auto {
                 do {
@@ -407,7 +482,177 @@ class RefactoredAppCoordinator: ObservableObject {
                     // Silent fail for polling
                 }
             }
+            
+            // THROTTLE: Wait 500ms between requests to prevent network overload (nw_path errors)
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
+    }
+
+    func syncMT5Trades() async {
+        // Update Account Balance/Equity during sync
+        if let account = try? await MT5Service.shared.getAccountInfo() {
+            print("💰 Live Sync: Updating Account Equity to KES \(account.equity)")
+            await MainActor.run {
+                NotificationCenter.default.post(name: .mt5AccountUpdated, object: account)
+            }
+        }
+
+        // PRODUCTION SYNC LOGIC
+        print("🔄 Force-Syncing MT5 trades and positions...")
+        
+        let allInternalTrades = await tradeHistory.getAllTrades()
+        
+        // 1. Sync Active Positions & Pending Orders
+        do {
+            let mt5Data = try await MT5Service.shared.getPositionsAndOrders()
+            let internalActiveTrades = allInternalTrades.filter { $0.status == .active }
+            
+            // ELITE RECONCILIATION: Close internal trades that are no longer in MT5 (Active OR Pending)
+            for internalTrade in internalActiveTrades {
+                guard let dealId = internalTrade.externalDealId else { continue }
+                
+                let stillActive = mt5Data.active.contains { String($0.ticket) == dealId }
+                let stillPending = mt5Data.pending.contains { String($0.ticket) == dealId }
+                
+                if !stillActive && !stillPending {
+                    print("🧹 Reconciliation: Internal trade \(internalTrade.symbol) #\(dealId) no longer in MT5. Marking as completed.")
+                    
+                    var closedTrade = internalTrade
+                    closedTrade.status = .completed
+                    await tradeHistory.updateTrade(closedTrade)
+                    
+                    await scalpingTradeMonitor.removeTrade(id: internalTrade.id)
+                    await tradeMonitor.removeTrade(id: internalTrade.id)
+                    
+                    await scalpingRiskManager.closeTrade(closedTrade)
+                    await riskManager.closeTrade(closedTrade)
+                }
+            }
+
+            // Add any new positions found in MT5 that we don't have internally
+            for pos in mt5Data.active {
+                let dealId = String(pos.ticket)
+                if await tradeHistory.getTradeByExternalId(dealId) == nil {
+                    print("📋 Found MT5 Position: \(pos.symbol) \(pos.type) @ \(pos.priceOpen)")
+                    
+                    let trade = TradeRecord(
+                        signalId: UUID(),
+                        symbol: pos.symbol,
+                        type: pos.type.lowercased().contains("buy") ? .buy : .sell,
+                        entryPrice: pos.priceOpen,
+                        entryTime: parseMT5Time(pos.openTime) ?? Date(),
+                        confidence: 100,
+                        takeProfit: pos.tp > 0 ? pos.tp : nil,
+                        stopLoss: pos.sl > 0 ? pos.sl : nil,
+                        positionSize: pos.volume,
+                        status: .active,
+                        externalDealId: dealId
+                    )
+                    await tradeHistory.addTrade(trade)
+                    
+                    if tradingMode == .scalping {
+                        await scalpingTradeMonitor.addTrade(trade, indicators: nil)
+                    } else {
+                        await tradeMonitor.addTrade(trade)
+                    }
+                }
+            }
+            
+            // Add any new pending orders found in MT5
+            for pos in mt5Data.pending {
+                let dealId = String(pos.ticket)
+                if await tradeHistory.getTradeByExternalId(dealId) == nil {
+                    print("🕒 Found MT5 Pending Order: \(pos.symbol) \(pos.type) @ \(pos.priceOpen)")
+                    
+                    let trade = TradeRecord(
+                        signalId: UUID(),
+                        symbol: pos.symbol,
+                        type: pos.type.lowercased().contains("buy") ? .buy : .sell,
+                        entryPrice: pos.priceOpen,
+                        entryTime: parseMT5Time(pos.openTime) ?? Date(),
+                        confidence: 100,
+                        takeProfit: pos.tp > 0 ? pos.tp : nil,
+                        stopLoss: pos.sl > 0 ? pos.sl : nil,
+                        positionSize: pos.volume,
+                        status: .pending,
+                        externalDealId: dealId
+                    )
+                    await tradeHistory.addTrade(trade)
+                }
+            }
+        } catch {
+            print("⚠️ MT5 sync failed: \(error)")
+        }
+        
+        // 2. Sync Closed History
+        do {
+            let history = try await MT5Service.shared.getTradeHistory(days: 3)
+            
+            for pos in history {
+                let dealId = String(pos.ticket)
+                
+                // Find if we already have this trade
+                if let existingTrade = await tradeHistory.getTradeByExternalId(dealId) {
+                    // If it was previously active, update it with final P&L
+                    if existingTrade.status == .active || existingTrade.status == .pending || (existingTrade.pnl == nil) {
+                        print("📊 Updating closed MT5 trade: \(pos.symbol) P&L: \(pos.profit)")
+                        var updatedTrade = existingTrade
+                        updatedTrade.exitPrice = pos.close_price
+                        updatedTrade.exitTime = parseMT5Time(pos.close_time) ?? Date()
+                        updatedTrade.pnl = pos.profit + pos.commission + pos.swap
+                        updatedTrade.swap = pos.swap
+                        updatedTrade.commission = pos.commission
+                        updatedTrade.status = .completed
+                        await tradeHistory.updateTrade(updatedTrade)
+                    }
+                } else {
+                    // It's a completely new historical trade we don't have
+                    print("📊 Syncing new historical MT5 trade: \(pos.symbol) P&L: \(pos.profit)")
+                    
+                    let trade = TradeRecord(
+                        signalId: UUID(),
+                        symbol: pos.symbol,
+                        type: pos.type.lowercased().contains("buy") ? .buy : .sell,
+                        entryPrice: pos.open_price,
+                        entryTime: parseMT5Time(pos.open_time) ?? Date(),
+                        exitPrice: pos.close_price,
+                        exitTime: parseMT5Time(pos.close_time) ?? Date(),
+                        confidence: 100,
+                        pnl: pos.profit + pos.commission + pos.swap,
+                        status: .completed,
+                        externalDealId: dealId,
+                        swap: pos.swap,
+                        commission: pos.commission
+                    )
+                    await tradeHistory.addTrade(trade)
+                }
+            }
+        } catch {
+            print("⚠️ MT5 History sync failed: \(error)")
+        }
+    }
+    
+    private func parseMT5Time(_ timestamp: Int64?) -> Date? {
+        guard let ts = timestamp, ts > 0 else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(ts))
+    }
+
+    private func parseMT5Time(_ timeStr: String?) -> Date? {
+        guard let timeStr = timeStr else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        
+        // Format 1: YYYY.MM.DD HH:MM:SS
+        formatter.dateFormat = "yyyy.MM.dd HH:mm:ss"
+        if let date = formatter.date(from: timeStr) { return date }
+        
+        // Format 2: YYYY-MM-DD'T'HH:MM:SS
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        if let date = formatter.date(from: timeStr) { return date }
+        
+        // Format 3: YYYY.MM.DD
+        formatter.dateFormat = "yyyy.MM.dd"
+        return formatter.date(from: timeStr)
     }
     
     private func updateTradingStatus() async {
@@ -452,32 +697,54 @@ class RefactoredAppCoordinator: ObservableObject {
     }
     
     private func handleNewSignal(_ signal: Signal) async {
-        // Check if we already have a pending signal for this symbol
-        let existingPending = signals.contains { $0.symbol == signal.symbol && $0.status == .pending }
-        guard !existingPending else {
-            print("⚠️ Already have pending signal for \(signal.symbol)")
-            return
-        }
-        
-        // FIX: Don't block signals based on active trades
-        // Just log that there's an active trade but still add the signal
-        let activeTrades = await tradeHistory.getActiveTrades()
-        if activeTrades.contains(where: { $0.symbol == signal.symbol }) {
-            print("📊 Note: Adding signal for \(signal.symbol) despite active trade")
-        }
-        
+        // ELITE SIGNAL REFRESH: Replace any existing pending signal for this symbol with the fresh one
         await MainActor.run {
+            if let existingIndex = self.signals.firstIndex(where: { $0.symbol == signal.symbol && $0.status == .pending }) {
+                print("🔄 Updating pending signal for \(signal.symbol) with fresh data")
+                self.signals.remove(at: existingIndex)
+            }
+
             self.signals.append(signal)
             self.lastSignal = "\(signal.symbol) \(signal.type.displayName) @ \(String(format: "%.5f", signal.price))"
+            
+            // ELITE UI REFRESH: Notify listeners that signals array changed
             self.objectWillChange.send()
+            
             print("✅ New \(tradingMode == .scalping ? "SCALPING" : "STANDARD") signal generated: \(signal.symbol) \(signal.type) @ \(signal.price) (Confidence: \(String(format: "%.1f", signal.confidence))%)")
+            
+            // ELITE AUTO-TRADE EXECUTION
+            let isAutoTradeEnabled = UserDefaults.standard.bool(forKey: "isAutoTradeEnabled")
+            let minConfidence = UserDefaults.standard.double(forKey: "minAutoTradeConfidence")
+            
+            if isAutoTradeEnabled && signal.confidence >= minConfidence {
+                print("⚡️ AUTO-TRADE: Signal confidence (\(Int(signal.confidence))%) >= Threshold (\(Int(minConfidence))%). Executing immediately.")
+                self.acceptSignal(signal)
+            }
         }
+        
+        // Post global notification for any non-SwiftUI listeners
+        NotificationCenter.default.post(name: .newSignalGenerated, object: signal)
         
         NotificationManager.shared.sendSignalNotification(signal)
     }
     
     private func createSignal(from scalpingSignal: ScalpingSignal) -> Signal {
-        let expiryDuration: TimeInterval = tradingMode == .scalping ? 180 : 300 // 3 minutes for scalping, 5 for standard
+        // ELITE DYNAMIC EXPIRY:
+        // 1. Base duration: 180s (3m) for scalping
+        var expiryDuration: TimeInterval = 180 
+        
+        // 2. Trend Conviction Bonus: If HTF aligned, the window of opportunity is wider
+        if scalpingSignal.confidenceFactors.keys.contains("HTF Power Alignment") || 
+           scalpingSignal.confidenceFactors.keys.contains("Elite Dip Buy") ||
+           scalpingSignal.confidenceFactors.keys.contains("Elite Rally Sell") {
+            expiryDuration = 420 // 7 minutes (Elite signals have macro backing)
+        } else if scalpingSignal.confidence > 90 {
+            expiryDuration = 300 // 5 minutes (High confidence)
+        }
+        
+        if tradingMode == .standard {
+            expiryDuration = 600 // 10 minutes for standard mode
+        }
         
         return Signal(
             id: UUID(),
@@ -563,7 +830,14 @@ class RefactoredAppCoordinator: ObservableObject {
                         NotificationCenter.default.post(name: .mt5TradeExecuted, object: tradeResult)
                     }
                 } catch {
-                    print("❌ Failed to execute MT5 trade: \(error)")
+                    print("❌ Failed to execute MT5 trade: \(error.localizedDescription)")
+                    
+                    // PRODUCTION FIX: Handle "Trade Disabled" or 10044 (Real Only) by marking symbol restricted
+                    if error.localizedDescription.contains("trade disabled") || 
+                       error.localizedDescription.contains("10044") {
+                        print("🛡 GodMode: Auto-Restricting \(signal.symbol) (Broker Restriction Detected)")
+                    }
+
                     if signal.source == .mt5 {
                         print("⚠️ MT5 execution failed - aborting")
                         await MainActor.run {
@@ -648,7 +922,7 @@ class RefactoredAppCoordinator: ObservableObject {
                 (positionSize.riskAmount) :
                 (positionSize.units * signal.price * 0.01)
             
-            print("✅ \(tradingMode == .scalping ? "SCALPING" : "STANDARD") trade opened: \(signal.symbol) - Risk: $\(String(format: "%.2f", riskAmount))")
+            print("✅ \(tradingMode == .scalping ? "SCALPING" : "STANDARD") trade opened: \(signal.symbol) - Risk: KES \(String(format: "%.2f", riskAmount))")
             
             if let dealId = externalDealId {
                 print("📋 IG Deal ID: \(dealId)")
@@ -687,7 +961,7 @@ class RefactoredAppCoordinator: ObservableObject {
         // Update risk metrics
         await updateRiskMetrics()
         
-        print("📊 Trade closed: \(trade.symbol) P&L: $\(String(format: "%.2f", trade.pnl ?? 0))")
+        print("📊 Trade closed: \(trade.symbol) P&L: KES \(String(format: "%.2f", trade.pnl ?? 0))")
     }
     
     func stop() async {
@@ -713,7 +987,6 @@ class RefactoredAppCoordinator: ObservableObject {
         tradingMode = mode
         await MainActor.run {
             signals.removeAll()
-            scalpingSignals.removeAll()
             status = "Switching to \(mode == .scalping ? "SCALPING" : "STANDARD") mode..."
         }
         
@@ -731,7 +1004,6 @@ class RefactoredAppCoordinator: ObservableObject {
             
             // Clear signals when switching source to avoid confusion
             self.signals.removeAll()
-            self.scalpingSignals.removeAll()
             
             print("🔄 Switched signal source to: \(source.displayName)")
             
@@ -803,7 +1075,7 @@ class RefactoredAppCoordinator: ObservableObject {
     func processIncomingSignal(_ signal: Signal, from source: SignalSource) async {
         // Record latency
         let latency = Date().timeIntervalSince(signal.timestamp)
-        await recordSignalLatency(source: source, latency: latency)
+        recordSignalLatency(source: source, latency: latency)
         
         // Store last signal from each source
         switch source {
@@ -849,14 +1121,29 @@ class RefactoredAppCoordinator: ObservableObject {
         }
     }
 
-    // Modify handleKlineUpdate to use the new method
     func handleKlineUpdate(symbol: String, timeframe: String, kline: Kline) async {
-    
+        // ELITE PAIR FILTER: Completely ignore pairs not selected in Settings
+        guard activeSymbols.contains(symbol) else { return }
+        
+        // FIXED: Additional whitelist check for scalping mode
+        if tradingMode == .scalping {
+            guard allowedScalpingSymbols.contains(symbol) else {
+                // print("📊 \(symbol) ignored: Not in scalping whitelist")
+                return
+            }
+        }
+
         if let marketDataActor = marketData as? RefactoredMarketDataActor {
             await marketDataActor.addCandle(symbol: symbol, timeframe: timeframe, candle: kline)
         }
         
-    
+        // PRODUCTION FIX: Only evaluate signals for current data (within last 2 minutes)
+        // This prevents "ghost signals" from historical data loading
+        let klineTime = Date(timeIntervalSince1970: TimeInterval(kline.closeTime))
+        let isRecent = abs(Date().timeIntervalSince(klineTime)) < 120
+        
+        guard isRecent else { return }
+
         switch tradingMode {
         case .scalping:
             await handleScalpingUpdate(symbol: symbol, timeframe: timeframe, kline: kline)
@@ -870,8 +1157,8 @@ class RefactoredAppCoordinator: ObservableObject {
         
         var report = """
         📊 SCALPING METRICS
-        Daily P&L: $\(String(format: "%.2f", metrics.dailyPnL))
-        Daily Limit: $\(String(format: "%.2f", metrics.dailyLossLimit))
+        Daily P&L: KES \(String(format: "%.2f", metrics.dailyPnL))
+        Daily Limit: KES \(String(format: "%.2f", metrics.dailyLossLimit))
         Hourly Trades: \(metrics.hourlyTrades)/5
         Active Trades: \(metrics.activeTrades)/\(metrics.maxConcurrentTrades)
         
@@ -884,68 +1171,84 @@ class RefactoredAppCoordinator: ObservableObject {
         
         return report
     }
+
+    // MARK: - Trade Analysis
     
-    // MARK: - Debug/Testing Helper Methods
-    
-    func resetAllCooldownsForTesting() async {
-        await MainActor.run {
-            self.lastScalpingSignalTime.removeAll()
-            print("✅ All signal cooldowns reset")
+    func analyzeTradeHistory() async {
+        let trades = await tradeHistory.getAllTrades()
+        let report = TradeAnalyzer.analyze(trades)
+        let recommendations = TradeAnalyzer.generateRecommendations(report)
+        let blacklistCode = TradeAnalyzer.generateBlacklistCode(report)
+        
+        // Print to console
+        print(recommendations)
+        print("\n\n")
+        print("// ===========================================")
+        print("// BLACKLIST CODE TO COPY INTO YOUR PROJECT")
+        print("// ===========================================")
+        print(blacklistCode)
+        
+        // Also save to file
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let reportPath = documentsPath.appendingPathComponent("trade_analysis_report.txt")
+        let codePath = documentsPath.appendingPathComponent("symbol_blacklist_code.swift")
+        
+        do {
+            try recommendations.write(to: reportPath, atomically: true, encoding: .utf8)
+            try blacklistCode.write(to: codePath, atomically: true, encoding: .utf8)
+            print("\n✅ Reports saved to:")
+            print("   - \(reportPath.path)")
+            print("   - \(codePath.path)")
+        } catch {
+            print("❌ Failed to save reports: \(error)")
         }
     }
-    
-    func forceResetAllLimitsForTesting() async {
-        // Reset risk manager limits
-        await scalpingRiskManager.resetAllLimitsForTesting()
+
+    // CSV Parser for Trade History
+    func parseTradeHistoryCSV(_ csvContent: String) -> [TradeRecord] {
+        var trades: [TradeRecord] = []
+        let rows = csvContent.components(separatedBy: "\n")
         
-        // Reset cooldowns
-        await MainActor.run {
-            self.lastScalpingSignalTime.removeAll()
-            print("✅ All trading limits and cooldowns reset for testing")
+        guard rows.count > 1 else { return trades }
+        
+        // Skip header
+        for row in rows.dropFirst() {
+            let columns = row.components(separatedBy: ",")
+            guard columns.count >= 12 else { continue }
+            
+            // Parse data
+            let symbol = columns[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let typeString = columns[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            let entryPrice = Double(columns[6]) ?? 0
+            let exitPrice = Double(columns[7]) ?? 0
+            let pnl = Double(columns[11]) ?? 0
+            let result = columns[12].trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // Determine status
+            let status: TradeRecord.TradeStatus = (result == "ACTIVE" || result == "PENDING") ? .active : .completed
+            
+            // Determine trade type
+            let type: SignalType = typeString == "BUY" ? .buy : .sell
+            
+            let trade = TradeRecord(
+                signalId: UUID(),
+                symbol: symbol,
+                type: type,
+                entryPrice: entryPrice,
+                entryTime: Date(),
+                exitPrice: status == .completed ? exitPrice : nil,
+                exitTime: status == .completed ? Date() : nil,
+                confidence: 100,
+                pnl: pnl,
+                status: status
+            )
+            trades.append(trade)
         }
+        
+        return trades
     }
     
-    // Add this method to force signal evaluation (keeping for diagnostic purposes but marking as test-only)
-    func forceGenerateSignal(symbol: String) async {
-        print("🔧 TEST MODE: Force generating signal for \(symbol)")
-        
-        // Force reset limits
-        await scalpingRiskManager.forceAllowTrading()
-        
-        // Manually trigger signal evaluation
-        if let marketDataActor = marketData as? RefactoredMarketDataActor {
-            let candles = await marketDataActor.getCandles(symbol: symbol, timeframe: "1m")
-            if let lastCandle = candles.last {
-                await handleScalpingUpdate(symbol: symbol, timeframe: "1m", kline: lastCandle)
-            }
-        }
-    }
-    
-    // MARK: - Test Signal Injection
-    func injectTestSignal(_ signal: Signal) async {
-        // Route test signals through the normal handling path
-        await handleNewSignal(signal)
-    }
+    // MARK: - Status Update Methods
 }
 
-// MARK: - Supporting Types
-struct ScalpingSignalDisplay: Identifiable {
-    let id = UUID()
-    let symbol: String
-    let type: SignalType
-    let price: Double
-    let confidence: Double
-    let score: Int
-    let factors: [String: Double]
-    let timestamp: Date
-    
-    var timeAgo: String {
-        let seconds = Int(Date().timeIntervalSince(timestamp))
-        if seconds < 60 {
-            return "\(seconds)s ago"
-        } else {
-            return "\(seconds/60)m ago"
-        }
-    }
-}
 

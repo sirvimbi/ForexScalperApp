@@ -11,7 +11,10 @@ actor TradeMonitor {
     init(marketData: MarketDataProvider, tradeHistory: RefactoredTradeHistoryManager) {
         self.marketData = marketData
         self.tradeHistory = tradeHistory
-        startMonitoring()
+        
+        Task { [weak self] in
+            await self?.startMonitoringLogic()
+        }
     }
     
     func setOnTradeClosedCallback(_ callback: @escaping (TradeRecord) async -> Void) {
@@ -26,8 +29,13 @@ actor TradeMonitor {
     func getActiveTradeCount() -> Int {
         return activeTrades.count
     }
+
+    func removeTrade(id: UUID) {
+        activeTrades.removeValue(forKey: id)
+        print("🧹 Monitor: Removed trade \(id) from tracking")
+    }
     
-    private func startMonitoring() {
+    private func startMonitoringLogic() {
         priceUpdateTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.checkActiveTrades()
@@ -37,7 +45,7 @@ actor TradeMonitor {
     }
     
     private func checkActiveTrades() async {
-        for (id, trade) in activeTrades {
+        for trade in activeTrades.values {
             guard let currentPrice = await marketData.getLatestPrice(symbol: trade.symbol) else {
                 continue
             }
@@ -91,7 +99,7 @@ actor TradeMonitor {
         // Send notifications for UI to update immediately
         await postTradeClosedNotifications(updatedTrade)
         
-        print("📊 Trade closed: \(trade.symbol) \(reason) | P&L: $\(String(format: "%.2f", pnl)) (\(String(format: "%.2f", pnlPercent))%)")
+        print("📊 Trade closed: \(trade.symbol) \(reason) | P&L: KES \(String(format: "%.2f", pnl)) (\(String(format: "%.2f", pnlPercent))%)")
     }
     
     // Helper method to post notifications

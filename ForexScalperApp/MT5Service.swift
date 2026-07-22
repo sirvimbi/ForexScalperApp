@@ -4,6 +4,16 @@ import Foundation
 class MT5Service {
     static let shared = MT5Service()
     
+    // PRODUCTION NETWORK OPTIMIZATION: Reuse session to prevent nw_path evaluation errors
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 25.0
+        config.timeoutIntervalForResource = 30.0
+        config.waitsForConnectivity = true
+        config.httpMaximumConnectionsPerHost = 10
+        return URLSession(configuration: config)
+    }()
+    
     private var customBaseURL: String?
     private var customAuthToken: String?
     
@@ -14,10 +24,24 @@ class MT5Service {
     }
     
     private var baseURL: String {
-        if let custom = customBaseURL { return custom }
-        let savedURL = UserDefaults.standard.string(forKey: "mt5BridgeURL") ?? "http://localhost:8891"
+        if let custom = customBaseURL { 
+            // PRODUCTION FIX: Automatically redirect from EA port 8890 to Bridge port 8891
+            if custom.contains(":8890") {
+                let fixed = custom.replacingOccurrences(of: ":8890", with: ":8891")
+                print("⚠️ MT5: Redirecting from EA port 8890 to Bridge port 8891 for God Mode logic.")
+                return fixed
+            }
+            return custom 
+        }
+        let savedURL = UserDefaults.standard.string(forKey: "mt5BridgeURL") ?? "http://127.0.0.1:8891"
         return savedURL.hasSuffix("/") ? String(savedURL.dropLast()) : savedURL
     }
+    
+    private var lastWorkingPath: String?
+    
+    // TRADABILITY CACHE: Prevent 500 errors by knowing which symbols are disabled
+    private var symbolTradeMode: [String: Int] = [:]
+    private var symbolVolumeLimits: [String: (min: Double, max: Double, step: Double)] = [:]
     
     func setBaseURL(_ url: String) {
         self.customBaseURL = url.hasSuffix("/") ? String(url.dropLast()) : url
@@ -58,7 +82,7 @@ class MT5Service {
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)
                 print("🌐 MT5: Attempting optional initialization at \(url.absoluteString)...")
                 
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await session.data(for: request)
                 
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 {
@@ -98,7 +122,7 @@ class MT5Service {
                 request.setValue(authBuffer, forHTTPHeaderField: "Authorization")
                 
                 print("🔍 MT5: Checking connection at \(path)...")
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await session.data(for: request)
                 
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                     if path.contains("status") {
@@ -143,8 +167,12 @@ class MT5Service {
         default: mt5Timeframe = timeframe.uppercased()
         }
         
-        // Try paths: /v1/history/prices (matches bridge), /api/mt5/candles, /candles
-        let paths = ["/v1/history/prices", "/api/mt5/candles", "/candles"]
+        // Try the last working path first to reduce network chatter and 404s
+        var paths = ["/v1/history/prices", "/api/mt5/candles", "/candles"]
+        if let working = lastWorkingPath, let idx = paths.firstIndex(of: working) {
+            paths.remove(at: idx)
+            paths.insert(working, at: 0)
+        }
         
         for path in paths {
             let urlString = "\(baseURL)\(path)?symbol=\(cleanSymbol)&time_frame=\(mt5Timeframe)&count=\(count)"
@@ -152,19 +180,29 @@ class MT5Service {
             
             var request = URLRequest(url: url)
             request.setValue(authBuffer, forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = 30.0 // INCREASED: Allow time for broker history download
             
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await session.data(for: request)
                 
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    let mt5Candles = try JSONDecoder().decode([MT5Candle].self, from: data)
+                    let priceResponse = try JSONDecoder().decode(MT5PriceHistoryResponse.self, from: data)
+                    let mt5Candles = priceResponse.data
+                    
+                    self.lastWorkingPath = path // Cache success
+                    
+                    // PRODUCTION FIX: If we requested data but got back 0 bars, don't return an empty array
+                    if mt5Candles.isEmpty {
+                         continue 
+                    }
+
                     return mt5Candles.map { candle in
                         Kline(
                             open: candle.open,
                             high: candle.high,
                             low: candle.low,
                             close: candle.close,
-                            volume: candle.tick_volume,
+                            volume: candle.totalVolume,
                             closeTime: Int(candle.time)
                         )
                     }
@@ -183,8 +221,9 @@ class MT5Service {
         // Clean symbol (remove slashes, e.g., EUR/USD -> EURUSD)
         let cleanSymbol = signal.symbol.replacingOccurrences(of: "/", with: "")
         
-        // Try paths: /v1/order (matches bridge), /api/mt5/trade, /trade
-        let paths = ["/v1/order", "/api/mt5/trade", "/trade"]
+        // Try the last working path first to ensure fast execution
+        let paths = ["/v1/order"] // Standardized on /v1/order for God Mode
+
         var lastError: Error?
         
         for path in paths {
@@ -194,6 +233,7 @@ class MT5Service {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue(authBuffer, forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = 10.0
             
             // MT5 precise options for God Mode - Matching nodejs bridge SendOrderRequest
             let body: [String: Any] = [
@@ -212,23 +252,40 @@ class MT5Service {
             
             do {
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)
-                let (data, response) = try await URLSession.shared.data(for: request)
+                print("🌐 MT5: Sending trade to \(url.absoluteString)...")
+                
+                let (data, response) = try await session.data(for: request)
                 
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 {
                         let tradeResult = try JSONDecoder().decode(MT5TradeResult.self, from: data)
                         if tradeResult.retcode != 10009 && tradeResult.retcode != 10008 {
-                            throw TradingError.apiError("MT5 Execution Failed: Code \(tradeResult.retcode)")
+                            print("❌ MT5: Execution failed with retcode \(tradeResult.retcode): \(tradeResult.comment ?? "No comment")")
+                            throw TradingError.apiError("MT5 Error \(tradeResult.retcode): \(tradeResult.comment ?? "Execution failed")")
                         }
                         return tradeResult
-                    } else if httpResponse.statusCode == 404 {
-                        continue
-                    } else {
-                        let errorMsg = String(data: data, encoding: .utf8) ?? "Unknown error"
-                        lastError = TradingError.apiError("Status \(httpResponse.statusCode): \(errorMsg)")
+                    } else if httpResponse.statusCode == 503 {
+                        // POTENTIAL FIX: Socket hang ups usually indicate EA overload. Retry once after delay.
+                        print("⚠️ MT5: EA reported 503 (Overload/Hangup). Retrying in 1s...")
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        continue 
+                    } else if (400...499).contains(httpResponse.statusCode) {
+                        let errorMsg = String(data: data, encoding: .utf8) ?? ""
+                        if errorMsg.lowercased().contains("symbol not found") || errorMsg.lowercased().contains("details") {
+                            print("❌ MT5: Symbol or configuration error (\(httpResponse.statusCode)): \(errorMsg)")
+                            throw TradingError.apiError("MT5 Config Error: \(errorMsg)")
+                        }
+                        print("⚠️ MT5: Path \(path) returned \(httpResponse.statusCode). Body: \(errorMsg)")
+                        continue // Try next path
+                    } else if httpResponse.statusCode >= 500 {
+                        // CRITICAL: Stop retrying on 500 Server Errors (like invalid stops) as the EA already tried and failed
+                        let errorMsg = String(data: data, encoding: .utf8) ?? "Unknown server error"
+                        print("❌ MT5: Terminal/EA Error (500): \(errorMsg)")
+                        throw TradingError.apiError("MT5 Execution Error: \(errorMsg)")
                     }
                 }
             } catch {
+                print("⚠️ MT5: Error during trade execution at \(path): \(error.localizedDescription)")
                 lastError = error
             }
         }
@@ -238,8 +295,7 @@ class MT5Service {
     
     // MARK: - Order History & Positions
     
-    func getOpenPositions() async throws -> [MT5Position] {
-        // Try paths: /v1/order/list, /api/mt5/positions, /positions
+    func getPositionsAndOrders() async throws -> (active: [MT5Position], pending: [MT5Position]) {
         let paths = ["/v1/order/list", "/api/mt5/positions", "/positions"]
         
         for path in paths {
@@ -247,18 +303,21 @@ class MT5Service {
             
             var request = URLRequest(url: url)
             request.setValue(authBuffer, forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = 10.0
             
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await session.data(for: request)
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    return try JSONDecoder().decode([MT5Position].self, from: data)
+                    let wrapper = try JSONDecoder().decode(MT5OrderListResponse.self, from: data)
+                    return (active: wrapper.opened, pending: wrapper.pending)
                 }
             } catch {
+                print("⚠️ MT5: Failed to fetch positions from \(path): \(error)")
                 continue
             }
         }
         
-        throw TradingError.apiError("Failed to fetch positions")
+        return (active: [], pending: [])
     }
     
     func getAccountInfo() async throws -> MT5AccountInfo {
@@ -271,8 +330,12 @@ class MT5Service {
             request.setValue(authBuffer, forHTTPHeaderField: "Authorization")
             
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await session.data(for: request)
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    // Debug print to verify figures
+                    if let jsonString = String(data: data, encoding: .utf8) {
+                        print("📊 MT5 Account Raw: \(jsonString)")
+                    }
                     return try JSONDecoder().decode(MT5AccountInfo.self, from: data)
                 }
             } catch {
@@ -296,7 +359,7 @@ class MT5Service {
             request.httpBody = try JSONSerialization.data(withJSONObject: ["ticket": ticket])
             
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await session.data(for: request)
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                     let result = try JSONDecoder().decode(MT5TradeResult.self, from: data)
                     return result.retcode == 10009
@@ -308,6 +371,147 @@ class MT5Service {
         
         return false
     }
+
+    func isSymbolTradable(_ symbol: String) async -> Bool {
+        let cleanSymbol = symbol.replacingOccurrences(of: "/", with: "")
+        
+        // Return cached value if we have it
+        if let mode = symbolTradeMode[cleanSymbol] {
+            return mode == 0
+        }
+        
+        do {
+            let info = try await getSymbolInfo(cleanSymbol)
+            symbolTradeMode[cleanSymbol] = info.trade_mode
+            symbolVolumeLimits[cleanSymbol] = (
+                min: info.volume_min ?? 0.01,
+                max: info.volume_max ?? 100.0,
+                step: info.volume_step ?? 0.01
+            )
+            return info.trade_mode == 0
+        } catch {
+            return true 
+        }
+    }
+
+    func getVolumeLimits(for symbol: String) async -> (min: Double, max: Double, step: Double) {
+        let cleanSymbol = symbol.replacingOccurrences(of: "/", with: "")
+        if let limits = symbolVolumeLimits[cleanSymbol] {
+            return limits
+        }
+        
+        // If not in cache, try to fetch
+        _ = await isSymbolTradable(symbol)
+        return symbolVolumeLimits[cleanSymbol] ?? (0.01, 100.0, 0.01)
+    }
+
+    func getSymbolInfo(_ symbol: String) async throws -> MT5SymbolInfo {
+        let urlString = "\(baseURL)/v1/symbol/info?symbol=\(symbol)"
+        guard let url = URL(string: urlString) else { throw TradingError.apiError("Invalid URL") }
+        
+        var request = URLRequest(url: url)
+        request.setValue(authBuffer, forHTTPHeaderField: "Authorization")
+        
+        let (data, response) = try await session.data(for: request)
+        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+            return try JSONDecoder().decode(MT5SymbolInfo.self, from: data)
+        }
+        throw TradingError.apiError("Symbol info unavailable")
+    }
+
+    func modifyPosition(ticket: Int, sl: Double, tp: Double) async throws -> Bool {
+        let paths = ["/v1/order/modify", "/api/mt5/modify", "/modify"]
+        
+        for path in paths {
+            guard let url = URL(string: "\(baseURL)\(path)") else { continue }
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(authBuffer, forHTTPHeaderField: "Authorization")
+            
+            let body: [String: Any] = [
+                "ticket": ticket,
+                "sl": sl,
+                "tp": tp
+            ]
+            
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            
+            do {
+                let (data, response) = try await session.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    let result = try JSONDecoder().decode(MT5TradeResult.self, from: data)
+                    return result.retcode == 10009
+                }
+            } catch {
+                continue
+            }
+        }
+        
+        return false
+    }
+
+    func getTradeHistory(days: Int = 30) async throws -> [MT5HistoryPosition] {
+        let paths = ["/v1/history/orders", "/api/mt5/history"]
+        
+        // Calculate dates
+        let toDate = Date()
+        let fromDate = Calendar.current.date(byAdding: .day, value: -days, to: toDate)!
+        
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        let fromStr = formatter.string(from: fromDate).replacingOccurrences(of: "Z", with: "")
+        let toStr = formatter.string(from: toDate).replacingOccurrences(of: "Z", with: "")
+        
+        for path in paths {
+            let urlString = "\(baseURL)\(path)?mode=positions&from_date=\(fromStr)&to_date=\(toStr)"
+            guard let url = URL(string: urlString) else { continue }
+            
+            var request = URLRequest(url: url)
+            request.setValue(authBuffer, forHTTPHeaderField: "Authorization")
+            
+            do {
+                let (data, response) = try await session.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    // The bridge returns a wrapped object with a "data" array
+                    let historyResponse = try JSONDecoder().decode(MT5HistoryResponse.self, from: data)
+                    return historyResponse.data
+                }
+            } catch {
+                print("⚠️ MT5: History fetch failed for \(path): \(error)")
+                continue
+            }
+        }
+        
+        return []
+    }
+
+    func setTrackedSymbols(_ symbols: [String]) async throws -> Bool {
+        let paths = ["/v1/track/prices", "/api/mt5/track"]
+        
+        for path in paths {
+            guard let url = URL(string: "\(baseURL)\(path)") else { continue }
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(authBuffer, forHTTPHeaderField: "Authorization")
+            
+            let body = ["symbols": symbols]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            
+            do {
+                let (data, response) = try await session.data(for: request)
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    return true
+                }
+            } catch {
+                continue
+            }
+        }
+        return false
+    }
 }
 
 // MARK: - Internal MT5 Helper Models
@@ -317,13 +521,57 @@ struct MT5StatusResponse: Codable {
     let message: String?
 }
 
+struct MT5SymbolInfo: Codable {
+    let name: String
+    let trade_mode: Int
+    let spread: Int
+    let digits: Int
+    let volume_min: Double?
+    let volume_max: Double?
+    let volume_step: Double?
+}
+
 struct MT5Candle: Codable {
     let time: TimeInterval
     let open: Double
     let high: Double
     let low: Double
     let close: Double
-    let tick_volume: Double
-    let spread: Int
-    let real_volume: Double
+    let volume: Double?
+    let tick_volume: Double?
+    let spread: Int?
+    let real_volume: Double?
+    
+    var totalVolume: Double {
+        return volume ?? tick_volume ?? 0
+    }
+}
+
+struct MT5PriceHistoryResponse: Codable {
+    let data: [MT5Candle]
+}
+
+struct MT5OrderListResponse: Codable {
+    let opened: [MT5Position]
+    let pending: [MT5Position]
+}
+
+struct MT5HistoryResponse: Codable {
+    let data: [MT5HistoryPosition]
+}
+
+struct MT5HistoryPosition: Codable {
+    let symbol: String
+    let ticket: Int64
+    let type: String
+    let volume: Double
+    let open_price: Double
+    let close_price: Double
+    let open_time: Int64
+    let close_time: Int64
+    let profit: Double
+    let commission: Double
+    let swap: Double
+    let comment: String?
+    let magic: Int64?
 }

@@ -6,17 +6,11 @@ import Combine
 
 @main
 struct ForexScalperApp: App {
-    @StateObject private var coordinator = RefactoredAppCoordinator(useDebugData: false)
+    @StateObject private var coordinator = RefactoredAppCoordinator()
     
     init() {
-        // Request notification permissions on launch
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            if granted {
-                print("✅ Notification permission granted")
-            } else if let error = error {
-                print("❌ Notification permission error: \(error)")
-            }
-        }
+        // Request notification permissions via the manager
+        NotificationManager.shared.requestAuthorization()
     }
     
     var body: some Scene {

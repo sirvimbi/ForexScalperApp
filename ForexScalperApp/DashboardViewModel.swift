@@ -9,6 +9,7 @@ class DashboardViewModel: ObservableObject {
     @Published var tradeHistory: [TradeRecord] = []
     @Published var activeTrades: [TradeRecord] = []
     @Published var accountBalance: Double = 10000
+    @Published var accountCurrency: String = "USD"
     @Published var riskPerTrade: Double = 0.01
     @Published var maxDailyRisk: Double = 0.03
     @Published var maxConcurrentTrades: Int = 3
@@ -22,7 +23,7 @@ class DashboardViewModel: ObservableObject {
     // MT5 Properties
     @Published var mt5Connected: Bool = false
     @Published var mt5Error: String = ""
-    @Published var mt5BridgeURL: String = "http://localhost:8891"
+    @Published var mt5BridgeURL: String = "http://127.0.0.1:8891"
     @Published var mt5AuthToken: String = "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"
     @Published var mt5MagicNumber: Int = 888888
     
@@ -41,15 +42,29 @@ class DashboardViewModel: ObservableObject {
     @Published var minScalpingScore: Double = 15
     @Published var maxSpreadBps: Double = 10
     @Published var signalCooldownSeconds: Double = 120
+    @Published var mandatoryConfluenceLevel: Double = 2 // Double for slider compatibility
     @Published var defaultStopLossPercent: Double = 1.0
     @Published var defaultRRRatio: Double = 2.0
-    @Published var activeSymbols: Set<String> = []
+    @Published var activeSymbols: Set<String> = [] {
+        didSet {
+            UserDefaults.standard.set(Array(activeSymbols), forKey: "activeSymbols")
+            print("🛡 Active Pairs Updated: \(activeSymbols.count) symbols")
+        }
+    }
+    
+    // Auto-Trade Settings
+    @Published var isAutoTradeEnabled: Bool = false
+    @Published var minAutoTradeConfidence: Double = 85.0
     
     // Added missing properties
     @Published var isExecutingTrade: Bool = false
     @Published var riskSettingsChanged: Bool = false
     @Published var tradingPairsChanged: Bool = false
     @Published var showSaveSuccess: Bool = false
+    
+    // CSV Export State
+    @Published var exportURL: URL?
+    @Published var isShowingShareSheet: Bool = false
     
     // Auto-refresh timer
     private var refreshTimer: Timer?
@@ -122,6 +137,8 @@ class DashboardViewModel: ObservableObject {
         signalCooldownSeconds = UserDefaults.standard.double(forKey: "signalCooldownSeconds") != 0 ?
             UserDefaults.standard.double(forKey: "signalCooldownSeconds") : 120
         
+        mandatoryConfluenceLevel = Double(scalpingConfig.mandatoryConfluenceLevel)
+        
         // Load MT5 settings
         mt5BridgeURL = UserDefaults.standard.string(forKey: "mt5BridgeURL") ?? "http://localhost:8891"
         mt5AuthToken = UserDefaults.standard.string(forKey: "mt5AuthToken") ?? "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"
@@ -133,18 +150,47 @@ class DashboardViewModel: ObservableObject {
         
         // Load Active Trading Pairs
         if let savedSymbols = UserDefaults.standard.array(forKey: "activeSymbols") as? [String] {
-            activeSymbols = Set(savedSymbols)
+            // PRODUCTION SANITIZATION: Only keep symbols that are in our current TradingPair list
+            let validSymbols = Set(TradingPair.allCases.map { $0.rawValue })
+            let filtered = savedSymbols.filter { validSymbols.contains($0) }
+            
+            activeSymbols = Set(filtered)
+            
+            // If sanitization resulted in empty set, use defaults
+            if activeSymbols.isEmpty {
+                activeSymbols = Set(["EURUSD", "GBPUSD", "USDJPY"])
+            }
         } else {
-            // Default to some active symbols
-            activeSymbols = Set(["EURUSD", "GBPUSD", "BTCUSDT"])
+            // Default to some active symbols - Forex Only
+            activeSymbols = Set(["EURUSD", "GBPUSD", "USDJPY"])
         }
+        
+        // Load Auto-Trade settings
+        isAutoTradeEnabled = UserDefaults.standard.bool(forKey: "isAutoTradeEnabled")
+        minAutoTradeConfidence = UserDefaults.standard.double(forKey: "minAutoTradeConfidence") != 0 ?
+            UserDefaults.standard.double(forKey: "minAutoTradeConfidence") : 85.0
         
         print("✅ Settings loaded from UserDefaults")
     }
     
     func saveSettings() {
-        // Save Risk Management settings
-        UserDefaults.standard.set(accountBalance, forKey: "accountBalance")
+        // Validation
+        guard accountBalance >= 100 else {
+            showNotification(title: "Invalid Balance", message: "Account balance must be at least $100")
+            return
+        }
+        
+        guard riskPerTrade > 0 && riskPerTrade <= 0.20 else {
+            showNotification(title: "Invalid Risk", message: "Risk per trade must be between 0.1% and 20%")
+            return
+        }
+        
+        guard mt5BridgeURL.hasPrefix("http") else {
+            showNotification(title: "Invalid URL", message: "Bridge URL must start with http:// or https://")
+            return
+        }
+        
+        // Save Risk Management settings (EXCEPT accountBalance, which is live)
         UserDefaults.standard.set(riskPerTrade, forKey: "riskPerTrade")
         UserDefaults.standard.set(maxDailyRisk, forKey: "maxDailyRisk")
         UserDefaults.standard.set(maxConcurrentTrades, forKey: "maxConcurrentTrades")
@@ -162,11 +208,19 @@ class DashboardViewModel: ObservableObject {
         UserDefaults.standard.set(maxSpreadBps, forKey: "maxSpreadBps")
         UserDefaults.standard.set(signalCooldownSeconds, forKey: "signalCooldownSeconds")
         
+        // Sync to ScalpingConfig
+        scalpingConfig.mandatoryConfluenceLevel = Int(mandatoryConfluenceLevel)
+        scalpingConfig.saveConfig()
+        
         // Save IG settings
         UserDefaults.standard.set(igAPIKey, forKey: "igAPIKey")
         UserDefaults.standard.set(igAccountID, forKey: "igAccountID")
         UserDefaults.standard.set(igEnvironment, forKey: "igEnvironment")
         UserDefaults.standard.set(igAutoReconnect, forKey: "igAutoReconnect")
+        
+        // Save Auto-Trade settings
+        UserDefaults.standard.set(isAutoTradeEnabled, forKey: "isAutoTradeEnabled")
+        UserDefaults.standard.set(minAutoTradeConfidence, forKey: "minAutoTradeConfidence")
         
         // Save MT5 settings
         UserDefaults.standard.set(mt5BridgeURL, forKey: "mt5BridgeURL")
@@ -176,22 +230,34 @@ class DashboardViewModel: ObservableObject {
         UserDefaults.standard.set(mt5Password, forKey: "mt5Password")
         UserDefaults.standard.set(mt5Server, forKey: "mt5Server")
         
-        // Load settings to ensure they are current
-        loadSettings()
+        // Remove v1 from URL if user entered it (the service handles it)
+        if mt5BridgeURL.hasSuffix("/v1") {
+            mt5BridgeURL = String(mt5BridgeURL.dropLast(3))
+            UserDefaults.standard.set(mt5BridgeURL, forKey: "mt5BridgeURL")
+        } else if mt5BridgeURL.hasSuffix("/v1/") {
+            mt5BridgeURL = String(mt5BridgeURL.dropLast(4))
+            UserDefaults.standard.set(mt5BridgeURL, forKey: "mt5BridgeURL")
+        }
         
         // Save Active Trading Pairs
         UserDefaults.standard.set(Array(activeSymbols), forKey: "activeSymbols")
         
+        // Synchronize with coordinator if possible
+        if self.coordinator != nil {
+             // The coordinator's activeSymbols property is computed from UserDefaults,
+             // so it will be updated automatically next time it's accessed.
+        }
+        
         // Update risk manager with new parameters
         Task {
-            await RefactoredRiskManager.shared.updateParameters(
-                RiskParameters(
-                    accountBalance: accountBalance,
-                    riskPerTrade: riskPerTrade,
-                    maxDailyRisk: maxDailyRisk,
-                    maxConcurrentTrades: maxConcurrentTrades
-                )
+            let params = RiskParameters(
+                accountBalance: accountBalance,
+                riskPerTrade: riskPerTrade,
+                maxDailyRisk: maxDailyRisk,
+                maxConcurrentTrades: maxConcurrentTrades
             )
+            await RefactoredRiskManager.shared.updateParameters(params)
+            await ScalpingRiskManager.shared.updateParameters(params)
         }
         
         // Update scalping config
@@ -202,7 +268,25 @@ class DashboardViewModel: ObservableObject {
         riskSettingsChanged = false
         tradingPairsChanged = false
         
+        showNotification(title: "Settings Saved", message: "All configuration parameters have been updated")
         print("✅ Settings saved to UserDefaults")
+    }
+
+    func showNotification(title: String, message: String) {
+        // 1. System Notification
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = message
+        content.sound = .default
+        
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+        
+        // 2. Local State for UI Feedback
+        Task { @MainActor in
+            // You can add a published 'alertMessage' here if you want an in-app alert too
+            print("📢 Notification: \(title) - \(message)")
+        }
     }
     
     func startAutoRefresh(interval: TimeInterval = 0.5) {
@@ -239,17 +323,19 @@ class DashboardViewModel: ObservableObject {
         
         Task {
             // Update signals from coordinator
-            let currentSignals = await MainActor.run { coordinator.signals }
-            let currentActiveSource = await MainActor.run { coordinator.getBestSignalSource() }
-            let binanceLat = await MainActor.run { coordinator.sourceLatency[.binance] ?? 0 }
-            let igLat = await MainActor.run { coordinator.sourceLatency[.ig] ?? 0 }
-            let mt5Lat = await MainActor.run { coordinator.sourceLatency[.mt5] ?? 0 }
-            let binanceRel = await MainActor.run { coordinator.sourceReliability[.binance] ?? 1.0 }
-            let igRel = await MainActor.run { coordinator.sourceReliability[.ig] ?? 1.0 }
-            let mt5Rel = await MainActor.run { coordinator.sourceReliability[.mt5] ?? 1.0 }
+            let currentSignals = coordinator.signals
+            let currentActiveSource = coordinator.getBestSignalSource()
+            let binanceLat = coordinator.sourceLatency[.binance] ?? 0
+            let igLat = coordinator.sourceLatency[.ig] ?? 0
+            let mt5Lat = coordinator.sourceLatency[.mt5] ?? 0
+            let binanceRel = coordinator.sourceReliability[.binance] ?? 1.0
+            let igRel = coordinator.sourceReliability[.ig] ?? 1.0
+            let mt5Rel = coordinator.sourceReliability[.mt5] ?? 1.0
             
             await MainActor.run {
-                self.signals = currentSignals
+                // FILTER: Only show signals for symbols currently active in Settings
+                self.signals = currentSignals.filter { self.activeSymbols.contains($0.symbol) }
+
                 self.activeSource = currentActiveSource
                 self.binanceLatency = binanceLat
                 self.igLatency = igLat
@@ -286,12 +372,25 @@ class DashboardViewModel: ObservableObject {
         }
     }
     
-    // Single acceptSignal method (removed duplicate)
+    // Single acceptSignal method
     func acceptSignal(_ signal: Signal) {
+        // Validation
+        guard signal.volume > 0 || (signal.positionSize ?? 0) > 0 else {
+            showNotification(title: "Invalid Volume", message: "Trade volume must be greater than 0")
+            return
+        }
+        
+        guard signal.price > 0 else {
+            showNotification(title: "Invalid Price", message: "Entry price must be valid")
+            return
+        }
+        
         // Show loading state
         isExecutingTrade = true
         
         coordinator?.acceptSignal(signal)
+        
+        showNotification(title: "Execution Sent", message: "Order for \(signal.symbol) dispatched to MT5")
         
         // Reset loading state after delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
@@ -346,17 +445,34 @@ class DashboardViewModel: ObservableObject {
     func clearHistory() {
         Task {
             await RefactoredTradeHistoryManager.shared.clearHistory(keepActive: true)
-            await loadTradeHistory()
+            loadTradeHistory()
         }
     }
     
     func clearAllHistory() {
         Task {
             await RefactoredTradeHistoryManager.shared.clearAllHistory()
-            await loadTradeHistory()
+            loadTradeHistory()
         }
     }
-    
+
+    func prepareCSVExport() async {
+        let csvString = await RefactoredTradeHistoryManager.shared.generateCSV()
+        let fileName = "TradeHistory_\(Int(Date().timeIntervalSince1970)).csv"
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        
+        do {
+            try csvString.write(to: tempURL, atomically: true, encoding: .utf8)
+            await MainActor.run {
+                self.exportURL = tempURL
+                self.isShowingShareSheet = true
+            }
+            print("📁 CSV prepared at: \(tempURL.path)")
+        } catch {
+            print("❌ Failed to write temp CSV: \(error)")
+        }
+    }
+
     func connectToIG() async {
         await MainActor.run {
             igConnected = false
@@ -419,42 +535,96 @@ class DashboardViewModel: ObservableObject {
             IGTradingService.shared.clearSession()
         }
     }
+
+    func refreshAccountInfo() async {
+        do {
+            let account = try await MT5Service.shared.getAccountInfo()
+            await MainActor.run {
+                self.accountBalance = account.equity
+                self.accountCurrency = account.currency
+                print("💰 Manual Equity Refresh: KES \(account.equity)")
+                
+                // Update risk managers
+                let params = RiskParameters(
+                    accountBalance: account.equity,
+                    riskPerTrade: self.riskPerTrade,
+                    maxDailyRisk: self.maxDailyRisk,
+                    maxConcurrentTrades: self.maxConcurrentTrades
+                )
+                
+                Task {
+                    await RefactoredRiskManager.shared.updateParameters(params)
+                    await ScalpingRiskManager.shared.updateParameters(params)
+                }
+            }
+        } catch {
+            print("❌ Account Refresh Failed: \(error)")
+        }
+    }
     
-    // MT5 Methods
     func connectToMT5() async {
+        guard !isConnecting else { return }
+        
         await MainActor.run {
-            mt5Connected = false
-            mt5Error = ""
-            isConnecting = true
-            
-            // Ensure any changes to URL/Credentials are saved before connecting
+            self.mt5Connected = false
+            self.mt5Error = ""
+            self.isConnecting = true
             saveSettings()
         }
         
         do {
-            // Update service with potential new URL and Token
             MT5Service.shared.setBaseURL(mt5BridgeURL)
             MT5Service.shared.setAuthToken(mt5AuthToken)
             
-            // First attempt to initialize/login MT5 if the bridge supports it
-            try await MT5Service.shared.initialize(
-                login: Int(mt5Login) ?? 0,
-                password: mt5Password,
-                server: mt5Server
-            )
-
             let connected = try await MT5Service.shared.checkConnection()
-            await MainActor.run {
-                self.mt5Connected = connected
-                self.isConnecting = false
-                if !connected {
-                    self.mt5Error = "MT5 Bridge reachable but terminal offline"
+            
+            if connected {
+                // FETCH ACCOUNT INFO - Use Equity for Risk Calculation
+                if let account = try? await MT5Service.shared.getAccountInfo() {
+                    await MainActor.run {
+                        self.accountBalance = account.equity // Use Equity instead of Balance
+                        self.accountCurrency = account.currency
+                        print("💰 Live Equity Sync: KES \(account.equity)")
+                        
+                        // Push live equity to Risk Managers immediately
+                        Task {
+                            let params = RiskParameters(
+                                accountBalance: account.equity,
+                                riskPerTrade: self.riskPerTrade,
+                                maxDailyRisk: self.maxDailyRisk,
+                                maxConcurrentTrades: self.maxConcurrentTrades
+                            )
+                            await RefactoredRiskManager.shared.updateParameters(params)
+                            await ScalpingRiskManager.shared.updateParameters(params)
+                        }
+                    }
+                }
+
+                await MainActor.run {
+                    self.mt5Connected = true
+                    self.isConnecting = false
+                    showNotification(title: "MT5 Connected", message: "Successfully linked to Exness (\(accountCurrency))")
+                }
+                
+                if let coordinator = self.coordinator {
+                    await coordinator.start()
+                }
+            } else {
+                print("⚠️ Dashboard: Bridge reachable, but EA not responding")
+                await MainActor.run {
+                    self.mt5Connected = false
+                    self.isConnecting = false
+                    self.mt5Error = "EA not responding. Is SocketBridgeEA on a chart?"
+                    showNotification(title: "EA Offline", message: "Bridge is active, but SocketBridgeEA is not found on a chart.")
                 }
             }
         } catch {
+            print("❌ Dashboard: Connection failed: \(error.localizedDescription)")
             await MainActor.run {
-                self.mt5Error = error.localizedDescription
+                self.mt5Connected = false
                 self.isConnecting = false
+                self.mt5Error = error.localizedDescription
+                showNotification(title: "Connection Failed", message: error.localizedDescription)
             }
         }
     }
@@ -474,8 +644,12 @@ class DashboardViewModel: ObservableObject {
     }
     
     var winRate: Double {
-        guard totalTrades > 0 else { return 0 }
-        return Double(wins) / Double(totalTrades) * 100
+        guard accountBalance > 0 else { return 0 }
+        return (totalPnL / accountBalance) * 100
+    }
+    
+    var currencySymbol: String {
+        return "KES "
     }
     
     var totalPnL: Double {
@@ -488,6 +662,22 @@ class DashboardViewModel: ObservableObject {
             .filter { Calendar.current.isDate($0.entryTime, inSameDayAs: today) }
             .compactMap { $0.pnl }
             .reduce(0, +)
+    }
+
+    var totalPnLString: String {
+        String(format: "%@%@%.2f", totalPnL >= 0 ? "+" : "", currencySymbol, totalPnL)
+    }
+    
+    var todayPnLString: String {
+        String(format: "%@%@%.2f", todayPnL >= 0 ? "+" : "", currencySymbol, todayPnL)
+    }
+
+    var totalPnLColor: Color {
+        totalPnL >= 0 ? .accentGreen : .accentRed
+    }
+    
+    var todayPnLColor: Color {
+        todayPnL >= 0 ? .accentGreen : .accentRed
     }
     
     var avgWin: Double {
@@ -559,6 +749,14 @@ class DashboardViewModel: ObservableObject {
     // MARK: - Private Methods
     
     private func setupNotificationObservers() {
+        // Observe new signals to keep local array in sync
+        NotificationCenter.default.publisher(for: .newSignalGenerated)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshData()
+            }
+            .store(in: &cancellables)
+
         NotificationCenter.default.publisher(for: .tradeHistoryUpdated)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -575,6 +773,17 @@ class DashboardViewModel: ObservableObject {
             }
             .store(in: &cancellables)
         
+        NotificationCenter.default.publisher(for: .mt5AccountUpdated)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                if let account = notification.object as? MT5AccountInfo {
+                    self?.accountBalance = account.equity
+                    self?.accountCurrency = account.currency
+                    print("💰 Live Equity Update: KES \(account.equity)")
+                }
+            }
+            .store(in: &cancellables)
+
         // Observe signal source changes
         NotificationCenter.default.publisher(for: .signalSourceChanged)
             .receive(on: DispatchQueue.main)
@@ -614,9 +823,11 @@ class DashboardViewModel: ObservableObject {
     }
     
     deinit {
-        Task { @MainActor in
-            self.stopAutoRefresh()
-        }
+        // Stop refresh timer if active
+        // Note: we can't use Task { @MainActor in self.stopAutoRefresh() } here safely in Swift 6
+        // because self is being deallocated. 
+        // DashboardViewModel is @MainActor, so deinit should be on MainActor too?
+        // In Swift, deinit of a MainActor class is not guaranteed to be on MainActor.
     }
 }
 

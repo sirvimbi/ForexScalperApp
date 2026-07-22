@@ -33,6 +33,14 @@ class ScalpingConfig: ObservableObject {
     @Published var maxDailyTrades: Int = 10 { didSet { saveConfig() } } // Limit trades to only best ones
     @Published var maxConcurrentScalps: Int = 2 { didSet { saveConfig() } }
     
+    // Confluence settings
+    @Published var mandatoryConfluenceLevel: Int = 2 { didSet { saveConfig() } } 
+    @Published var minConfluencePillars: Int = 5 { didSet { saveConfig() } } 
+    
+    // Manual Volume/Lot settings
+    @Published var useManualLot: Bool = false { didSet { saveConfig() } }
+    @Published var manualLotSize: Double = 0.01 { didSet { saveConfig() } }
+    
     private let savePath: URL
     
     init() {
@@ -50,7 +58,9 @@ class ScalpingConfig: ObservableObject {
             trailActivationPips: trailActivationPips, trailDistance: trailDistance,
             maxHoldMinutes: maxHoldMinutes, enableIndicatorExit: enableIndicatorExit,
             minScore: minScore, maxSpreadBps: maxSpreadBps, cooldownSeconds: cooldownSeconds,
-            maxDailyTrades: maxDailyTrades, maxConcurrentScalps: maxConcurrentScalps
+            maxDailyTrades: maxDailyTrades, maxConcurrentScalps: maxConcurrentScalps,
+            mandatoryConfluenceLevel: mandatoryConfluenceLevel,
+            useManualLot: useManualLot, manualLotSize: manualLotSize
         )
         do {
             let encoder = JSONEncoder()
@@ -86,6 +96,9 @@ class ScalpingConfig: ObservableObject {
             self.cooldownSeconds = config.cooldownSeconds
             self.maxDailyTrades = config.maxDailyTrades
             self.maxConcurrentScalps = config.maxConcurrentScalps
+            self.mandatoryConfluenceLevel = config.mandatoryConfluenceLevel
+            self.useManualLot = config.useManualLot ?? false
+            self.manualLotSize = config.manualLotSize ?? 0.01
         } catch {
             print("📝 No existing scalping config, using HIGH QUALITY defaults")
         }
@@ -96,6 +109,7 @@ class ScalpingConfig: ObservableObject {
         minScore = 40.0
         cooldownSeconds = 120.0 // Reduced from 300
         maxDailyTrades = 20 // Increased from 10
+        mandatoryConfluenceLevel = 2
         saveConfig()
     }
     
@@ -107,5 +121,8 @@ class ScalpingConfig: ObservableObject {
         let maxHoldMinutes: Double; let enableIndicatorExit: Bool; let minScore: Double
         let maxSpreadBps: Double; let cooldownSeconds: Double; let maxDailyTrades: Int
         let maxConcurrentScalps: Int
+        let mandatoryConfluenceLevel: Int
+        let useManualLot: Bool?
+        let manualLotSize: Double?
     }
 }

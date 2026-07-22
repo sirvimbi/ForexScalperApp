@@ -81,9 +81,6 @@ class SignalComparator {
         // Check which signal has stronger supporting factors
         
         // Factor: Timeframe alignment
-        let binanceTimeframes = ["1m", "5m", "1h"]
-        let igTimeframes = ["tick", "1m", "5m"]
-        
         // If one signal is from a higher timeframe, it might be more reliable
         if binance.timeframe == "1h" && ig.timeframe == "1m" {
             return .binance

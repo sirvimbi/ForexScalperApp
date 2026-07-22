@@ -10,7 +10,18 @@ actor RefactoredTradeHistoryManager {
     private init() {
         savePath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("trade_history.json")
-        loadTrades()
+        
+        // Inline load logic to avoid isolation warnings in init
+        do {
+            let data = try Data(contentsOf: savePath)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let loadedTrades = try decoder.decode([TradeRecord].self, from: data)
+            self.trades = Dictionary(uniqueKeysWithValues: loadedTrades.map { ($0.id, $0) })
+            print("📊 Trade history: Loaded \(self.trades.count) trades")
+        } catch {
+            print("📝 No existing trade history")
+        }
     }
     
     func addTrade(_ trade: TradeRecord) {
@@ -40,6 +51,14 @@ actor RefactoredTradeHistoryManager {
     
     func getTrade(id: UUID) -> TradeRecord? {
         return trades[id]
+    }
+    
+    func getTradeByExternalId(_ externalId: String) -> TradeRecord? {
+        return trades.values.first { $0.externalDealId == externalId }
+    }
+    
+    func getAllTrades() -> [TradeRecord] {
+        return Array(trades.values)
     }
     
     func getActiveTrades() -> [TradeRecord] {
@@ -112,6 +131,54 @@ actor RefactoredTradeHistoryManager {
         trades.removeAll()
         saveTrades()
         notifyUpdate()
+    }
+    
+    // MARK: - CSV Export
+    
+    func generateCSV() async -> String {
+        let sortedTrades = trades.values.sorted { $0.entryTime > $1.entryTime }
+        
+        let header = "Symbol,Type,Signal Generated,Time Filled,Accepted,Volume/Lot,Open Price,Exit Price,T/P,S/L,Swap (KES),P/L (KES),Result\n"
+        
+        let rows = sortedTrades.map { trade -> String in
+            let df = DateFormatter()
+            df.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            
+            let signalTimeStr = df.string(from: trade.signalTime ?? trade.entryTime)
+            let filledTimeStr = df.string(from: trade.entryTime)
+            
+            // Result calculation
+            let pnlValue = trade.pnl ?? 0
+            let result: String
+            if trade.status == .active || trade.status == .pending {
+                result = trade.status.rawValue.uppercased()
+            } else {
+                result = pnlValue > 0 ? "WIN" : (pnlValue < 0 ? "LOSS" : "BREAKEVEN")
+            }
+            
+            // Volume formatting (Filled vs Total)
+            // Note: Since we mainly track filled trades, we show filled. 
+            // If we had the original signal volume we'd show both.
+            let volumeStr = String(format: "%.2f", trade.positionSize ?? 0)
+            
+            return [
+                trade.symbol,
+                trade.type.displayName,
+                signalTimeStr,
+                filledTimeStr,
+                trade.isAccepted ? "YES" : "NO",
+                volumeStr,
+                String(format: "%.5f", trade.entryPrice),
+                String(format: "%.5f", trade.exitPrice ?? 0),
+                String(format: "%.5f", trade.takeProfit ?? 0),
+                String(format: "%.5f", trade.stopLoss ?? 0),
+                String(format: "%.2f", trade.swap ?? 0),
+                String(format: "%.2f", pnlValue),
+                result
+            ].joined(separator: ",")
+        }
+        
+        return header + rows.joined(separator: "\n")
     }
     
     // MARK: - Private methods

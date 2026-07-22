@@ -85,7 +85,7 @@ class IGTradingService {
             request.setValue(sessionId, forHTTPHeaderField: "x-session-id")
         }
         
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let (data, _) = try await URLSession.shared.data(from: url)
         
         // Debug: Print raw response
         if let responseString = String(data: data, encoding: .utf8) {

@@ -88,21 +88,6 @@ struct ContentView: View {
                     }
                     .padding(.top)
                     .buttonStyle(.borderedProminent)
-                    
-                    // Test buttons
-                    HStack(spacing: 20) {
-                        Button("Test Bullish") {
-                            fillBullishData()
-                            makePrediction()
-                        }
-                        .buttonStyle(.bordered)
-                        
-                        Button("Test Bearish") {
-                            fillBearishData()
-                            makePrediction()
-                        }
-                        .buttonStyle(.bordered)
-                    }
                 }
                 .padding()
             }

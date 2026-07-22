@@ -66,8 +66,11 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         
         let has1m = (symbolCandles["1m"]?.count ?? 0) >= 100
         let has5m = (symbolCandles["5m"]?.count ?? 0) >= 50
+        let has15m = (symbolCandles["15m"]?.count ?? 0) >= 30
         let has1h = (symbolCandles["1h"]?.count ?? 0) >= 20
+        let has4h = (symbolCandles["4h"]?.count ?? 0) >= 20
+        let hasD1 = (symbolCandles["D1"]?.count ?? 0) >= 15
         
-        return has1m && has5m && has1h
+        return has1m && has5m && has15m && has1h && has4h && hasD1
     }
 }

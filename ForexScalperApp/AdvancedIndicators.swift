@@ -33,7 +33,6 @@ struct AdvancedIndicators {
         var sar = candles[0].low
         
         for i in 1..<candles.count {
-            let prevCandle = candles[i-1]
             let currentCandle = candles[i]
             
             if isUptrend {
@@ -147,7 +146,7 @@ struct AdvancedIndicators {
         let totalVolume = volumeByPrice.values.reduce(0, +)
         let targetVolume = totalVolume * 0.7
         
-        var sortedBuckets = volumeByPrice.sorted { $0.value > $1.value }
+        let sortedBuckets = volumeByPrice.sorted { $0.value > $1.value }
         var accumulatedVolume = 0.0
         var valueAreaBuckets: Set<Int> = []
         
@@ -174,8 +173,6 @@ struct AdvancedIndicators {
         guard candles.count > lookback else { return (0, 0) }
         
         let recentCandles = Array(candles.suffix(lookback))
-        let highs = recentCandles.map { $0.high }
-        let lows = recentCandles.map { $0.low }
         
         // Find swing highs and lows
         var swingHighs: [Double] = []

@@ -2,6 +2,7 @@
 import SwiftUI
 import Combine
 import UserNotifications
+import UniformTypeIdentifiers
 
 // MARK: - Design System (keep existing)
 extension Color {
@@ -188,6 +189,9 @@ struct DashboardView: View {
     @State private var notificationMessage = ""
     @State private var selectedTrade: TradeRecord?
     
+    @StateObject private var notificationManager = NotificationManager.shared
+    @State private var isNotificationBannerDismissed = false
+    
     private let tabs     = ["Signals", "History", "Performance", "Settings"]
     private let tabIcons = ["bolt.fill", "clock.fill", "chart.bar.fill", "gearshape.fill"]
     
@@ -279,7 +283,9 @@ struct DashboardView: View {
         notificationMessage = "Accepting signal for \(signal.symbol)..."
         showNotificationAlert = true
         selectedSignal = signal
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        
+        // Use a longer delay to ensure the alert layout is settled before presenting the sheet
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             showTradeSheet = true
         }
     }
@@ -353,8 +359,8 @@ struct DashboardView: View {
                     .foregroundColor(.textMuted)
                     .tracking(1.5)
                 GlowText(
-                    text: String(format: "%@$%.2f", viewModel.todayPnL >= 0 ? "+" : "", viewModel.todayPnL),
-                    color: viewModel.todayPnL >= 0 ? .accentGreen : .accentRed,
+                    text: viewModel.todayPnLString,
+                    color: viewModel.todayPnLColor,
                     font: .system(size: 22, weight: .black, design: .rounded)
                 )
             }
@@ -534,6 +540,51 @@ struct DashboardView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(viewModel.isRefreshing)
+                
+                Divider()
+                    .background(Color.borderSubtle)
+                    .frame(height: 20)
+                    .padding(.horizontal, 4)
+                
+                // AUTO-TRADE TOGGLE & SLIDER
+                HStack(spacing: 12) {
+                    HStack(spacing: 8) {
+                        Toggle(isOn: $viewModel.isAutoTradeEnabled) {
+                            Image(systemName: viewModel.isAutoTradeEnabled ? "bolt.fill" : "bolt.slash.fill")
+                                .font(.system(size: 10))
+                        }
+                        .toggleStyle(SwitchToggleStyle(tint: .accentGreen))
+                        .scaleEffect(0.7)
+                        .frame(width: 45)
+                    }
+                    
+                    if viewModel.isAutoTradeEnabled {
+                        HStack(spacing: 8) {
+                            Text("\(Int(viewModel.minAutoTradeConfidence))%")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(.accentGold)
+                                .frame(width: 30)
+                            
+                            Slider(value: $viewModel.minAutoTradeConfidence, in: 50...98, step: 1)
+                                .frame(width: 80)
+                                .accentColor(.accentGold)
+                            
+                            Image(systemName: "target")
+                                .font(.system(size: 10))
+                                .foregroundColor(.textMuted)
+                        }
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(viewModel.isAutoTradeEnabled ? Color.accentGreen.opacity(0.05) : Color.clear)
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(viewModel.isAutoTradeEnabled ? Color.accentGreen.opacity(0.2) : Color.clear, lineWidth: 1)
+                )
+                .animation(.spring(), value: viewModel.isAutoTradeEnabled)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
@@ -543,6 +594,52 @@ struct DashboardView: View {
             
             ScrollView {
                 LazyVStack(spacing: 12) {
+                    if !notificationManager.isAuthorized && !isNotificationBannerDismissed {
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.accentGold)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Notifications are disabled")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.white)
+                                Text("Enable them to receive real-time signals.")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.textSecondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Button("Settings") {
+                                #if os(macOS)
+                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.notifications")!)
+                                #else
+                                if let url = URL(string: UIApplication.openSettingsURLString) {
+                                    UIApplication.shared.open(url)
+                                }
+                                #endif
+                            }
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.accentCyan)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.accentCyan.opacity(0.1))
+                            .cornerRadius(4)
+                            
+                            Button(action: { isNotificationBannerDismissed = true }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.textMuted)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(10)
+                        .background(Color.bgCard)
+                        .cornerRadius(8)
+                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentGold.opacity(0.3), lineWidth: 1))
+                        .padding(.bottom, 8)
+                    }
+
                     #if os(iOS)
                     HStack {
                         Text("Live Signals")
@@ -552,7 +649,7 @@ struct DashboardView: View {
                             Circle()
                                 .fill(Color.green)
                                 .frame(width: 8, height: 8)
-                            Text("LIVE 0.5s")
+                            Text("LIVE")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -560,7 +657,9 @@ struct DashboardView: View {
                     .padding(.horizontal)
                     #endif
                     
-                    let pendingSignals = viewModel.signals.filter { $0.status == .pending }
+                    // ELITE SIGNAL RECONCILIATION
+                    let allSignals = coordinator.signals
+                    let pendingSignals = allSignals.filter { $0.status == .pending }
                     
                     if pendingSignals.isEmpty {
                         VStack(spacing: 20) {
@@ -618,7 +717,7 @@ struct DashboardView: View {
                     }
                 }
                 .padding(20)
-                .animation(.easeInOut, value: viewModel.signals.filter { $0.status == .pending }.count)
+                .animation(.easeInOut, value: coordinator.signals.filter { $0.status == .pending }.count)
             }
             .refreshable {
                 viewModel.refreshData()
@@ -718,7 +817,7 @@ struct DashboardView: View {
                         .font(.system(size: 24, weight: .bold))
                     Spacer()
                     VStack(alignment: .trailing) {
-                        Text(String(format: "$%.5f", signal.price))
+                        Text(String(format: "KES %.5f", signal.price))
                             .font(.system(size: 20, weight: .semibold, design: .monospaced))
                         HStack {
                             if signal.volume > 0 {
@@ -751,7 +850,7 @@ struct DashboardView: View {
                                 .font(.headline)
                             Spacer()
                             if let pnl = signal.pnl {
-                                Text(String(format: "P&L: %@$%.2f", pnl >= 0 ? "+" : "", pnl))
+                                Text(String(format: "P&L: %@%@%.2f", pnl >= 0 ? "+" : "", viewModel.currencySymbol, pnl))
                                     .font(.caption.bold())
                                     .foregroundColor(pnl >= 0 ? .accentGreen : .accentRed)
                             }
@@ -760,12 +859,12 @@ struct DashboardView: View {
                         if let acceptedPrice = signal.acceptedPrice {
                             HStack {
                                 Text("Entry: ").font(.caption).foregroundColor(.textSecondary)
-                                Text(String(format: "$%.5f", acceptedPrice))
+                                Text(String(format: "%@%.5f", viewModel.currencySymbol, acceptedPrice))
                                     .font(.caption.monospacedDigit()).foregroundColor(.textPrimary)
                                 Spacer()
                                 if let exitPrice = signal.closedPrice {
                                     Text("Exit: ").font(.caption).foregroundColor(.textSecondary)
-                                    Text(String(format: "$%.5f", exitPrice))
+                                    Text(String(format: "%@%.5f", viewModel.currencySymbol, exitPrice))
                                         .font(.caption.monospacedDigit()).foregroundColor(.textPrimary)
                                 }
                             }
@@ -775,13 +874,13 @@ struct DashboardView: View {
                             HStack {
                                 VStack(alignment: .leading) {
                                     Text("Stop Loss").font(.caption2).foregroundColor(.textMuted)
-                                    Text(String(format: "$%.5f", stopLoss))
+                                    Text(String(format: "%@%.5f", viewModel.currencySymbol, stopLoss))
                                         .font(.caption2.monospacedDigit()).foregroundColor(.accentRed)
                                 }
                                 Spacer()
                                 VStack(alignment: .trailing) {
                                     Text("Take Profit").font(.caption2).foregroundColor(.textMuted)
-                                    Text(String(format: "$%.5f", takeProfit))
+                                    Text(String(format: "%@%.5f", viewModel.currencySymbol, takeProfit))
                                         .font(.caption2.monospacedDigit()).foregroundColor(.accentGreen)
                                 }
                             }
@@ -790,7 +889,7 @@ struct DashboardView: View {
                         if let positionSize = signal.positionSize {
                             HStack {
                                 Text("Position Size: ").font(.caption).foregroundColor(.textSecondary)
-                                Text(String(format: "$%.2f", positionSize))
+                                Text(String(format: "%.2f Lots", positionSize))
                                     .font(.caption.monospacedDigit()).foregroundColor(.accentCyan)
                                 Spacer()
                                 Text("Click to view details")
@@ -873,6 +972,22 @@ struct DashboardView: View {
                         }
                         Spacer()
                         HStack(spacing: 8) {
+                            Button(action: { viewModel.refreshData() }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.clockwise").font(.system(size: 11))
+                                    Text("SYNC MT5")
+                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                        .tracking(1.0)
+                                }
+                                .foregroundColor(.accentCyan)
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(Color.accentCyan.opacity(0.1))
+                                .cornerRadius(6)
+                                .overlay(RoundedRectangle(cornerRadius: 6)
+                                    .strokeBorder(Color.accentCyan.opacity(0.3), lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+
                             Button(action: { viewModel.clearHistory() }) {
                                 HStack(spacing: 4) {
                                     Image(systemName: "trash").font(.system(size: 11))
@@ -914,8 +1029,8 @@ struct DashboardView: View {
                             StatBox(title: "Total Trades", value: "\(viewModel.totalTrades)", accentColor: .accentCyan, icon: "chart.bar.fill")
                             StatBox(title: "Win Rate", value: String(format: "%.1f%%", viewModel.winRate), accentColor: .accentGreen, icon: "checkmark.circle.fill")
                             StatBox(title: "Profit Factor", value: String(format: "%.2f", viewModel.profitFactor), accentColor: .accentGold, icon: "multiply.circle.fill")
-                            StatBox(title: "Avg Win", value: String(format: "$%.2f", viewModel.avgWin), accentColor: .accentGreen, icon: "arrow.up.right")
-                            StatBox(title: "Avg Loss", value: String(format: "$%.2f", viewModel.avgLoss), accentColor: .accentRed, icon: "arrow.down.right")
+                            StatBox(title: "Avg Win", value: String(format: "%@%.2f", viewModel.currencySymbol, viewModel.avgWin), accentColor: .accentGreen, icon: "arrow.up.right")
+                            StatBox(title: "Avg Loss", value: String(format: "%@%.2f", viewModel.currencySymbol, viewModel.avgLoss), accentColor: .accentRed, icon: "arrow.down.right")
                         }
                         .padding(.horizontal, 20)
                     }
@@ -934,6 +1049,30 @@ struct DashboardView: View {
                     }
                     
                     #if os(iOS)
+                    HStack {
+                        Text("History")
+                            .font(.largeTitle).bold()
+                        Spacer()
+                        
+                        if let url = viewModel.exportURL {
+                            ShareLink(item: url) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .foregroundColor(.accentCyan)
+                            }
+                        } else {
+                            Button(action: { Task { await viewModel.prepareCSVExport() } }) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .foregroundColor(.accentCyan)
+                            }
+                        }
+
+                        Button(action: { viewModel.refreshData() }) {
+                            Image(systemName: "arrow.clockwise")
+                                .foregroundColor(.accentCyan)
+                        }
+                    }
+                    .padding(.horizontal)
+
                     List {
                         ForEach(viewModel.tradeHistory) { trade in
                             tradeRow(trade, isActive: false)
@@ -941,6 +1080,39 @@ struct DashboardView: View {
                     }
                     .listStyle(PlainListStyle())
                     #else
+                    HStack {
+                        Text("MASTER TRADE HISTORY")
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                            .foregroundColor(.accentCyan)
+                            .tracking(2)
+                        Spacer()
+                        
+                        if let url = viewModel.exportURL {
+                            ShareLink("EXPORT CSV", item: url)
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Color.accentCyan.opacity(0.1))
+                                .foregroundColor(.accentCyan)
+                                .cornerRadius(5)
+                        } else {
+                            Button(action: {
+                                Task {
+                                    await viewModel.prepareCSVExport()
+                                }
+                            }) {
+                                Label("PREPARE CSV", systemImage: "doc.text.fill")
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .padding(.horizontal, 10).padding(.vertical, 5)
+                                    .background(Color.accentCyan.opacity(0.1))
+                                    .foregroundColor(.accentCyan)
+                                    .cornerRadius(5)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+
                     GlassCard {
                         VStack(spacing: 0) {
                             HStack {
@@ -1025,19 +1197,21 @@ struct DashboardView: View {
                 HStack {
                     VStack(alignment: .leading) {
                         Text("Entry").font(.caption).foregroundColor(.gray)
-                        Text(String(format: "$%.5f", trade.entryPrice)).font(.subheadline).monospacedDigit()
+                        Text(String(format: "%@%.5f", viewModel.currencySymbol, trade.entryPrice)).font(.subheadline).monospacedDigit()
                     }
                     Spacer()
                     if let exitPrice = trade.exitPrice {
                         VStack(alignment: .trailing) {
                             Text("Exit").font(.caption).foregroundColor(.gray)
-                            Text(String(format: "$%.5f", exitPrice)).font(.subheadline).monospacedDigit()
+                            Text(String(format: "%@%.5f", viewModel.currencySymbol, exitPrice)).font(.subheadline).monospacedDigit()
                         }
+                    } else {
+                        TagBadge(text: trade.status.rawValue.uppercased(), color: trade.status == .active ? .accentCyan : .accentGold)
                     }
                     if let pnl = trade.pnl {
                         VStack(alignment: .trailing) {
                             Text("P&L").font(.caption).foregroundColor(.gray)
-                            Text(String(format: "%@$%.2f", pnl >= 0 ? "+" : "", pnl))
+                            Text(String(format: "%@%@%.2f", pnl >= 0 ? "+" : "", viewModel.currencySymbol, pnl))
                                 .foregroundColor(pnl >= 0 ? .green : .red)
                                 .bold().monospacedDigit()
                         }
@@ -1055,25 +1229,25 @@ struct DashboardView: View {
                 TagBadge(text: trade.type.displayName, color: isBuy ? .accentGreen : .accentRed)
                     .frame(width: 60, alignment: .leading)
                 
-                Text(String(format: "$%.5f", trade.entryPrice))
+                Text(String(format: "%@%.5f", viewModel.currencySymbol, trade.entryPrice))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.textSecondary)
                     .frame(width: 110, alignment: .leading)
                 
                 Group {
                     if let exit = trade.exitPrice {
-                        Text(String(format: "$%.5f", exit))
+                        Text(String(format: "%@%.5f", viewModel.currencySymbol, exit))
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.textSecondary)
                     } else {
-                        TagBadge(text: "ACTIVE", color: .accentCyan)
+                        TagBadge(text: trade.status.rawValue.uppercased(), color: trade.status == .active ? .accentCyan : .accentGold)
                     }
                 }
                 .frame(width: 110, alignment: .leading)
                 
                 Group {
                     if let pnl = trade.pnl {
-                        Text(String(format: "%@$%.2f", pnl >= 0 ? "+" : "", pnl))
+                        Text(String(format: "%@%@%.2f", pnl >= 0 ? "+" : "", viewModel.currencySymbol, pnl))
                             .font(.system(size: 12, weight: .bold, design: .monospaced))
                             .foregroundColor(pnlColor)
                     } else {
@@ -1134,13 +1308,13 @@ struct DashboardView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
                             StatBox(title: "Total Trades", value: "\(viewModel.totalTrades)", accentColor: .accentCyan, icon: "chart.bar.fill")
-                            StatBox(title: "Win Rate", value: String(format: "%.1f%%", viewModel.winRate), accentColor: viewModel.winRate >= 60 ? .accentGreen : .accentRed, icon: "checkmark.circle.fill")
+                            StatBox(title: "Return on Equity", value: String(format: "%.1f%%", viewModel.winRate), accentColor: viewModel.winRate >= 0 ? .accentGreen : .accentRed, icon: "checkmark.circle.fill")
                             StatBox(title: "Profit Factor", value: String(format: "%.2f", viewModel.profitFactor), accentColor: .accentGold, icon: "multiply.circle.fill")
-                            StatBox(title: "Net P&L", value: String(format: "%@$%.2f", viewModel.totalPnL >= 0 ? "+" : "", viewModel.totalPnL), accentColor: viewModel.totalPnL >= 0 ? .accentGreen : .accentRed, icon: "dollarsign.circle.fill")
-                            StatBox(title: "Today's P&L", value: String(format: "%@$%.2f", viewModel.todayPnL >= 0 ? "+" : "", viewModel.todayPnL), accentColor: viewModel.todayPnL >= 0 ? .accentGreen : .accentRed, icon: "calendar.circle.fill")
-                            StatBox(title: "Avg Win", value: String(format: "$%.2f", viewModel.avgWin), accentColor: .accentGreen, icon: "arrow.up.right")
-                            StatBox(title: "Avg Loss", value: String(format: "$%.2f", viewModel.avgLoss), accentColor: .accentRed, icon: "arrow.down.right")
-                            StatBox(title: "Max Drawdown", value: String(format: "$%.2f", viewModel.maxDrawdown), accentColor: .accentRed, icon: "arrow.down.to.line")
+                            StatBox(title: "Net P&L", value: viewModel.totalPnLString, accentColor: viewModel.totalPnLColor, icon: "chart.line.uptrend.xyaxis")
+                            StatBox(title: "Today's P&L", value: viewModel.todayPnLString, accentColor: viewModel.todayPnLColor, icon: "calendar.badge.clock")
+                            StatBox(title: "Avg Win", value: String(format: "%@%.2f", viewModel.currencySymbol, viewModel.avgWin), accentColor: .accentGreen, icon: "arrow.up.right")
+                            StatBox(title: "Avg Loss", value: String(format: "%@%.2f", viewModel.currencySymbol, viewModel.avgLoss), accentColor: .accentRed, icon: "arrow.down.right")
+                            StatBox(title: "Max Drawdown", value: String(format: "%@%.2f", viewModel.currencySymbol, viewModel.maxDrawdown), accentColor: .accentRed, icon: "arrow.down.to.line")
                         }
                         .padding(.horizontal, 20)
                     }
@@ -1183,8 +1357,8 @@ struct DashboardView: View {
                                 
                                 Divider().background(Color.borderSubtle)
                                 
-                                perfRow(label: "Best Trade", value: String(format: "+$%.2f", viewModel.bestTrade), color: .accentGreen)
-                                perfRow(label: "Worst Trade", value: String(format: "-$%.2f", abs(viewModel.worstTrade)), color: .accentRed)
+                                perfRow(label: "Best Trade", value: String(format: "+%@%.2f", viewModel.currencySymbol, viewModel.bestTrade), color: .accentGreen)
+                                perfRow(label: "Worst Trade", value: String(format: "-%@%.2f", viewModel.currencySymbol, abs(viewModel.worstTrade)), color: .accentRed)
                                 perfRow(label: "Avg Duration", value: viewModel.avgTradeDuration)
                                 perfRow(label: "Profit Factor", value: String(format: "%.2f", viewModel.profitFactor), color: .accentGold)
                             }
@@ -1268,7 +1442,7 @@ struct DashboardView: View {
                                             .font(.system(size: 12, weight: .bold, design: .monospaced))
                                             .foregroundColor(winPct >= 50 ? .accentGreen : .accentRed)
                                             .frame(width: 70, alignment: .leading)
-                                        Text(String(format: "%@$%.2f", pnl >= 0 ? "+" : "", pnl))
+                                        Text(String(format: "%@%@%.2f", pnl >= 0 ? "+" : "", viewModel.currencySymbol, pnl))
                                             .font(.system(size: 12, weight: .bold, design: .monospaced))
                                             .foregroundColor(pnl >= 0 ? .accentGreen : .accentRed)
                                             .frame(width: 100, alignment: .leading)
@@ -1435,7 +1609,7 @@ struct DashboardView: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Net P&L").font(.caption2).foregroundColor(.textMuted)
-                    Text(String(format: "%@$%.2f", pnl >= 0 ? "+" : "", pnl))
+                    Text(String(format: "%@%@%.2f", pnl >= 0 ? "+" : "", viewModel.currencySymbol, pnl))
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(pnl >= 0 ? .accentGreen : .accentRed)
                 }
@@ -1498,9 +1672,28 @@ struct DashboardView: View {
                                     
                                     settingsRow("Account Balance") {
                                         HStack(spacing: 4) {
-                                            Text("$").foregroundColor(.textMuted).font(.subheadline)
-                                            TextField("10000", value: $viewModel.accountBalance, format: .number)
-                                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                            Text(viewModel.currencySymbol).foregroundColor(.textMuted).font(.subheadline)
+                                            HStack {
+                                                Text(String(format: "KES %.2f", viewModel.accountBalance))
+                                                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                                    .foregroundColor(.accentCyan)
+                                                Spacer()
+                                                Button(action: {
+                                                    Task { await viewModel.refreshAccountInfo() }
+                                                }) {
+                                                    Image(systemName: "arrow.clockwise")
+                                                        .font(.caption2)
+                                                        .foregroundColor(.accentCyan)
+                                                }
+                                                .buttonStyle(.plain)
+
+                                                Image(systemName: "lock.fill")
+                                                    .font(.caption2)
+                                                    .foregroundColor(.textMuted)
+                                            }
+                                            .padding(8)
+                                            .background(Color.black.opacity(0.2))
+                                            .cornerRadius(4)
                                                 .frame(width: 120)
                                         }
                                     }
@@ -1546,6 +1739,22 @@ struct DashboardView: View {
                                     sectionHeader("SCALPING CONFIGURATION", icon: "gauge.high", color: .accentGold)
                                     Divider().background(Color.borderSubtle)
                                     
+                                    settingsRow("Manual Volume/Lot") {
+                                        HStack(spacing: 8) {
+                                            Toggle("", isOn: $viewModel.scalpingConfig.useManualLot)
+                                                .toggleStyle(SwitchToggleStyle(tint: .accentGreen))
+                                                .scaleEffect(0.8)
+                                                .labelsHidden()
+                                            
+                                            if viewModel.scalpingConfig.useManualLot {
+                                                TextField("0.01", value: $viewModel.scalpingConfig.manualLotSize, format: .number)
+                                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                                    .frame(width: 50)
+                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                            }
+                                        }
+                                    }
+
                                     settingsRow("Confidence Threshold") {
                                         HStack(spacing: 8) {
                                             Slider(value: $viewModel.scalpingConfig.confidenceThreshold, in: 5...95, step: 1)
@@ -1570,9 +1779,9 @@ struct DashboardView: View {
                                     
                                     settingsRow("Min Signal Score") {
                                         HStack(spacing: 8) {
-                                            Slider(value: $viewModel.minScalpingScore, in: 10...50, step: 1)
+                                            Slider(value: $viewModel.scalpingConfig.minScore, in: 10...50, step: 1)
                                                 .frame(width: 120)
-                                            Text("\(Int(viewModel.minScalpingScore))")
+                                            Text("\(Int(viewModel.scalpingConfig.minScore))")
                                                 .font(.system(size: 12, weight: .bold, design: .monospaced))
                                                 .foregroundColor(.accentGold)
                                                 .frame(width: 30, alignment: .trailing)
@@ -1581,14 +1790,45 @@ struct DashboardView: View {
                                     
                                     settingsRow("Cooldown (seconds)") {
                                         HStack(spacing: 8) {
-                                            Slider(value: $viewModel.signalCooldownSeconds, in: 30...600, step: 15)
+                                            Slider(value: $viewModel.scalpingConfig.cooldownSeconds, in: 30...600, step: 15)
                                                 .frame(width: 120)
-                                            Text("\(Int(viewModel.signalCooldownSeconds))s")
+                                            Text("\(Int(viewModel.scalpingConfig.cooldownSeconds))s")
                                                 .font(.system(size: 12, weight: .bold, design: .monospaced))
                                                 .foregroundColor(.accentGold)
                                                 .frame(width: 40, alignment: .trailing)
                                         }
                                     }
+
+                                    settingsRow("Trend Confluence") {
+                                        HStack(spacing: 8) {
+                                            Slider(value: $viewModel.mandatoryConfluenceLevel, in: 0...3, step: 1)
+                                                .frame(width: 120)
+                                            let levelText = ["None", "H4", "H4+D1", "Elite"][Int(viewModel.mandatoryConfluenceLevel)]
+                                            Text(levelText)
+                                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.accentGold)
+                                                .frame(width: 50, alignment: .trailing)
+                                        }
+                                        .onChange(of: viewModel.mandatoryConfluenceLevel) { old, newValue in
+                                            viewModel.scalpingConfig.mandatoryConfluenceLevel = Int(newValue)
+                                        }
+                                    }
+                                    
+                                    settingsRow("Strategy Pillars") {
+                                        HStack(spacing: 8) {
+                                            Slider(value: Binding(
+                                                get: { Double(viewModel.scalpingConfig.minConfluencePillars) },
+                                                set: { viewModel.scalpingConfig.minConfluencePillars = Int($0) }
+                                            ), in: 1...7, step: 1)
+                                            .frame(width: 120)
+                                            Text("\(viewModel.scalpingConfig.minConfluencePillars)/7")
+                                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.accentGold)
+                                                .frame(width: 36, alignment: .trailing)
+                                        }
+                                    }
+                                    .help("Minimum number of strategy pillars that must align to trigger a signal.")
+                                    .help("0: M1 only, 1: H4 alignment, 2: H4+D1 (Recommended), 3: H4+D1+W1 (Elite Only)")
                                 }
                                 .padding(16)
                             }
@@ -1659,17 +1899,24 @@ struct DashboardView: View {
                                             }
                                         }) {
                                             HStack(spacing: 6) {
-                                                Image(systemName: "bolt.fill")
-                                                Text(viewModel.mt5Connected ? "RECHECK MT5" : "CONNECT MT5")
+                                                if viewModel.isConnecting {
+                                                    ProgressView()
+                                                        .scaleEffect(0.5)
+                                                        .tint(.bgPrimary)
+                                                } else {
+                                                    Image(systemName: "bolt.fill")
+                                                }
+                                                Text(viewModel.isConnecting ? "CONNECTING..." : (viewModel.mt5Connected ? "RECHECK MT5" : "CONNECT MT5"))
                                                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                                             }
                                             .frame(maxWidth: .infinity)
                                             .padding(.vertical, 8)
-                                            .background(Color.accentCyan)
+                                            .background(viewModel.isConnecting ? Color.accentCyan.opacity(0.5) : Color.accentCyan)
                                             .foregroundColor(.bgPrimary)
                                             .cornerRadius(7)
                                         }
                                         .buttonStyle(.plain)
+                                        .disabled(viewModel.isConnecting)
                                     }
                                 }
                                 .padding(16)
@@ -1681,22 +1928,30 @@ struct DashboardView: View {
                                     sectionHeader("ACTIVE TRADING PAIRS", icon: "chart.line.uptrend.xyaxis", color: .accentCyan)
                                     Divider().background(Color.borderSubtle)
                                     
-                                    let forexPairs = TradingPair.allCases.filter { $0.category == "Forex" }.map { $0.rawValue }.sorted()
-                                    let cryptoPairs = TradingPair.allCases.filter { $0.category == "Crypto" }.map { $0.rawValue }.sorted()
+                                    let majorPairs = TradingPair.allCases.filter { !$0.isExotic }.map { $0.rawValue }.sorted()
+                                    let exoticPairs = TradingPair.allCases.filter { $0.isExotic }.map { $0.rawValue }.sorted()
                                     
                                     ScrollView {
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            Text("FOREX").font(.system(size: 10, weight: .bold)).foregroundColor(.accentGold)
-                                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 8) {
-                                                ForEach(forexPairs, id: \.self) { symbol in
-                                                    pairToggle(symbol: symbol)
+                                        VStack(alignment: .leading, spacing: 16) {
+                                            if !majorPairs.isEmpty {
+                                                VStack(alignment: .leading, spacing: 8) {
+                                                    Text("MAJOR PAIRS").font(.system(size: 10, weight: .bold)).foregroundColor(.accentGold)
+                                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 8) {
+                                                        ForEach(majorPairs, id: \.self) { symbol in
+                                                            pairToggle(symbol: symbol)
+                                                        }
+                                                    }
                                                 }
                                             }
                                             
-                                            Text("CRYPTO").font(.system(size: 10, weight: .bold)).foregroundColor(.accentPurple).padding(.top, 8)
-                                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 8) {
-                                                ForEach(cryptoPairs, id: \.self) { symbol in
-                                                    pairToggle(symbol: symbol)
+                                            if !exoticPairs.isEmpty {
+                                                VStack(alignment: .leading, spacing: 8) {
+                                                    Text("EXOTIC PAIRS").font(.system(size: 10, weight: .bold)).foregroundColor(.accentPurple)
+                                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 8) {
+                                                        ForEach(exoticPairs, id: \.self) { symbol in
+                                                            pairToggle(symbol: symbol)
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -1785,8 +2040,17 @@ struct DashboardView: View {
         Section("Risk Management") {
             HStack {
                 Text("Account Balance"); Spacer()
-                TextField("Amount", value: $viewModel.accountBalance, format: .number)
-                    .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
+                HStack {
+                    Text("KES \(String(format: "%.2f", viewModel.accountBalance))")
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button(action: {
+                        Task { await viewModel.refreshAccountInfo() }
+                    }) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    Image(systemName: "lock.fill").font(.caption).foregroundColor(.gray)
+                }
             }
             HStack {
                 Text("Risk per Trade (%)"); Spacer()
@@ -1810,10 +2074,30 @@ struct DashboardView: View {
     var scalpingConfigSection: some View {
         #if os(iOS)
         Section("Scalping Configuration") {
+            Toggle("Manual Volume/Lot", isOn: $viewModel.scalpingConfig.useManualLot)
+            
+            if viewModel.scalpingConfig.useManualLot {
+                HStack {
+                    Text("Lot Size"); Spacer()
+                    TextField("0.01", value: $viewModel.scalpingConfig.manualLotSize, format: .number)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+
             HStack {
                 Text("Min Confidence %"); Spacer()
-                Slider(value: $viewModel.scalpingConfig.confidenceThreshold, in: 5...50, step: 1)
+                Slider(value: $viewModel.scalpingConfig.confidenceThreshold, in: 5...98, step: 1)
                 Text("\(Int(viewModel.scalpingConfig.confidenceThreshold))%")
+            }
+            HStack {
+                Text("Trend Confluence"); Spacer()
+                Slider(value: $viewModel.mandatoryConfluenceLevel, in: 0...3, step: 1)
+                let levelText = ["None", "H4", "H4+D1", "Elite"][Int(viewModel.mandatoryConfluenceLevel)]
+                Text(levelText).font(.caption).foregroundColor(.accentGold)
+            }
+            .onChange(of: viewModel.mandatoryConfluenceLevel) { old, newValue in
+                viewModel.scalpingConfig.mandatoryConfluenceLevel = Int(newValue)
             }
             HStack {
                 Text("Spread Tolerance (bps)"); Spacer()
@@ -1821,9 +2105,9 @@ struct DashboardView: View {
                 Text("\(Int(viewModel.scalpingConfig.spreadTolerance))")
             }
             HStack {
-                Text("RSI Weight"); Spacer()
-                Slider(value: $viewModel.scalpingConfig.rsiWeight, in: 5...30, step: 1)
-                Text("\(Int(viewModel.scalpingConfig.rsiWeight))")
+                Text("Min Signal Score"); Spacer()
+                Slider(value: $viewModel.scalpingConfig.minScore, in: 10...50, step: 1)
+                Text("\(Int(viewModel.scalpingConfig.minScore))")
             }
         }
         #else
@@ -1834,18 +2118,12 @@ struct DashboardView: View {
     @ViewBuilder
     var tradingPairsSection: some View {
         #if os(iOS)
-        Section("Trading Pairs") {
-            let forexPairs = viewModel.availableSymbols.filter {
-                $0.hasSuffix("USD") || $0.contains("JPY") || $0.contains("CHF") || $0.contains("TRY") || $0.contains("CZK")
-            }.sorted()
+        Group {
+            let majorPairs = TradingPair.allCases.filter { !$0.isExotic }.map { $0.rawValue }.sorted()
+            let exoticPairs = TradingPair.allCases.filter { $0.isExotic }.map { $0.rawValue }.sorted()
             
-            let cryptoPairs = viewModel.availableSymbols.filter {
-                $0.hasSuffix("USDT") && !forexPairs.contains($0)
-            }.sorted()
-            
-            if !forexPairs.isEmpty {
-                Text("FOREX").font(.caption).foregroundColor(.accentGold)
-                ForEach(forexPairs, id: \.self) { symbol in
+            Section("Major Pairs") {
+                ForEach(majorPairs, id: \.self) { symbol in
                     HStack {
                         Text(symbol); Spacer()
                         if viewModel.activeSymbols.contains(symbol) {
@@ -1863,9 +2141,8 @@ struct DashboardView: View {
                 }
             }
             
-            if !cryptoPairs.isEmpty {
-                Text("CRYPTO").font(.caption).foregroundColor(.accentPurple).padding(.top, 8)
-                ForEach(cryptoPairs, id: \.self) { symbol in
+            Section("Exotic Pairs") {
+                ForEach(exoticPairs, id: \.self) { symbol in
                     HStack {
                         Text(symbol); Spacer()
                         if viewModel.activeSymbols.contains(symbol) {

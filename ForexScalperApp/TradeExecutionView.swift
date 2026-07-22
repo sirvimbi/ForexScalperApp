@@ -251,12 +251,25 @@ struct TradeExecutionView: View {
     }
     
     private func executeTrade() {
+        // Validation
+        guard positionSize >= 0.01 else {
+            viewModel.showNotification(title: "Invalid Volume", message: "Minimum trade volume is 0.01 lots")
+            return
+        }
+        
+        if orderType == .buyLimit || orderType == .buyStop || orderType == .sellLimit || orderType == .sellStop {
+            guard signal.price > 0 else {
+                viewModel.showNotification(title: "Invalid Price", message: "A valid price is required for pending orders")
+                return
+            }
+        }
+        
         isExecuting = true
         
         var finalSignal = signal
         finalSignal.positionSize = positionSize
-        finalSignal.stopLoss = stopLoss
-        finalSignal.takeProfit = takeProfit
+        finalSignal.stopLoss = stopLoss > 0 ? stopLoss : nil
+        finalSignal.takeProfit = takeProfit > 0 ? takeProfit : nil
         finalSignal.orderType = orderType
         finalSignal.filler = fillingType
         finalSignal.executionMode = executionMode
@@ -264,6 +277,9 @@ struct TradeExecutionView: View {
         finalSignal.comment = comment
         
         viewModel.acceptSignal(finalSignal)
+        
+        // Immediate UI feedback via notification
+        viewModel.showNotification(title: "Execution Dispatched", message: "\(orderType.rawValue) \(signal.symbol) @ \(String(format: "%.5f", signal.price))")
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             isExecuting = false
@@ -304,12 +320,12 @@ struct TradeDetailView: View {
                 Section("Prices") {
                     HStack {
                         Text("Entry"); Spacer()
-                        Text(String(format: "$%.5f", trade.entryPrice)).monospacedDigit()
+                        Text(String(format: "%@%.5f", viewModel.currencySymbol, trade.entryPrice)).monospacedDigit()
                     }
                     if let exitPrice = trade.exitPrice {
                         HStack {
                             Text("Exit"); Spacer()
-                            Text(String(format: "$%.5f", exitPrice)).monospacedDigit()
+                            Text(String(format: "%@%.5f", viewModel.currencySymbol, exitPrice)).monospacedDigit()
                         }
                     }
                 }
@@ -318,7 +334,7 @@ struct TradeDetailView: View {
                     Section("P&L") {
                         HStack {
                             Text("Total"); Spacer()
-                            Text(String(format: "%@$%.2f", pnl >= 0 ? "+" : "", pnl))
+                            Text(String(format: "%@%@%.2f", pnl >= 0 ? "+" : "", viewModel.currencySymbol, pnl))
                                 .foregroundColor(pnl >= 0 ? .green : .red)
                                 .bold()
                         }
@@ -367,7 +383,7 @@ struct TradeDetailView: View {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text("Entry Price").font(.caption).foregroundColor(.secondary)
-                                Text(String(format: "$%.5f", trade.entryPrice))
+                                Text(String(format: "%@%.5f", viewModel.currencySymbol, trade.entryPrice))
                                     .font(.title3.monospacedDigit())
                             }
                         }
@@ -376,7 +392,7 @@ struct TradeDetailView: View {
                             HStack {
                                 VStack(alignment: .leading) {
                                     Text("P&L").font(.caption).foregroundColor(.secondary)
-                                    Text(String(format: "%@$%.2f", pnl >= 0 ? "+" : "", pnl))
+                                    Text(String(format: "%@%@%.2f", pnl >= 0 ? "+" : "", viewModel.currencySymbol, pnl))
                                         .font(.title2.bold())
                                         .foregroundColor(pnl >= 0 ? .green : .red)
                                 }

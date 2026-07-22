@@ -2,6 +2,31 @@
 import Foundation
 import SwiftUI
 
+import UniformTypeIdentifiers
+
+// MARK: - CSV Document for Export
+struct CSVDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.commaSeparatedText] }
+    var text: String
+
+    init(text: String = "") {
+        self.text = text
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        if let data = configuration.file.regularFileContents {
+            text = String(decoding: data, as: UTF8.self)
+        } else {
+            text = ""
+        }
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        let data = Data(text.utf8)
+        return FileWrapper(regularFileWithContents: data)
+    }
+}
+
 // MARK: - Signal Types
 enum SignalType: String, Codable, Sendable, CaseIterable {
     case buy, sell, none
@@ -86,7 +111,7 @@ enum MT5ExecutionMode: String, Codable, Sendable {
     case exchange = "EXCHANGE"
 }
 
-// MARK: - Signal struct with Codable conformance
+// MARK: - Signal struct
 struct Signal: Identifiable, Sendable, Codable {
     let id: UUID
     let type: SignalType
@@ -111,7 +136,6 @@ struct Signal: Identifiable, Sendable, Codable {
     var tradeId: UUID?
     var externalDealId: String?
     
-    // MT5 Specific fields for "God Mode"
     var magicNumber: Int?
     var comment: String?
     var deviation: Int?
@@ -150,7 +174,6 @@ struct Signal: Identifiable, Sendable, Codable {
         self.tradeId = try container.decodeIfPresent(UUID.self, forKey: .tradeId)
         self.externalDealId = try container.decodeIfPresent(String.self, forKey: .externalDealId)
         
-        // MT5
         self.magicNumber = try container.decodeIfPresent(Int.self, forKey: .magicNumber)
         self.comment = try container.decodeIfPresent(String.self, forKey: .comment)
         self.deviation = try container.decodeIfPresent(Int.self, forKey: .deviation)
@@ -184,7 +207,6 @@ struct Signal: Identifiable, Sendable, Codable {
         try container.encodeIfPresent(tradeId, forKey: .tradeId)
         try container.encodeIfPresent(externalDealId, forKey: .externalDealId)
         
-        // MT5
         try container.encodeIfPresent(magicNumber, forKey: .magicNumber)
         try container.encodeIfPresent(comment, forKey: .comment)
         try container.encodeIfPresent(deviation, forKey: .deviation)
@@ -260,15 +282,15 @@ struct Signal: Identifiable, Sendable, Codable {
     }
 }
 
-// MARK: - Signal Extension for Expiry
+// MARK: - Signal Extension
 extension Signal {
     var expiryDuration: TimeInterval {
         switch timeframe {
-        case "1m": return 180 // 3 minutes
-        case "5m": return 900 // 15 minutes
-        case "15m": return 2700 // 45 minutes
-        case "1h": return 10800 // 3 hours
-        default: return 300 // 5 minutes default
+        case "1m": return 180 
+        case "5m": return 900 
+        case "15m": return 2700 
+        case "1h": return 10800 
+        default: return 300 
         }
     }
     
@@ -304,19 +326,22 @@ struct TradeRecord: Identifiable, Codable, Sendable {
     var exitPrice: Double?
     var exitTime: Date?
     let confidence: Double
-    let takeProfit: Double?
-    let stopLoss: Double?
+    var takeProfit: Double?
+    var stopLoss: Double?
     let positionSize: Double?
     var pnl: Double?
     var pnlPercent: Double?
     var status: TradeStatus
     var externalDealId: String?
     
+    // God Mode Enhanced Fields
+    var swap: Double?
+    var commission: Double?
+    var signalTime: Date?
+    var isAccepted: Bool = true
+    
     enum TradeStatus: String, Codable {
-        case active
-        case completed
-        case stopped
-        case expired
+        case active, completed, stopped, expired, pending
     }
     
     init(id: UUID = UUID(),
@@ -334,7 +359,10 @@ struct TradeRecord: Identifiable, Codable, Sendable {
          pnl: Double? = nil,
          pnlPercent: Double? = nil,
          status: TradeStatus = .active,
-         externalDealId: String? = nil) {
+         externalDealId: String? = nil,
+         swap: Double? = nil,
+         commission: Double? = nil,
+         signalTime: Date? = nil) {
         self.id = id
         self.signalId = signalId
         self.symbol = symbol
@@ -351,6 +379,9 @@ struct TradeRecord: Identifiable, Codable, Sendable {
         self.pnlPercent = pnlPercent
         self.status = status
         self.externalDealId = externalDealId
+        self.swap = swap
+        self.commission = commission
+        self.signalTime = signalTime ?? entryTime
     }
     
     var isActive: Bool { status == .active }
@@ -360,140 +391,128 @@ struct TradeRecord: Identifiable, Codable, Sendable {
     }
 }
 
-// MARK: - Trading Pair Enum for better type safety
+// MARK: - Trading Pair Enum (Strict Forex Only)
 enum TradingPair: String, CaseIterable {
-    // Forex Majors
-    case eurusd = "EURUSD"
-    case gbpusd = "GBPUSD"
-    case usdjpy = "USDJPY"
-    case usdchf = "USDCHF"
-    case audusd = "AUDUSD"
-    case usdcad = "USDCAD"
-    case nzdusd = "NZDUSD"
-    
-    // Forex Minors/Crosses
-    case eurgbp = "EURGBP"
-    case eurjpy = "EURJPY"
-    case gbpjpy = "GBPJPY"
-    case audjpy = "AUDJPY"
-    case cadjpy = "CADJPY"
-    case chfjpy = "CHFJPY"
-    case euraud = "EURAUD"
-    case eurcad = "EURCAD"
-    case gbpaud = "GBPAUD"
-    case audcad = "AUDCAD"
-    
-    // Forex Exotics
-    case usdmxn = "USDMXN"
-    case usdzar = "USDZAR"
-    case usdtry = "USDTRY"
-    case usdhkd = "USDHKD"
-    case usdsgd = "USDSGD"
-    case usdnok = "USDNOK"
-    case usdsek = "USDSEK"
-    case usddkk = "USDDKK"
-    case usdpln = "USDPLN"
-    case usdcnh = "USDCNH"
-    case eurczk = "EURCZK"
-    case eurhuf = "EURHUF"
-    case eurpln = "EURPLN"
-    case eurtry = "EURTRY"
-    
-    // Crypto
-    case btcusdt = "BTCUSDT"
-    case ethusdt = "ETHUSDT"
-    case xrpusdt = "XRPUSDT"
-    case adausdt = "ADAUSDT"
-    case solusdt = "SOLUSDT"
-    case dotusdt = "DOTUSDT"
-    case dogeusdt = "DOGEUSDT"
-    case avaxusdt = "AVAXUSDT"
-    case linkusdt = "LINKUSDT"
-    case ltcusdt = "LTCUSDT"
+    // Majors
+    case eurusd = "EURUSD", gbpusd = "GBPUSD", usdjpy = "USDJPY", usdchf = "USDCHF", audusd = "AUDUSD", usdcad = "USDCAD", nzdusd = "NZDUSD"
+    // Minors
+    case eurgbp = "EURGBP", eurjpy = "EURJPY", gbpjpy = "GBPJPY", audjpy = "AUDJPY", cadjpy = "CADJPY", chfjpy = "CHFJPY", euraud = "EURAUD", eurcad = "EURCAD", eurchf = "EURCHF", eurnzd = "EURNZD", gbpaud = "GBPAUD", gbpcad = "GBPCAD", gbpchf = "GBPCHF", gbpnzd = "GBPNZD", audcad = "AUDCAD", audchf = "AUDCHF", audnzd = "AUDNZD", cadchf = "CADCHF", nzdcad = "NZDCAD", nzdchf = "NZDCHF", nzdjpy = "NZDJPY"
+    // Exotics
+    case usdsek = "USDSEK", usdnok = "USDNOK", usdpln = "USDPLN", usdmxn = "USDMXN", usdzar = "USDZAR", usdhkd = "USDHKD", usdsgd = "USDSGD", usdtry = "USDTRY", usdils = "USDILS", usdcnh = "USDCNH", usdthb = "USDTHB", usddkk = "USDDKK", eursek = "EURSEK", eurnok = "EURNOK", eurpln = "EURPLN", eurmxn = "EURMXN", eurzar = "EURZAR", eurtry = "EURTRY", eurdkk = "EURDKK", eurhkd = "EURHKD", eurczk = "EURCZK", eurhuf = "EURHUF", gbptry = "GBPTRY"
     
     var displayName: String {
-        switch self {
-        case .eurusd: return "EUR/USD"
-        case .gbpusd: return "GBP/USD"
-        case .usdjpy: return "USD/JPY"
-        case .usdchf: return "USD/CHF"
-        case .audusd: return "AUD/USD"
-        case .usdcad: return "USD/CAD"
-        case .nzdusd: return "NZD/USD"
-        case .eurgbp: return "EUR/GBP"
-        case .eurjpy: return "EUR/JPY"
-        case .gbpjpy: return "GBP/JPY"
-        case .audjpy: return "AUD/JPY"
-        case .cadjpy: return "CAD/JPY"
-        case .chfjpy: return "CHF/JPY"
-        case .euraud: return "EUR/AUD"
-        case .eurcad: return "EUR/CAD"
-        case .gbpaud: return "GBP/AUD"
-        case .audcad: return "AUD/CAD"
-        case .usdmxn: return "USD/MXN"
-        case .usdzar: return "USD/ZAR"
-        case .usdtry: return "USD/TRY"
-        case .usdhkd: return "USD/HKD"
-        case .usdsgd: return "USD/SGD"
-        case .usdnok: return "USD/NOK"
-        case .usdsek: return "USD/SEK"
-        case .usddkk: return "USD/DKK"
-        case .usdpln: return "USD/PLN"
-        case .usdcnh: return "USD/CNH"
-        case .eurczk: return "EUR/CZK"
-        case .eurhuf: return "EUR/HUF"
-        case .eurpln: return "EUR/PLN"
-        case .eurtry: return "EUR/TRY"
-        case .btcusdt: return "BTC/USDT"
-        case .ethusdt: return "ETH/USDT"
-        case .xrpusdt: return "XRP/USDT"
-        case .adausdt: return "ADA/USDT"
-        case .solusdt: return "SOL/USDT"
-        case .dotusdt: return "DOT/USDT"
-        case .dogeusdt: return "DOGE/USDT"
-        case .avaxusdt: return "AVAX/USDT"
-        case .linkusdt: return "LINK/USDT"
-        case .ltcusdt: return "LTC/USDT"
-        }
+        return self.rawValue.prefix(3) + "/" + self.rawValue.suffix(3)
     }
     
     var category: String {
-        switch self {
-        case .eurusd, .gbpusd, .usdjpy, .usdchf, .audusd, .usdcad, .nzdusd,
-             .eurgbp, .eurjpy, .gbpjpy, .audjpy, .cadjpy, .chfjpy, .euraud, .eurcad, .gbpaud, .audcad,
-             .usdmxn, .usdzar, .usdtry, .usdhkd, .usdsgd, .usdnok, .usdsek, .usddkk, .usdpln, .usdcnh,
-             .eurczk, .eurhuf, .eurpln, .eurtry:
-            return "Forex"
-        case .btcusdt, .ethusdt, .xrpusdt, .adausdt, .solusdt, .dotusdt, .dogeusdt, .avaxusdt, .linkusdt, .ltcusdt:
-            return "Crypto"
-        }
+        return "Forex"
     }
-}
-
-// MARK: - Time Filter
-enum TimeFilter: String, CaseIterable {
-    case oneHour = "1h"
-    case sixHours = "6h"
-    case twelveHours = "12h"
-    case twentyFourHours = "24h"
-    case oneWeek = "1w"
-    case oneMonth = "1m"
-    case allTime = "All"
     
-    var hours: TimeInterval? {
-        switch self {
-        case .oneHour: return 1
-        case .sixHours: return 6
-        case .twelveHours: return 12
-        case .twentyFourHours: return 24
-        case .oneWeek: return 24 * 7
-        case .oneMonth: return 24 * 30
-        case .allTime: return nil
-        }
+    var isExotic: Bool {
+        let exotics: Set<TradingPair> = [
+            .usdsek, .usdnok, .usdpln, .usdmxn, .usdzar, .usdhkd, .usdsgd, .usdtry, .usdils, .usdcnh, .usdthb, .usddkk,
+            .eursek, .eurnok, .eurpln, .eurmxn, .eurzar, .eurtry, .eurdkk, .eurhkd, .eurczk, .eurhuf, .gbptry
+        ]
+        return exotics.contains(self)
     }
 }
 
-// MARK: - Risk Management
+// MARK: - Scalping Supporting Types
+enum PricePattern: String, Codable, Sendable {
+    case none
+    case bullishEngulfing
+    case bearishEngulfing
+    case hammer
+    case invertedHammer
+    case morningStar
+    case eveningStar
+    case shootingStar
+}
+
+enum MarketRegime: String, Codable, Sendable {
+    case trending
+    case ranging
+    case volatile
+}
+
+struct IndicatorSet: Sendable {
+    let rsi: Double
+    let stochasticK: Double
+    let stochasticD: Double
+    let cci: Double
+    let sar: Double
+    let atr: Double
+    let ema9: Double
+    let ema21: Double
+    let ema50: Double
+    let ema9_5m: Double
+    let ema21_5m: Double
+    let ema50_5m: Double
+    let bbPosition: Double
+    let volumeRatio: Double
+    let volumeProfilePOC: Double
+    let support: Double
+    let resistance: Double
+    let sessions: (asiaRange: (high: Double, low: Double),
+                   londonRange: (high: Double, low: Double),
+                   usRange: (high: Double, low: Double))
+    let trendStrength: Double
+    let pricePattern: PricePattern
+    let regime: MarketRegime
+    let currentPrice: Double
+    let h4Trend: SignalType
+    let d1Trend: SignalType
+    let w1Trend: SignalType
+}
+
+struct ScalpingSignal: Sendable {
+    let type: SignalType
+    let symbol: String
+    let price: Double
+    let confidence: Double
+    let score: Int
+    let sellScore: Int
+    let indicators: IndicatorSet
+    let confidenceFactors: [String: Double]
+    let timestamp: Date
+    
+    // God Mode Fields
+    var stopLoss: Double?
+    var takeProfit: Double?
+    var volume: Double?
+    var orderType: MT5OrderType?
+    var fillingType: MT5FillingType?
+    var executionMode: MT5ExecutionMode?
+    
+    func withConfidence(_ newConfidence: Double) -> ScalpingSignal {
+        ScalpingSignal(
+            type: type,
+            symbol: symbol,
+            price: price,
+            confidence: newConfidence,
+            score: score,
+            sellScore: sellScore,
+            indicators: indicators,
+            confidenceFactors: confidenceFactors,
+            timestamp: timestamp,
+            stopLoss: stopLoss,
+            takeProfit: takeProfit,
+            volume: volume,
+            orderType: orderType,
+            fillingType: fillingType,
+            executionMode: executionMode
+        )
+    }
+}
+
+struct SignalQuality: Sendable {
+    let type: SignalType
+    let confidence: Double
+    let timestamp: Date
+    var wasWin: Bool?
+}
+
+// MARK: - Supporting Structs
 struct RiskParameters {
     let accountBalance: Double
     let riskPerTrade: Double
@@ -509,23 +528,6 @@ struct PositionSize {
     let potentialReward: Double
 }
 
-// MARK: - Trade Stats
-struct TradeStats {
-    let totalTrades: Int
-    let activeTrades: Int
-    let closedTrades: Int
-    let wins: Int
-    let losses: Int
-    let winRate: Double
-    let totalPnL: Double
-    let averageWin: Double
-    let averageLoss: Double
-    let profitFactor: Double
-    let symbolPerformance: [String: (trades: Int, wins: Int, pnl: Double)]
-    let confidencePerformance: [(range: String, trades: Int, wins: Int, winRate: Double)]
-}
-
-// MARK: - Backtest Result
 struct BacktestResultData {
     let symbol: String
     let totalTrades: Int
@@ -536,121 +538,43 @@ struct BacktestResultData {
     let maxDrawdown: Double
     let sharpeRatio: Double
     let profitFactor: Double
-    
-    var avgWin: Double = 0
-    var avgLoss: Double = 0
-    var startBalance: Double = 10000
-    var endBalance: Double = 0
-    var equityCurve: [Double] = []
-    var sampleTrades: [BacktestTrade] = []
-    var netPnL: Double { totalPnL }
 }
 
-struct BacktestTrade {
-    let symbol: String
-    let direction: String
-    let entryPrice: Double
-    let exitPrice: Double
-    let pnl: Double
-}
-
-// MARK: - IG Types for API Integration
-struct IGAccountInfo: Codable {
-    let accountId: String
-    let accountName: String
-    let balance: Double
-    let deposit: Double
-    let profitLoss: Double
-    let available: Double
-    let currency: String
-}
-
-struct IGPosition: Codable {
-    let dealId: String
-    let epic: String
-    let marketName: String
-    let direction: String
-    let size: Double
-    let level: Double
-    let limitLevel: Double?
-    let stopLevel: Double?
-    let createdDate: String
-    let currency: String
-    let profitLoss: Double?
-}
-
-struct IGMarketSnapshot: Codable {
-    let symbol: String
-    let epic: String
-    let bid: Double
-    let offer: Double
-    let high: Double
-    let low: Double
-    let change: Double
-    let changePct: Double
-    let volume: Double
-    let updateTime: String
-    let marketStatus: String
-}
-
-struct IGCandle: Codable {
-    let openTime: String
-    let openPrice: Double
-    let highPrice: Double
-    let lowPrice: Double
-    let closePrice: Double
-    let lastTradedVolume: Double
-}
-
-// MARK: - API Response Wrapper
-struct APIResponse<T: Codable>: Codable {
-    let success: Bool
-    let data: T?
-    let error: String?
-    let message: String?
-}
-
-// MARK: - MT5 Types
+// MARK: - MT5 & IG Models
 struct MT5AccountInfo: Codable {
     let login: Int
-    let balance: Double
-    let equity: Double
-    let margin: Double
-    let marginFree: Double
-    let profit: Double
-    let currency: String
-    let server: String
+    let balance, equity, margin, margin_free, profit: Double
+    let currency, server: String
+    
+    enum CodingKeys: String, CodingKey {
+        case login, balance, equity, margin, margin_free, profit, currency, server
+    }
 }
 
 struct MT5Position: Codable {
-    let ticket: Int
-    let symbol: String
-    let type: String
-    let volume: Double
-    let priceOpen: Double
-    let sl: Double
-    let tp: Double
-    let priceCurrent: Double
-    let profit: Double
-    let magic: Int?
+    let ticket: Int64
+    let symbol, type: String
+    let volume, priceOpen, sl, tp, priceCurrent, profit: Double
+    let magic: Int64?
     let comment: String?
+    let openTime: Int64?
+    
+    enum CodingKeys: String, CodingKey {
+        case ticket, symbol, type, volume, sl, tp, magic, comment, profit
+        case priceOpen = "price_open", priceCurrent = "price_current", openTime = "open_time"
+    }
 }
 
 struct MT5TradeResult: Codable {
     let retcode: Int
-    let order: Int?
-    let deal: Int?
-    let volume: Double
-    let price: Double
-    let bid: Double
-    let ask: Double
+    let order, deal: Int64?
+    let volume, price, bid, ask: Double
     let comment: String?
-    let request_id: Int?
-    let retcode_external: Int?
 }
 
-// MARK: - Notification Names
+// MARK: - Notifications
 extension Notification.Name {
+    static let newSignalGenerated = Notification.Name("newSignalGenerated")
     static let acceptSignal = Notification.Name("acceptSignal")
     static let denySignal = Notification.Name("denySignal")
     static let showSignalDashboard = Notification.Name("showSignalDashboard")

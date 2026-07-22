@@ -48,9 +48,13 @@ actor RefactoredRiskManager: RiskManagerProtocol {
     func calculatePositionSize(for signal: Signal) async -> PositionSize? {
         let riskAmount = parameters.accountBalance * parameters.riskPerTrade
         
+        // KES ACCOUNT PROTECTION: Convert KES risk to USD base
+        let kesToUsdRate = 130.0
+        let riskInUsd = riskAmount / kesToUsdRate
+        
         // Calculate position size based on volatility
         let volatility = signal.volume > 0 ? signal.volume / 1000 : 0.001
-        let baseUnits = riskAmount / (signal.price * volatility)
+        let baseUnits = riskInUsd / (signal.price * volatility)
         
         // Adjust for market conditions
         let adjustedUnits = baseUnits * getPositionSizeMultiplier(for: signal)

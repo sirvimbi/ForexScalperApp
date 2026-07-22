@@ -48,10 +48,14 @@ actor BinanceService: MarketDataProvider {
         print("📥 Fetching historical data for \(symbols.count) symbols...")
         
         for symbol in symbols {
+            let binanceSymbol = convertToBinanceSymbol(symbol)
+            if binanceSymbol.isEmpty { continue }
+            
+            // Collect all timeframes first before firing any "recent" callbacks
             for timeframe in timeframes {
-                await fetchKlines(symbol: symbol, interval: convertToBinanceInterval(timeframe), limit: 200)
-                // Add a small delay to avoid rate limiting
-                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+                // ELITE DEPTH: 1000 bars for better trend analysis
+                await fetchKlines(symbol: symbol, interval: convertToBinanceInterval(timeframe), limit: 1000)
+                try? await Task.sleep(nanoseconds: 50_000_000)
             }
         }
         
@@ -60,6 +64,8 @@ actor BinanceService: MarketDataProvider {
     
     private func fetchKlines(symbol: String, interval: String, limit: Int) async {
         let binanceSymbol = convertToBinanceSymbol(symbol)
+        guard !binanceSymbol.isEmpty else { return }
+        
         let urlString = "\(baseURL)/klines?symbol=\(binanceSymbol)&interval=\(interval)&limit=\(limit)"
         
         guard let url = URL(string: urlString) else { return }
@@ -82,7 +88,7 @@ actor BinanceService: MarketDataProvider {
                               let volume = Double(item[5] as? String ?? "0") else {
                             return nil
                         }
-                        return Kline(open: open, high: high, low: low, close: close, volume: volume, closeTime: Int(closeTime))
+                        return Kline(open: open, high: high, low: low, close: close, volume: volume, closeTime: Int(closeTime / 1000))
                     }
                     
                     // Call the handler for each kline
@@ -91,7 +97,7 @@ actor BinanceService: MarketDataProvider {
                     }
                 }
             } else {
-                print("⚠️ Failed to fetch historical data for \(symbol) \(interval): \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                print("⚠️ Failed to fetch Binance historical data for \(symbol) (\(binanceSymbol)) \(interval): \((response as? HTTPURLResponse)?.statusCode ?? 0)")
             }
         } catch {
             print("❌ Error fetching historical data for \(symbol) \(interval): \(error)")
@@ -100,13 +106,20 @@ actor BinanceService: MarketDataProvider {
     
     private func connectWebSocket() {
         // Binance requires lowercase symbols and specific stream naming
-        let streams = symbols.flatMap { symbol in
-            timeframes.map { timeframe in
-                let binanceSymbol = convertToBinanceSymbol(symbol).lowercased()
+        let streams = symbols.compactMap { symbol -> [String]? in
+            let binanceSymbol = convertToBinanceSymbol(symbol).lowercased()
+            if binanceSymbol.isEmpty { return nil }
+            
+            return timeframes.map { timeframe in
                 let binanceInterval = convertToBinanceInterval(timeframe)
                 return "\(binanceSymbol)@kline_\(binanceInterval)"
             }
-        }.joined(separator: "/")
+        }.flatMap { $0 }.joined(separator: "/")
+        
+        if streams.isEmpty {
+            print("ℹ️ No symbols available for Binance WebSocket")
+            return
+        }
         
         guard let url = URL(string: wsURL + streams) else { return }
         
@@ -116,7 +129,6 @@ actor BinanceService: MarketDataProvider {
         
         receiveMessage()
         print("✅ WebSocket connected for real-time updates")
-        print("📡 Now monitoring \(symbols.count) symbols in real-time")
     }
     
     private func receiveMessage() {
@@ -135,7 +147,9 @@ actor BinanceService: MarketDataProvider {
                 @unknown default:
                     break
                 }
-                self.receiveMessage()
+                Task { [weak self] in
+                    await self?.receiveMessage()
+                }
                 
             case .failure(let error):
                 print("❌ WebSocket Error: \(error.localizedDescription)")
@@ -164,7 +178,7 @@ actor BinanceService: MarketDataProvider {
             low: Double(detail.l) ?? 0,
             close: Double(detail.c) ?? 0,
             volume: Double(detail.v) ?? 0,
-            closeTime: detail.T
+            closeTime: Int(detail.T / 1000)
         )
         
         onKlineReceived?(symbol, timeframe, kline)
@@ -189,41 +203,33 @@ actor BinanceService: MarketDataProvider {
     // MARK: - Helpers
     
     private func convertToBinanceSymbol(_ symbol: String) -> String {
-        // 1. Precise mappings for known pairs
-        let forexToBinance = [
+        // PRODUCTION WHITELIST: Only return symbols verified to exist on Binance Spot API
+        // This prevents 400 errors for Forex pairs that Binance doesn't support as Spot.
+        
+        let whitelist = [
             "EURUSD": "EURUSDT",
             "GBPUSD": "GBPUSDT",
             "AUDUSD": "AUDUSDT",
-            "NZDUSD": "NZDUSDT",
-            "USDJPY": "USDJPY",   // Some Binance regions have this
-            "USDCAD": "USDCAD",
-            "USDCHF": "USDCHF",
-            "EURGBP": "EURGBP",
-            "EURJPY": "EURJPY",
-            "GBPJPY": "GBPJPY"
+            "BTCUSDT": "BTCUSDT",
+            "ETHUSDT": "ETHUSDT",
+            "XRPUSDT": "XRPUSDT",
+            "LTCUSDT": "LTCUSDT",
+            "ADAUSDT": "ADAUSDT",
+            "SOLUSDT": "SOLUSDT"
         ]
         
-        if let mapped = forexToBinance[symbol] {
+        if let mapped = whitelist[symbol] {
             return mapped
         }
         
-        // 2. Crypto mappings
-        let cryptoMajors = ["BTC", "ETH", "XRP", "ADA", "SOL", "DOT", "DOGE", "AVAX", "LINK", "LTC"]
-        for crypto in cryptoMajors {
-            if symbol.starts(with: crypto) && !symbol.hasSuffix("USDT") {
-                return "\(crypto)USDT"
-            }
-        }
-
-        // 3. If it already has USDT, return as is
-        if symbol.hasSuffix("USDT") { return symbol }
-        
-        // 4. Default: try appending USDT if it's a 3-letter crypto or common major
-        if symbol.count <= 4 {
-            return "\(symbol)USDT"
+        // If it's a crypto symbol already ending in USDT, allow it
+        if symbol.hasSuffix("USDT") {
+            return symbol
         }
         
-        return symbol
+        // For all other symbols (Exotic Forex, specialized crosses), return empty
+        // to force the app to use MT5 for historical data and real-time updates.
+        return ""
     }
     
     private func findOriginalSymbol(for binanceSymbol: String) -> String {
@@ -237,14 +243,15 @@ actor BinanceService: MarketDataProvider {
     }
     
     private func convertToBinanceInterval(_ timeframe: String) -> String {
-        switch timeframe {
-        case "1m": return "1m"
-        case "5m": return "5m"
-        case "15m": return "15m"
-        case "30m": return "30m"
-        case "1h": return "1h"
-        case "4h": return "4h"
-        case "1d": return "1d"
+        switch timeframe.uppercased() {
+        case "1M": return "1m"
+        case "5M": return "5m"
+        case "15M": return "15m"
+        case "30M": return "30m"
+        case "1H": return "1h"
+        case "4H": return "4h"
+        case "D1": return "1d"
+        case "W1": return "1w"
         default: return "1m"
         }
     }

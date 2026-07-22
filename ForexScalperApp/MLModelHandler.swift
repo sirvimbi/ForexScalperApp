@@ -17,7 +17,9 @@ actor MLModelHandler {
     
     init() {
         if !skipModelLoading {
-            loadModel()
+            Task {
+                await loadModel()
+            }
         } else {
             print("⚠️ SKIPPING Core ML model loading due to SKIP_COREML env var. Predictions will be disabled.")
         }
@@ -187,7 +189,7 @@ actor MLModelHandler {
               let volumeRatio = features["volume_ratio"],
               let returns = features["returns"],
               let bbPosition = features["bb_position"],
-              let atrPct = features["atr_pct"] else {
+              let _ = features["atr_pct"] else {
             print("⚠️ Insufficient features for rule-based signal")
             return nil
         }
