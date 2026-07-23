@@ -1993,6 +1993,48 @@ struct DashboardView: View {
                                 }
                                 .padding(16)
                             }
+
+                            // NOTIFICATIONS CARD (macOS)
+                            GlassCard {
+                                VStack(alignment: .leading, spacing: 14) {
+                                    sectionHeader("NOTIFICATIONS & SYSTEM", icon: "bell.badge.fill", color: .accentCyan)
+                                    Divider().background(Color.borderSubtle)
+                                    
+                                    Toggle("Signal Alerts", isOn: $viewModel.notifyOnSignal)
+                                        .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
+                                    Toggle("Trade Executions", isOn: $viewModel.notifyOnTrade)
+                                        .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
+                                    Toggle("Trade Closures", isOn: $viewModel.notifyOnClose)
+                                        .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
+                                    
+                                    Divider().background(Color.borderSubtle)
+                                    
+                                    Button(action: {
+                                        NotificationManager.shared.requestAuthorization()
+                                        // Send dummy to force registration
+                                        let content = UNMutableNotificationContent()
+                                        content.title = "God Mode System Check"
+                                        content.body = "Notification pipe is now active and synced."
+                                        content.sound = .default
+                                        let request = UNNotificationRequest(identifier: "test_mac", content: content, trigger: nil)
+                                        UNUserNotificationCenter.current().add(request)
+                                    }) {
+                                        HStack {
+                                            Image(systemName: "exclamationmark.shield.fill")
+                                            Text("FORCE ENABLE NOTIFICATIONS")
+                                        }
+                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 8)
+                                        .background(Color.accentCyan.opacity(0.1))
+                                        .foregroundColor(.accentCyan)
+                                        .cornerRadius(7)
+                                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.accentCyan.opacity(0.3), lineWidth: 1))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(16)
+                            }
                         }
                     }
                     .padding(20)
@@ -2233,6 +2275,17 @@ struct DashboardView: View {
         #if os(iOS)
         Section("Notifications") {
             Toggle("Signal Alerts", isOn: $viewModel.notifyOnSignal)
+            Button("FORCE ENABLE NOTIFICATIONS") {
+                NotificationManager.shared.requestAuthorization()
+                // Send dummy to force registration
+                let content = UNMutableNotificationContent()
+                content.title = "God Mode Active"
+                content.body = "Notifications are now synced with macOS."
+                let request = UNNotificationRequest(identifier: "test", content: content, trigger: nil)
+                UNUserNotificationCenter.current().add(request)
+            }
+            .foregroundColor(.accentCyan)
+
             Toggle("Trade Executed", isOn: $viewModel.notifyOnTrade)
             Toggle("Trade Closed", isOn: $viewModel.notifyOnClose)
             Toggle("Expiry Warning", isOn: $viewModel.notifyOnExpiry)

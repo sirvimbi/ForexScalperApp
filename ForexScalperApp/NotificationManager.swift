@@ -51,25 +51,23 @@ class NotificationManager: NSObject, ObservableObject {
     }
     
     func requestAuthorization() {
+        print("🔔 NotificationManager: Requesting authorization...")
         UNUserNotificationCenter.current().getNotificationSettings { settings in
+            print("🔔 Current settings status: \(settings.authorizationStatus.rawValue)")
             switch settings.authorizationStatus {
-            case .notDetermined:
+            case .notDetermined, .denied:
+                // SIMPLIFIED: Removed .criticalAlert which requires special Apple approval
                 UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
                     DispatchQueue.main.async {
                         self.isAuthorized = granted
                         if granted {
-                            print("✅ Notification permission granted")
-                        } else if let error = error {
-                            print("❌ Notification permission error: \(error.localizedDescription)")
+                            print("✅ Notification permission GRANTED")
+                            // Trigger immediate test notification to confirm
+                            self.sendTestNotification()
                         } else {
-                            print("⚠️ Notification permission denied by user")
+                            print("⚠️ Notification DENIED. Please check System Settings.")
                         }
                     }
-                }
-            case .denied:
-                DispatchQueue.main.async {
-                    self.isAuthorized = false
-                    print("⚠️ Notifications are DENIED. User must enable them in System Settings.")
                 }
             case .authorized, .provisional:
                 DispatchQueue.main.async {
@@ -159,6 +157,16 @@ class NotificationManager: NSObject, ObservableObject {
     func removeAllNotifications() {
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+    }
+    
+    func sendTestNotification() {
+        let content = UNMutableNotificationContent()
+        content.title = "God Mode System Check"
+        content.body = "Notification pipe is now active and synced."
+        content.sound = .default
+        
+        let request = UNNotificationRequest(identifier: "system_test_\(UUID().uuidString)", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
     }
 }
 
