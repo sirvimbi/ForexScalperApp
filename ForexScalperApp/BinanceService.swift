@@ -88,7 +88,7 @@ actor BinanceService: MarketDataProvider {
                               let volume = Double(item[5] as? String ?? "0") else {
                             return nil
                         }
-                        return Kline(open: open, high: high, low: low, close: close, volume: volume, closeTime: Int(closeTime / 1000))
+                        return Kline(open: open, high: high, low: low, close: close, volume: volume, closeTime: Int(closeTime / 1000), spread: nil)
                     }
                     
                     // Call the handler for each kline
@@ -178,7 +178,8 @@ actor BinanceService: MarketDataProvider {
             low: Double(detail.l) ?? 0,
             close: Double(detail.c) ?? 0,
             volume: Double(detail.v) ?? 0,
-            closeTime: Int(detail.T / 1000)
+            closeTime: Int(detail.T / 1000),
+            spread: nil
         )
         
         onKlineReceived?(symbol, timeframe, kline)

@@ -15,6 +15,11 @@ actor ScalpingSignalEngine {
     private var signalQualityHistory: [String: [SignalQuality]] = [:]
     private let maxQualityHistory = 100
 
+    // MARK: - Symbol Performance Tracking (NEW)
+    private var symbolPerformance: [String: (wins: Int, losses: Int, pnl: Double)] = [:]
+    private let minTradesForAdaptation = 5
+    private let minWinRateForTrading = 0.40  // 40% minimum win rate
+
     // FIXED: Whitelist of tradable symbols (majors + tight-spread minors only)
     private let allowedSymbols = Set([
                                          "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD",  // Majors
@@ -30,30 +35,80 @@ actor ScalpingSignalEngine {
         self.config = config
     }
 
+    // MARK: - Symbol Performance Tracking Methods (NEW)
+    func updateSymbolPerformance(symbol: String, pnl: Double) async {
+        var stats = symbolPerformance[symbol] ?? (wins: 0, losses: 0, pnl: 0.0)
+        if pnl > 0 {
+            stats.wins += 1
+        } else if pnl < 0 {
+            stats.losses += 1
+        }
+        stats.pnl += pnl
+        symbolPerformance[symbol] = stats
+    }
+
+    func shouldTradeSymbol(_ symbol: String) -> Bool {
+        guard let stats = symbolPerformance[symbol],
+              stats.wins + stats.losses >= minTradesForAdaptation else {
+            return true  // Not enough data, allow trading
+        }
+
+        let winRate = Double(stats.wins) / Double(stats.wins + stats.losses)
+        return winRate >= minWinRateForTrading
+    }
+
+    func getSymbolConfidenceMultiplier(_ symbol: String) -> Double {
+        guard let stats = symbolPerformance[symbol],
+              stats.wins + stats.losses >= minTradesForAdaptation else {
+            return 1.0  // Not enough data, no adjustment
+        }
+
+        let winRate = Double(stats.wins) / Double(stats.wins + stats.losses)
+        if winRate >= 0.60 {
+            return 1.2  // Boost confidence for high-performing symbols
+        } else if winRate >= 0.50 {
+            return 1.1  // Slight boost
+        } else if winRate >= 0.40 {
+            return 1.0  // Neutral
+        } else {
+            return 0.8  // Reduce confidence for poorly performing symbols
+        }
+    }
+
     func evaluateScalpingSignal(symbol: String) async -> ScalpingSignal? {
-        // 1. SYMBOL WHITELIST CHECK (NEW)
+        // 1. SYMBOL WHITELIST CHECK
         guard allowedSymbols.contains(symbol) else {
-            // print("📊 \(symbol) rejected: Not in allowed symbols list")
             return nil
         }
 
-        // 2. TRADABILITY CHECK
+        // 2. PERFORMANCE CHECK (NEW)
+        guard shouldTradeSymbol(symbol) else {
+            let perf = symbolPerformance[symbol]
+            let total = Double((perf?.wins ?? 0) + (perf?.losses ?? 0))
+            let winRate = total > 0 ? (Double(perf?.wins ?? 0) / total) * 100 : 0
+            print("📊 \(symbol) Rejected: Poor historical performance (\(String(format: "%.1f", winRate))% win rate)")
+            return nil
+        }
+
+        // 3. TRADABILITY CHECK
         guard await MT5Service.shared.isSymbolTradable(symbol) else {
             return nil
         }
 
-        // 3. RISK CHECK
+        // 4. RISK CHECK
         guard await riskManager.canOpenTrade(for: symbol) else {
             return nil
         }
 
-        // 4. COOLDOWN CHECK (FIXED: 5 minutes between signals)
+        // 5. COOLDOWN CHECK
+        let cooldown = await MainActor.run { config.cooldownSeconds }
         if let lastSignal = lastSignalTime[symbol],
-           Date().timeIntervalSince(lastSignal) < 300 { // FIXED: 5 minute cooldown
+           Date().timeIntervalSince(lastSignal) < cooldown {
+            // print("📊 \(symbol) ignored: Cooldown active")
             return nil
         }
 
-        // 5. INTELLIGENT DATA FETCHING
+        // 6. INTELLIGENT DATA FETCHING
         async let c1m = fetchIfStale(symbol, "1m", 1000)
         async let c5m = fetchIfStale(symbol, "5m", 500)
         async let c15m = fetchIfStale(symbol, "15m", 300)
@@ -67,38 +122,83 @@ actor ScalpingSignalEngine {
             "4h": c4h, "D1": cD1, "W1": cW1
         ]
 
-        guard validateData(candlesByTimeframe, symbol: symbol) else { return nil }
+        guard validateData(candlesByTimeframe, symbol: symbol) else { 
+            print("📊 \(symbol) Rejected: Insufficient MT5 candle data for analysis")
+            return nil 
+        }
 
-        // 6. INDICATOR ENGINE
+        // 7. INDICATOR ENGINE
         let indicators = await calculateAllIndicators(symbol: symbol, candlesByTimeframe: candlesByTimeframe)
 
-        // 7. FIXED: SPREAD GUARD (3 bps = 30 pips max)
-        let spreadBps = (indicators.atr / indicators.currentPrice) * 10000
-        if spreadBps > 3.0 { // FIXED: 12 -> 3 bps
-            print("📊 \(symbol) Rejected: Spread too high (\(String(format: "%.1f", spreadBps)) bps)")
+        // 8. SPREAD GUARD (DYNAMIC)
+        let tolerance = await MainActor.run { config.spreadTolerance }
+        
+        let actualSpread: Double
+        if let s = indicators.spread {
+            let pointSize = symbol.contains("JPY") ? 0.01 : 0.0001
+            actualSpread = (s * pointSize / indicators.currentPrice) * 10000
+        } else {
+            actualSpread = (indicators.atr / indicators.currentPrice) * 10000
+        }
+        
+        if actualSpread > tolerance {
+            print("📊 \(symbol) Rejected: Spread too high (\(String(format: "%.1f", actualSpread)) bps) - Limit: \(tolerance) bps")
             return nil
         }
 
-        // 8. ELITE SIGNAL GENERATION
+        // 9. VOLATILITY FILTER (NEW)
+        guard await validateVolatility(symbol: symbol, indicators: indicators) else {
+            return nil
+        }
+
+        // 10. ELITE SIGNAL GENERATION
         let signal = await generateSignal(symbol: symbol, indicators: indicators)
 
-        if signal.type == .none { return nil }
+        if signal.type == .none { 
+            // Diagnostic log already handled inside generateSignal
+            return nil 
+        }
 
-        // 9. FINAL QUALITY FILTERS (The 80% Filter)
+        // 11. FINAL QUALITY FILTERS
         guard let finalSignal = await applyQualityFilters(signal, symbol: symbol) else {
             return nil
         }
 
-        // 10. R:R VALIDATION (NEW)
+        // 12. R:R VALIDATION
         guard validateRiskReward(finalSignal) else {
             print("📊 \(symbol) Rejected: Poor risk/reward ratio")
             return nil
         }
 
-        print("🚀 GOD MODE 2.0: Elite Signal for \(symbol) | Confidence: \(Int(finalSignal.confidence))%")
-        await trackSignalQuality(finalSignal)
+        // 13. SYMBOL-SPECIFIC CONFIDENCE ADJUSTMENT (NEW)
+        let confidenceMultiplier = getSymbolConfidenceMultiplier(symbol)
+        var adjustedSignal = finalSignal
+        adjustedSignal.confidence = min(finalSignal.confidence * confidenceMultiplier, 100)
 
-        return finalSignal
+        print("🚀 GOD MODE 2.0: Elite Signal for \(symbol) | Confidence: \(Int(adjustedSignal.confidence))%")
+        await trackSignalQuality(adjustedSignal)
+
+        return adjustedSignal
+    }
+
+    // MARK: - Volatility Filter (NEW)
+    private func validateVolatility(symbol: String, indicators: IndicatorSet) async -> Bool {
+        let atrPercentage = indicators.atr / indicators.currentPrice * 100
+        let minVol = await MainActor.run { config.minVolatilityATR }
+
+        // Skip if volatility is too low (no movement to profit from)
+        if atrPercentage < minVol {
+            print("📊 \(symbol) Rejected: Low volatility (\(String(format: "%.3f", atrPercentage))%) - Threshold: \(minVol)%")
+            return false
+        }
+
+        // Skip if volatility is too high (unsafe for 10 pip SL)
+        if atrPercentage > 0.5 {
+            print("📊 \(symbol) Rejected: High volatility (\(String(format: "%.2f", atrPercentage))%)")
+            return false
+        }
+
+        return true
     }
 
     private func fetchIfStale(_ symbol: String, _ timeframe: String, _ count: Int) async -> [Kline] {
@@ -145,7 +245,7 @@ actor ScalpingSignalEngine {
         return IndicatorSet(
             rsi: rsi1m, stochasticK: stoch1m.k.last ?? 50, stochasticD: stoch1m.d.last ?? 50,
             cci: AdvancedIndicators.cci(c1m, period: 20).last ?? 0,
-            sar: sar1m, atr: atr1m,
+            sar: sar1m, atr: atr1m, spread: c1m.last?.spread,
             ema9: ema9_1m, ema21: ema21_1m, ema50: ema50_1m,
             ema9_5m: ema9_5m, ema21_5m: ema21_5m, ema50_5m: 0,
             bbPosition: bbPosition, volumeRatio: volRatio, volumeProfilePOC: 0,
@@ -172,40 +272,60 @@ actor ScalpingSignalEngine {
     }
 
     private func generateSignal(symbol: String, indicators: IndicatorSet) async -> ScalpingSignal {
+        var buyScore = 0.0
+        var sellScore = 0.0
         var activePillarsBuy = 0
         var activePillarsSell = 0
         var confidenceFactors: [String: Double] = [:]
 
+        // Load dynamic configuration from MainActor
+        let (confluenceLevel, minReqScore, minPillars, weights) = await MainActor.run {
+            (
+                config.mandatoryConfluenceLevel,
+                config.minScore,
+                config.minConfluencePillars,
+                (rsi: config.rsiWeight, stoch: config.stochasticWeight, cci: config.cciWeight,
+                 ma: config.maWeight, bb: config.bbWeight, vol: config.volumeWeight,
+                 pat: config.patternWeight)
+            )
+        }
+
         // 1. HTF TREND ANCHORS (H4 & D1)
-        if indicators.h4Trend == .buy { activePillarsBuy += 1 }
-        if indicators.h4Trend == .sell { activePillarsSell += 1 }
-        if indicators.d1Trend == .buy { activePillarsBuy += 1 }
-        if indicators.d1Trend == .sell { activePillarsSell += 1 }
+        if indicators.h4Trend == .buy { activePillarsBuy += 1; buyScore += weights.ma * 0.5 }
+        if indicators.h4Trend == .sell { activePillarsSell += 1; sellScore += weights.ma * 0.5 }
+        if indicators.d1Trend == .buy { activePillarsBuy += 1; buyScore += weights.ma * 0.5 }
+        if indicators.d1Trend == .sell { activePillarsSell += 1; sellScore += weights.ma * 0.5 }
 
         // 2. MOMENTUM CLOUD (MA Alignment 1m + 5m)
         if indicators.ema9 > indicators.ema21 && indicators.ema9_5m > indicators.ema21_5m {
             activePillarsBuy += 1
+            buyScore += weights.ma
             confidenceFactors["MA Stacked"] = 1.1
         } else if indicators.ema9 < indicators.ema21 && indicators.ema9_5m < indicators.ema21_5m {
             activePillarsSell += 1
+            sellScore += weights.ma
             confidenceFactors["MA Stacked"] = 1.1
         }
 
         // 3. OSCILLATOR EXHAUSTION (RSI + Stoch)
         if indicators.rsi < 35 && indicators.stochasticK < 25 {
             activePillarsBuy += 1
+            buyScore += (weights.rsi + weights.stoch)
             confidenceFactors["Exhaustion"] = 1.2
         } else if indicators.rsi > 65 && indicators.stochasticK > 75 {
             activePillarsSell += 1
+            sellScore += (weights.rsi + weights.stoch)
             confidenceFactors["Exhaustion"] = 1.2
         }
 
         // 4. VOLATILITY REJECTION (Bollinger Bands)
         if indicators.bbPosition < 0.1 {
             activePillarsBuy += 1
+            buyScore += weights.bb
             confidenceFactors["BB Reject"] = 1.15
         } else if indicators.bbPosition > 0.9 {
             activePillarsSell += 1
+            sellScore += weights.bb
             confidenceFactors["BB Reject"] = 1.15
         }
 
@@ -213,59 +333,77 @@ actor ScalpingSignalEngine {
         if indicators.pricePattern != .none {
             if indicators.pricePattern == .bullishEngulfing || indicators.pricePattern == .hammer {
                 activePillarsBuy += 1
+                buyScore += weights.pat
                 confidenceFactors["PA Trigger"] = 1.1
             } else if indicators.pricePattern == .bearishEngulfing || indicators.pricePattern == .shootingStar {
                 activePillarsSell += 1
+                sellScore += weights.pat
                 confidenceFactors["PA Trigger"] = 1.1
             }
         }
 
-        // FIXED: VOLUME IS NOW A FILTER, NOT A PILLAR
-        // Volume must be above 1.3x to even consider the signal, but doesn't add to pillars
+        // 6. VOLUME SURGE
         let hasVolume = indicators.volumeRatio > 1.3
+        if hasVolume {
+            activePillarsBuy += 1; activePillarsSell += 1
+            buyScore += weights.vol; sellScore += weights.vol
+            confidenceFactors["Institutional Volume"] = 1.2
+        }
 
-        // FIXED: Minimum pillars required is 3 (was 2)
-        let minPillars = 3
-        let currentPillars = activePillarsBuy > activePillarsSell ? activePillarsBuy : activePillarsSell
+        let currentPillars = buyScore > sellScore ? activePillarsBuy : activePillarsSell
 
-        // FIXED: Must have volume confirmation AND enough pillars
-        if activePillarsBuy > activePillarsSell && currentPillars >= minPillars && hasVolume {
-            let baseConfidence = Double(currentPillars) / 6.0 * 100
+        if buyScore > sellScore && currentPillars >= minPillars && buyScore >= minReqScore && hasVolume {
+            let baseConfidence = min(buyScore / 80.0 * 100, 100)
             let adjustedConfidence = min(baseConfidence * confidenceFactors.values.reduce(1.0, *), 100)
 
-            // Use fixed pip values for SL/TP (will be overridden by RiskManager)
-            let sl = indicators.currentPrice - (indicators.atr * 1.0)
-            let tp = indicators.currentPrice + (indicators.atr * 2.0)
+            let sl = indicators.currentPrice - (indicators.atr * 0.8)
+            let tp = indicators.currentPrice + (indicators.atr * 4.0)
 
             return ScalpingSignal(
                 type: .buy, symbol: symbol, price: indicators.currentPrice,
-                confidence: adjustedConfidence, score: currentPillars, sellScore: 0,
+                confidence: adjustedConfidence, score: Int(buyScore), sellScore: 0,
                 indicators: indicators, confidenceFactors: confidenceFactors, timestamp: Date(),
                 stopLoss: sl, takeProfit: tp
             )
-        } else if activePillarsSell > activePillarsBuy && currentPillars >= minPillars && hasVolume {
-            let baseConfidence = Double(currentPillars) / 6.0 * 100
+        } else if sellScore > buyScore && currentPillars >= minPillars && sellScore >= minReqScore && hasVolume {
+            let baseConfidence = min(sellScore / 80.0 * 100, 100)
             let adjustedConfidence = min(baseConfidence * confidenceFactors.values.reduce(1.0, *), 100)
 
-            let sl = indicators.currentPrice + (indicators.atr * 1.0)
-            let tp = indicators.currentPrice - (indicators.atr * 2.0)
+            let sl = indicators.currentPrice + (indicators.atr * 0.8)
+            let tp = indicators.currentPrice - (indicators.atr * 4.0)
 
             return ScalpingSignal(
                 type: .sell, symbol: symbol, price: indicators.currentPrice,
-                confidence: adjustedConfidence, score: currentPillars, sellScore: 0,
+                confidence: adjustedConfidence, score: Int(sellScore), sellScore: 0,
                 indicators: indicators, confidenceFactors: confidenceFactors, timestamp: Date(),
                 stopLoss: sl, takeProfit: tp
             )
+        }
+        
+        // ADD DIAGNOSTIC LOG FOR PILLAR FAILURE
+        let finalScore = max(buyScore, sellScore)
+        if finalScore > 10 { // Only log if there was some interest
+            let side = buyScore > sellScore ? "BUY" : "SELL"
+            print("📊 \(symbol) Pillar Check: \(currentPillars)/\(minPillars) Pillars aligned (\(side)). Score: \(Int(finalScore))/\(Int(minReqScore))")
         }
 
         return ScalpingSignal(type: .none, symbol: symbol, price: indicators.currentPrice, confidence: 0, score: 0, sellScore: 0, indicators: indicators, confidenceFactors: [:], timestamp: Date())
     }
 
     private func applyQualityFilters(_ signal: ScalpingSignal, symbol: String) async -> ScalpingSignal? {
-        guard signal.type != .none && signal.confidence >= 75 else { return nil }
+        let (minConf, cooldown) = await MainActor.run {
+            (config.getConfidenceThreshold(for: symbol), config.cooldownSeconds)
+        }
 
-        // FIXED: 5 minute cooldown between signals per symbol
-        if let last = lastSignalTime[symbol], Date().timeIntervalSince(last) < 300 {
+        guard signal.type != .none && signal.confidence >= minConf else {
+            if signal.type != .none {
+                print("📊 \(symbol) Rejected: Confidence too low (\(Int(signal.confidence))% < \(Int(minConf))%)")
+            }
+            return nil
+        }
+
+        // Cooldown between signals per symbol
+        if let last = lastSignalTime[symbol], Date().timeIntervalSince(last) < cooldown {
             return nil
         }
 
@@ -273,7 +411,6 @@ actor ScalpingSignalEngine {
         return signal
     }
 
-    // FIXED: NEW R:R VALIDATION
     private func validateRiskReward(_ signal: ScalpingSignal) -> Bool {
         guard let sl = signal.stopLoss, let tp = signal.takeProfit else { return false }
 

@@ -1788,6 +1788,29 @@ struct DashboardView: View {
                                         }
                                     }
                                     
+                                    settingsRow("Volatility Threshold") {
+                                        HStack(spacing: 8) {
+                                            Slider(value: $viewModel.scalpingConfig.minVolatilityATR, in: 0.005...0.2, step: 0.005)
+                                                .frame(width: 120)
+                                            Text(String(format: "%.3f%%", viewModel.scalpingConfig.minVolatilityATR))
+                                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.accentGold)
+                                                .frame(width: 50, alignment: .trailing)
+                                        }
+                                    }
+                                    .help("Minimum ATR % required to consider a trade. Set lower for more signals in quiet markets.")
+
+                                    settingsRow("Broker Suffix") {
+                                        HStack(spacing: 8) {
+                                            TextField("e.g. m", text: $viewModel.scalpingConfig.brokerSuffix)
+                                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                                .frame(width: 60)
+                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                            Spacer()
+                                        }
+                                    }
+                                    .help("Appends this suffix to symbols for execution (e.g. EURUSD -> EURUSDm for Exness Real).")
+
                                     settingsRow("Cooldown (seconds)") {
                                         HStack(spacing: 8) {
                                             Slider(value: $viewModel.scalpingConfig.cooldownSeconds, in: 30...600, step: 15)
@@ -2108,6 +2131,18 @@ struct DashboardView: View {
                 Text("Min Signal Score"); Spacer()
                 Slider(value: $viewModel.scalpingConfig.minScore, in: 10...50, step: 1)
                 Text("\(Int(viewModel.scalpingConfig.minScore))")
+            }
+            HStack {
+                Text("Volatility ATR %"); Spacer()
+                Slider(value: $viewModel.scalpingConfig.minVolatilityATR, in: 0.005...0.2, step: 0.005)
+                Text(String(format: "%.3f%%", viewModel.scalpingConfig.minVolatilityATR))
+            }
+            HStack {
+                Text("Broker Suffix"); Spacer()
+                TextField("m", text: $viewModel.scalpingConfig.brokerSuffix)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .frame(width: 60)
+                    .multilineTextAlignment(.trailing)
             }
         }
         #else

@@ -14,7 +14,7 @@ class RefactoredAppCoordinator: ObservableObject {
     private let tradeHistory = RefactoredTradeHistoryManager.shared
     private let binanceService: BinanceService
     private var lastScalpingSignalTime: [String: Date] = [:]
-    
+
     // Published properties for SwiftUI
     @Published var signals: [Signal] = []
     @Published var lastSignal: String = "No signal yet"
@@ -22,7 +22,7 @@ class RefactoredAppCoordinator: ObservableObject {
     @Published var connectionStatus: String = "Disconnected"
     @Published var riskMetrics: RiskMetrics?
     @Published var tradingMode: TradingMode = .scalping
-    
+
     @Published var selectedSignalSource: SignalSource = .auto
     private let signalComparator = SignalComparator()
     private var lastBinanceSignal: [String: Signal] = [:]
@@ -32,76 +32,76 @@ class RefactoredAppCoordinator: ObservableObject {
     var sourceReliability: [SignalSource: Double] = [.binance: 1.0, .ig: 1.0, .mt5: 1.0]
     private var lastSourceSwitch: Date = Date()
     private let minSwitchInterval: TimeInterval = 60
-    
+
     // Use Task for background processing
     private var signalGenerationTask: Task<Void, Never>?
     private var metricsUpdateTask: Task<Void, Never>?
     private var isRunning = false
-    
+
     // Batch processing for better performance
     private let symbols: [String]
     private let batchSize = 5
-    
+
     private var activeSymbols: Set<String> {
         // PRODUCTION SANITIZATION: Strictly only allow symbols from the TradingPair enum
         let saved = UserDefaults.standard.stringArray(forKey: "activeSymbols") ?? []
         let validSymbols = Set(TradingPair.allCases.map { $0.rawValue })
         let filtered = saved.filter { validSymbols.contains($0) }
-        
+
         // If everything was filtered out but we need something to monitor
         if filtered.isEmpty {
             return Set(["EURUSD", "GBPUSD", "USDJPY"])
         }
         return Set(filtered)
     }
-    
+
     var marketDataProvider: MarketDataProvider {
         return marketData
     }
 
     // MARK: - Symbol Whitelist for Scalping
     private let allowedScalpingSymbols = Set([
-        "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD",  // Majors
-        "EURJPY", "GBPJPY", "AUDJPY", "NZDJPY", "EURGBP", "EURCHF",  // Minors with tight spreads
-        "GBPCHF", "CADJPY", "CHFJPY", "AUDCHF", "NZDCAD", "AUDNZD"   // Additional tight spreads
-    ])
-    
+                                                 "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD",  // Majors
+                                                 "EURJPY", "GBPJPY", "AUDJPY", "NZDJPY", "EURGBP", "EURCHF",  // Minors with tight spreads
+                                                 "GBPCHF", "CADJPY", "CHFJPY", "AUDCHF", "NZDCAD", "AUDNZD"   // Additional tight spreads
+                                             ])
+
     enum TradingMode {
         case standard
         case scalping
     }
-    
+
     init(symbols: [String] = TradingPair.allCases.map { $0.rawValue }) {
         // Keep all symbols - don't filter to only USDT
         self.symbols = symbols
-        
+
         // Initialize market data actor
         let marketDataActor = RefactoredMarketDataActor()
         self.marketData = marketDataActor
-        
+
         // Initialize Binance service
         self.binanceService = BinanceService()
-        
+
         // Initialize other components
         let regimeDetector = HeuristicRegimeDetector(marketData: marketData)
         let mlModel = MLModelHandler()
-        
+
         self.tradeMonitor = TradeMonitor(marketData: marketData, tradeHistory: tradeHistory)
-        
+
         self.scalpingEngine = ScalpingSignalEngine(
             marketData: marketData,
             tradeHistory: tradeHistory,
             riskManager: scalpingRiskManager,
             config: ScalpingConfig.shared
         )
-        
+
         self.scalpingTradeMonitor = ScalpingTradeMonitor(
             marketData: marketData,
             tradeHistory: tradeHistory,
             signalEngine: scalpingEngine,
             config: ScalpingConfig.shared
         )
-        
+
         self.signalEngine = RefactoredSignalEngine(
             marketData: marketData,
             regimeDetector: regimeDetector,
@@ -109,18 +109,18 @@ class RefactoredAppCoordinator: ObservableObject {
             tradeHistory: tradeHistory,
             riskManager: riskManager
         )
-        
+
         // Set up trade monitor callbacks
         Task {
             await tradeMonitor.setOnTradeClosedCallback { [weak self] trade in
                 await self?.handleTradeClosed(trade)
             }
-            
+
             await scalpingTradeMonitor.setOnTradeClosedCallback { [weak self] trade in
                 await self?.handleTradeClosed(trade)
             }
         }
-        
+
         // Start the coordinator
         Task {
             await connectToDataSources()
@@ -128,18 +128,36 @@ class RefactoredAppCoordinator: ObservableObject {
             await startMetricsUpdates()
         }
     }
-    
+
+    // MARK: - Symbol Normalization (FIXED)
+    private func normalizeSymbol(_ symbol: String) -> String {
+        // Remove trailing 'm' from MT5 symbols (EURUSDm -> EURUSD)
+        var normalized = symbol.replacingOccurrences(of: "m", with: "")
+
+        // Remove any suffix after '.' (EURUSD.ecn -> EURUSD)
+        if let dotIndex = normalized.firstIndex(of: ".") {
+            normalized = String(normalized[..<dotIndex])
+        }
+
+        // Handle special cases
+        if normalized == "USTEC" || normalized == "US100" {
+            return "US100"
+        }
+
+        return normalized
+    }
+
     private func connectToDataSources() async {
         await MainActor.run {
             status = "Connecting to Data Sources..."
             connectionStatus = "Connecting..."
         }
-        
+
         // 1. Connect to Binance WebSocket for real-time data
         await binanceService.connect(
             symbols: symbols,
             timeframes: tradingMode == .scalping ?
-                ["1m", "5m", "15m", "30m", "1h", "4h", "D1", "W1"] : 
+                ["1m", "5m", "15m", "30m", "1h", "4h", "D1", "W1"] :
                 ["1m", "5m", "1h", "4h", "D1"],
             onKline: { [weak self] symbol, timeframe, kline in
                 Task { [weak self] in
@@ -147,13 +165,13 @@ class RefactoredAppCoordinator: ObservableObject {
                 }
             }
         )
-        
+
         // 2. Connect/Check MT5 (God Mode)
         do {
             let mt5Login = UserDefaults.standard.string(forKey: "mt5Login") ?? "436886946"
             let mt5Password = UserDefaults.standard.string(forKey: "mt5Password") ?? "Kenya@254"
             let mt5Server = UserDefaults.standard.string(forKey: "mt5Server") ?? "ExnessKE-MT5Trial9"
-            
+
             try await MT5Service.shared.initialize(
                 login: Int(mt5Login) ?? 0,
                 password: mt5Password,
@@ -168,19 +186,19 @@ class RefactoredAppCoordinator: ObservableObject {
         } catch {
             print("⚠️ MT5 connection failed: \(error.localizedDescription)")
         }
-        
+
         // Wait for initial data to arrive
         try? await Task.sleep(nanoseconds: 3_000_000_000)
-        
+
         await MainActor.run {
             connectionStatus = "Multi-Source Connected"
             status = "Running in \(tradingMode == .scalping ? "SCALPING" : "STANDARD") mode..."
         }
     }
-    
+
     private func syncMT5Data() async {
         print("🔄 Syncing MT5 Data (Deep Context)...")
-        
+
         // 1. PUSH WATCHLIST: Ensure EA knows which symbols we care about
         let symbolsArray = Array(activeSymbols)
         if !symbolsArray.isEmpty {
@@ -195,13 +213,13 @@ class RefactoredAppCoordinator: ObservableObject {
         // 2. FETCH HISTORY: Serial sync to prevent socket saturation
         for symbol in symbolsArray.prefix(15) { // Limit initial deep sync to top 15 pairs
             let tfs = ["1m", "5m", "15m", "30m", "1h", "4h", "D1", "W1"]
-            
+
             for tf in tfs {
                 // Check if already cancelled
                 if Task.isCancelled { return }
-                
+
                 let depth = (tf == "1m" || tf == "5m") ? 1000 : 300 // Slightly reduced depth for minor TFs
-                
+
                 do {
                     let candles = try await MT5Service.shared.getCandles(symbol: symbol, timeframe: tf, count: depth)
                     if let marketDataActor = marketData as? RefactoredMarketDataActor {
@@ -211,16 +229,16 @@ class RefactoredAppCoordinator: ObservableObject {
                         print("📊 \(symbol) [\(tf)]: Loaded \(candles.count) bars")
                     }
                     // CRITICAL: Small sleep to let MT5 socket breathe
-                    try? await Task.sleep(nanoseconds: 100_000_000) 
+                    try? await Task.sleep(nanoseconds: 100_000_000)
                 } catch {
                     print("⚠️ Failed to sync \(symbol) \(tf): \(error.localizedDescription)")
                 }
             }
         }
-        
+
         await syncMT5Trades()
     }
-    
+
     private func startMetricsUpdates() async {
         metricsUpdateTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -229,14 +247,14 @@ class RefactoredAppCoordinator: ObservableObject {
             }
         }
     }
-    
+
     private func updateRiskMetrics() async {
         let metrics = await scalpingRiskManager.getCurrentRiskMetrics()
         await MainActor.run {
             self.riskMetrics = metrics
         }
     }
-    
+
     private func handleScalpingUpdate(symbol: String, timeframe: String, kline: Kline) async {
         // For scalping, we evaluate on every 1m candle
         if timeframe == "1m" {
@@ -248,7 +266,7 @@ class RefactoredAppCoordinator: ObservableObject {
                 await handleNewSignal(signal)
             }
         }
-        
+
         // Update scalping trade monitor with new price data
         if timeframe == "1m" {
             // Pass latest indicators to trade monitor
@@ -256,7 +274,7 @@ class RefactoredAppCoordinator: ObservableObject {
             await scalpingTradeMonitor.updatePrice(symbol: symbol, price: kline.close, indicators: indicators)
         }
     }
-    
+
     private func handleStandardUpdate(symbol: String, timeframe: String, kline: Kline) async {
         // Original logic for standard trading
         if timeframe == "1m" {
@@ -270,7 +288,7 @@ class RefactoredAppCoordinator: ObservableObject {
             }
         }
     }
-    
+
     private func shouldEvaluateScalping(symbol: String, kline: Kline) async -> Bool {
         // 0. Check if market data is ready (has sufficient history for all timeframes)
         if let marketDataActor = marketData as? RefactoredMarketDataActor {
@@ -278,18 +296,18 @@ class RefactoredAppCoordinator: ObservableObject {
                 return false
             }
         }
-        
+
         // 1. Check if symbol is strictly in our active list
         guard activeSymbols.contains(symbol) else {
             return false
         }
-        
+
         // 2. Check for pending signal
         let existingPending = signals.contains { $0.symbol == symbol && $0.status == .pending }
         if existingPending {
             return false
         }
-        
+
         // 3. Check cooldown
         if let lastSignalTime = lastScalpingSignalTime[symbol] {
             let cooldown = ScalpingConfig.shared.cooldownSeconds
@@ -297,13 +315,13 @@ class RefactoredAppCoordinator: ObservableObject {
                 return false
             }
         }
-        
+
         return true
     }
-    
+
     private func calculateLatestIndicators(symbol: String) async -> IndicatorSet? {
         guard let marketDataActor = marketData as? RefactoredMarketDataActor else { return nil }
-        
+
         let candles1m = await marketDataActor.getCandles(symbol: symbol, timeframe: "1m")
         let candles5m = await marketDataActor.getCandles(symbol: symbol, timeframe: "5m")
         let _ = await marketDataActor.getCandles(symbol: symbol, timeframe: "15m")
@@ -312,28 +330,28 @@ class RefactoredAppCoordinator: ObservableObject {
         let candles4h = await marketDataActor.getCandles(symbol: symbol, timeframe: "4h")
         let candlesD1 = await marketDataActor.getCandles(symbol: symbol, timeframe: "D1")
         let candlesW1 = await marketDataActor.getCandles(symbol: symbol, timeframe: "W1")
-        
+
         guard candles1m.count >= 100 else { return nil }
-        
+
         // Calculate indicators (simplified version for trade monitor)
         let rsi = Indicators.rsi(candles1m.map { $0.close }, period: 14).last ?? 50
         let stoch = AdvancedIndicators.stochastic(candles1m, periodK: 14, periodD: 3)
         let bb = Indicators.bollingerBands(candles1m.map { $0.close }, period: 20, stdDev: 2.0)
         let currentPrice = candles1m.last?.close ?? 0
         let bbPosition = (currentPrice - (bb.lower.last ?? 0)) /
-                         max((bb.upper.last ?? 1) - (bb.lower.last ?? 0), 0.0001)
-        
+            max((bb.upper.last ?? 1) - (bb.lower.last ?? 0), 0.0001)
+
         let ema9 = Indicators.ema(candles1m.map { $0.close }, period: 9).last ?? currentPrice
         let ema21 = Indicators.ema(candles1m.map { $0.close }, period: 21).last ?? currentPrice
         let ema50 = Indicators.ema(candles1m.map { $0.close }, period: 50).last ?? currentPrice
         let ema9_5m = Indicators.ema(candles5m.map { $0.close }, period: 9).last ?? currentPrice
         let ema21_5m = Indicators.ema(candles5m.map { $0.close }, period: 21).last ?? currentPrice
         let ema50_5m = Indicators.ema(candles5m.map { $0.close }, period: 50).last ?? currentPrice
-        
+
         let cci = AdvancedIndicators.cci(candles1m, period: 20).last ?? 0
         let sar = AdvancedIndicators.parabolicSAR(candles1m).last ?? currentPrice
         let atr = AdvancedIndicators.atr(candles1m, period: 14).last ?? 0
-        
+
         let h4TrendVal = calculateTrend(candles: Array(candles4h.suffix(20)))
         let d1TrendVal = calculateTrend(candles: Array(candlesD1.suffix(10)))
         let w1TrendVal = calculateTrend(candles: Array(candlesW1.suffix(5)))
@@ -345,6 +363,7 @@ class RefactoredAppCoordinator: ObservableObject {
             cci: cci,
             sar: sar,
             atr: atr,
+            spread: candles1m.last?.spread,
             ema9: ema9,
             ema21: ema21,
             ema50: ema50,
@@ -372,12 +391,12 @@ class RefactoredAppCoordinator: ObservableObject {
         let closes = candles.map { $0.close }
         let sma10 = closes.suffix(10).reduce(0, +) / Double(min(10, closes.count))
         let sma20 = closes.suffix(20).reduce(0, +) / Double(min(20, closes.count))
-        
+
         if sma10 > sma20 * 1.001 { return .buy }
         if sma10 < sma20 * 0.999 { return .sell }
         return .none
     }
-    
+
     private func shouldEvaluateSymbol(symbol: String, kline: Kline) async -> Bool {
         // 0. Check if market data is ready
         if let marketDataActor = marketData as? RefactoredMarketDataActor {
@@ -385,47 +404,47 @@ class RefactoredAppCoordinator: ObservableObject {
                 return false
             }
         }
-        
+
         // 1. Check if strictly in active symbols
         guard activeSymbols.contains(symbol) else {
             return false
         }
-        
+
         // Original logic for standard trading
         let existingPending = signals.contains { $0.symbol == symbol && $0.status == .pending }
         if existingPending {
             return false
         }
-        
+
         let activeTrades = await tradeHistory.getActiveTrades()
         if activeTrades.contains(where: { $0.symbol == symbol }) {
             return false
         }
-        
+
         guard let marketDataActor = marketData as? RefactoredMarketDataActor else { return false }
-        
+
         let candles = await marketDataActor.getCandles(symbol: symbol, timeframe: "1m")
         guard candles.count >= 2 else { return false }
-        
+
         let previousClose = candles[candles.count - 2].close
         let priceChangePercent = abs((kline.close - previousClose) / previousClose) * 100
-        
+
         let shouldEvaluate = priceChangePercent > 0.1 || Int(Date().timeIntervalSince1970) % 300 < 10
-        
+
         return shouldEvaluate
     }
-    
+
     private var mt5PollingTask: Task<Void, Never>?
     private var mt5TradeSyncTask: Task<Void, Never>?
     private var htfRefreshTask: Task<Void, Never>?
 
     func start() async {
-        guard !isRunning else { 
+        guard !isRunning else {
             await syncMT5Data()
-            return 
+            return
         }
         isRunning = true
-        
+
         signalGenerationTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.cleanupExpiredSignals()
@@ -438,15 +457,15 @@ class RefactoredAppCoordinator: ObservableObject {
         mt5PollingTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pollMT5Data()
-                try? await Task.sleep(nanoseconds: 15_000_000_000) 
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
             }
         }
-        
+
         // Start MT5 trade sync task
         mt5TradeSyncTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.syncMT5Trades()
-                try? await Task.sleep(nanoseconds: 30_000_000_000) 
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
 
@@ -459,18 +478,18 @@ class RefactoredAppCoordinator: ObservableObject {
             }
         }
     }
-    
+
     private func pollMT5Data() async {
         guard marketData is RefactoredMarketDataActor else { return }
-        
+
         // Only poll symbols that are strictly active
         let symbolsToPoll = Array(activeSymbols)
         guard !symbolsToPoll.isEmpty else { return }
-        
+
         for symbol in symbolsToPoll {
             // Check for cancellation between requests
             if Task.isCancelled { return }
-            
+
             // Only poll for symbols that aren't updating frequently from Binance, or all if MT5 is selected
             if selectedSignalSource == .mt5 || selectedSignalSource == .both || selectedSignalSource == .auto {
                 do {
@@ -482,7 +501,7 @@ class RefactoredAppCoordinator: ObservableObject {
                     // Silent fail for polling
                 }
             }
-            
+
             // THROTTLE: Wait 500ms between requests to prevent network overload (nw_path errors)
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
@@ -499,31 +518,31 @@ class RefactoredAppCoordinator: ObservableObject {
 
         // PRODUCTION SYNC LOGIC
         print("🔄 Force-Syncing MT5 trades and positions...")
-        
+
         let allInternalTrades = await tradeHistory.getAllTrades()
-        
+
         // 1. Sync Active Positions & Pending Orders
         do {
             let mt5Data = try await MT5Service.shared.getPositionsAndOrders()
             let internalActiveTrades = allInternalTrades.filter { $0.status == .active }
-            
+
             // ELITE RECONCILIATION: Close internal trades that are no longer in MT5 (Active OR Pending)
             for internalTrade in internalActiveTrades {
                 guard let dealId = internalTrade.externalDealId else { continue }
-                
+
                 let stillActive = mt5Data.active.contains { String($0.ticket) == dealId }
                 let stillPending = mt5Data.pending.contains { String($0.ticket) == dealId }
-                
+
                 if !stillActive && !stillPending {
                     print("🧹 Reconciliation: Internal trade \(internalTrade.symbol) #\(dealId) no longer in MT5. Marking as completed.")
-                    
+
                     var closedTrade = internalTrade
                     closedTrade.status = .completed
                     await tradeHistory.updateTrade(closedTrade)
-                    
+
                     await scalpingTradeMonitor.removeTrade(id: internalTrade.id)
                     await tradeMonitor.removeTrade(id: internalTrade.id)
-                    
+
                     await scalpingRiskManager.closeTrade(closedTrade)
                     await riskManager.closeTrade(closedTrade)
                 }
@@ -534,10 +553,12 @@ class RefactoredAppCoordinator: ObservableObject {
                 let dealId = String(pos.ticket)
                 if await tradeHistory.getTradeByExternalId(dealId) == nil {
                     print("📋 Found MT5 Position: \(pos.symbol) \(pos.type) @ \(pos.priceOpen)")
-                    
+
+                    let normalizedSymbol = normalizeSymbol(pos.symbol)
+
                     let trade = TradeRecord(
                         signalId: UUID(),
-                        symbol: pos.symbol,
+                        symbol: normalizedSymbol,
                         type: pos.type.lowercased().contains("buy") ? .buy : .sell,
                         entryPrice: pos.priceOpen,
                         entryTime: parseMT5Time(pos.openTime) ?? Date(),
@@ -549,7 +570,7 @@ class RefactoredAppCoordinator: ObservableObject {
                         externalDealId: dealId
                     )
                     await tradeHistory.addTrade(trade)
-                    
+
                     if tradingMode == .scalping {
                         await scalpingTradeMonitor.addTrade(trade, indicators: nil)
                     } else {
@@ -557,16 +578,18 @@ class RefactoredAppCoordinator: ObservableObject {
                     }
                 }
             }
-            
+
             // Add any new pending orders found in MT5
             for pos in mt5Data.pending {
                 let dealId = String(pos.ticket)
                 if await tradeHistory.getTradeByExternalId(dealId) == nil {
                     print("🕒 Found MT5 Pending Order: \(pos.symbol) \(pos.type) @ \(pos.priceOpen)")
-                    
+
+                    let normalizedSymbol = normalizeSymbol(pos.symbol)
+
                     let trade = TradeRecord(
                         signalId: UUID(),
-                        symbol: pos.symbol,
+                        symbol: normalizedSymbol,
                         type: pos.type.lowercased().contains("buy") ? .buy : .sell,
                         entryPrice: pos.priceOpen,
                         entryTime: parseMT5Time(pos.openTime) ?? Date(),
@@ -583,19 +606,20 @@ class RefactoredAppCoordinator: ObservableObject {
         } catch {
             print("⚠️ MT5 sync failed: \(error)")
         }
-        
+
         // 2. Sync Closed History
         do {
             let history = try await MT5Service.shared.getTradeHistory(days: 3)
-            
+
             for pos in history {
                 let dealId = String(pos.ticket)
-                
+                let normalizedSymbol = normalizeSymbol(pos.symbol)
+
                 // Find if we already have this trade
                 if let existingTrade = await tradeHistory.getTradeByExternalId(dealId) {
                     // If it was previously active, update it with final P&L
                     if existingTrade.status == .active || existingTrade.status == .pending || (existingTrade.pnl == nil) {
-                        print("📊 Updating closed MT5 trade: \(pos.symbol) P&L: \(pos.profit)")
+                        print("📊 Updating closed MT5 trade: \(normalizedSymbol) P&L: \(pos.profit)")
                         var updatedTrade = existingTrade
                         updatedTrade.exitPrice = pos.close_price
                         updatedTrade.exitTime = parseMT5Time(pos.close_time) ?? Date()
@@ -607,11 +631,11 @@ class RefactoredAppCoordinator: ObservableObject {
                     }
                 } else {
                     // It's a completely new historical trade we don't have
-                    print("📊 Syncing new historical MT5 trade: \(pos.symbol) P&L: \(pos.profit)")
-                    
+                    print("📊 Syncing new historical MT5 trade: \(normalizedSymbol) P&L: \(pos.profit)")
+
                     let trade = TradeRecord(
                         signalId: UUID(),
-                        symbol: pos.symbol,
+                        symbol: normalizedSymbol,
                         type: pos.type.lowercased().contains("buy") ? .buy : .sell,
                         entryPrice: pos.open_price,
                         entryTime: parseMT5Time(pos.open_time) ?? Date(),
@@ -631,7 +655,7 @@ class RefactoredAppCoordinator: ObservableObject {
             print("⚠️ MT5 History sync failed: \(error)")
         }
     }
-    
+
     private func parseMT5Time(_ timestamp: Int64?) -> Date? {
         guard let ts = timestamp, ts > 0 else { return nil }
         return Date(timeIntervalSince1970: TimeInterval(ts))
@@ -641,24 +665,24 @@ class RefactoredAppCoordinator: ObservableObject {
         guard let timeStr = timeStr else { return nil }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        
+
         // Format 1: YYYY.MM.DD HH:MM:SS
         formatter.dateFormat = "yyyy.MM.dd HH:mm:ss"
         if let date = formatter.date(from: timeStr) { return date }
-        
+
         // Format 2: YYYY-MM-DD'T'HH:MM:SS
         formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
         if let date = formatter.date(from: timeStr) { return date }
-        
+
         // Format 3: YYYY.MM.DD
         formatter.dateFormat = "yyyy.MM.dd"
         return formatter.date(from: timeStr)
     }
-    
+
     private func updateTradingStatus() async {
         let metrics = await scalpingRiskManager.getCurrentRiskMetrics()
         let hour = Calendar.current.component(.hour, from: Date())
-        
+
         var statusDetails = "Running"
         if hour < 8 || hour > 21 {
             statusDetails += " (Low liquidity session)"
@@ -669,16 +693,16 @@ class RefactoredAppCoordinator: ObservableObject {
         if metrics.hourlyTrades >= 4 {
             statusDetails += " - Near hourly limit"
         }
-        
+
         await MainActor.run {
             self.status = statusDetails
         }
     }
-    
+
     private func cleanupExpiredSignals() async {
         let now = Date()
         let activeSignals = signals.filter { $0.status == .pending || $0.status == .accepted }
-        
+
         for signal in activeSignals {
             if signal.expiryTime < now {
                 await MainActor.run {
@@ -686,7 +710,7 @@ class RefactoredAppCoordinator: ObservableObject {
                         var expiredSignal = signal
                         expiredSignal.status = .expired
                         signals[index] = expiredSignal
-                        
+
                         DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
                             self.signals.removeAll { $0.id == signal.id && $0.status == .expired }
                         }
@@ -695,57 +719,64 @@ class RefactoredAppCoordinator: ObservableObject {
             }
         }
     }
-    
+
     private func handleNewSignal(_ signal: Signal) async {
+        // Normalize symbol to avoid duplicates
+        let normalizedSymbol = normalizeSymbol(signal.symbol)
+        var normalizedSignal = signal
+        normalizedSignal.symbol = normalizedSymbol
+
         // ELITE SIGNAL REFRESH: Replace any existing pending signal for this symbol with the fresh one
         await MainActor.run {
-            if let existingIndex = self.signals.firstIndex(where: { $0.symbol == signal.symbol && $0.status == .pending }) {
-                print("🔄 Updating pending signal for \(signal.symbol) with fresh data")
+            if let existingIndex = self.signals.firstIndex(where: {
+                self.normalizeSymbol($0.symbol) == normalizedSymbol && $0.status == .pending
+            }) {
+                print("🔄 Updating pending signal for \(normalizedSymbol) with fresh data")
                 self.signals.remove(at: existingIndex)
             }
 
-            self.signals.append(signal)
-            self.lastSignal = "\(signal.symbol) \(signal.type.displayName) @ \(String(format: "%.5f", signal.price))"
-            
+            self.signals.append(normalizedSignal)
+            self.lastSignal = "\(normalizedSymbol) \(normalizedSignal.type.displayName) @ \(String(format: "%.5f", normalizedSignal.price))"
+
             // ELITE UI REFRESH: Notify listeners that signals array changed
             self.objectWillChange.send()
-            
-            print("✅ New \(tradingMode == .scalping ? "SCALPING" : "STANDARD") signal generated: \(signal.symbol) \(signal.type) @ \(signal.price) (Confidence: \(String(format: "%.1f", signal.confidence))%)")
-            
+
+            print("✅ New \(tradingMode == .scalping ? "SCALPING" : "STANDARD") signal generated: \(normalizedSymbol) \(normalizedSignal.type) @ \(normalizedSignal.price) (Confidence: \(String(format: "%.1f", normalizedSignal.confidence))%)")
+
             // ELITE AUTO-TRADE EXECUTION
             let isAutoTradeEnabled = UserDefaults.standard.bool(forKey: "isAutoTradeEnabled")
             let minConfidence = UserDefaults.standard.double(forKey: "minAutoTradeConfidence")
-            
-            if isAutoTradeEnabled && signal.confidence >= minConfidence {
-                print("⚡️ AUTO-TRADE: Signal confidence (\(Int(signal.confidence))%) >= Threshold (\(Int(minConfidence))%). Executing immediately.")
-                self.acceptSignal(signal)
+
+            if isAutoTradeEnabled && normalizedSignal.confidence >= minConfidence {
+                print("⚡️ AUTO-TRADE: Signal confidence (\(Int(normalizedSignal.confidence))%) >= Threshold (\(Int(minConfidence))%). Executing immediately.")
+                self.acceptSignal(normalizedSignal)
             }
         }
-        
+
         // Post global notification for any non-SwiftUI listeners
-        NotificationCenter.default.post(name: .newSignalGenerated, object: signal)
-        
-        NotificationManager.shared.sendSignalNotification(signal)
+        NotificationCenter.default.post(name: .newSignalGenerated, object: normalizedSignal)
+
+        NotificationManager.shared.sendSignalNotification(normalizedSignal)
     }
-    
+
     private func createSignal(from scalpingSignal: ScalpingSignal) -> Signal {
         // ELITE DYNAMIC EXPIRY:
         // 1. Base duration: 180s (3m) for scalping
-        var expiryDuration: TimeInterval = 180 
-        
+        var expiryDuration: TimeInterval = 180
+
         // 2. Trend Conviction Bonus: If HTF aligned, the window of opportunity is wider
-        if scalpingSignal.confidenceFactors.keys.contains("HTF Power Alignment") || 
-           scalpingSignal.confidenceFactors.keys.contains("Elite Dip Buy") ||
-           scalpingSignal.confidenceFactors.keys.contains("Elite Rally Sell") {
+        if scalpingSignal.confidenceFactors.keys.contains("HTF Power Alignment") ||
+               scalpingSignal.confidenceFactors.keys.contains("Elite Dip Buy") ||
+               scalpingSignal.confidenceFactors.keys.contains("Elite Rally Sell") {
             expiryDuration = 420 // 7 minutes (Elite signals have macro backing)
         } else if scalpingSignal.confidence > 90 {
             expiryDuration = 300 // 5 minutes (High confidence)
         }
-        
+
         if tradingMode == .standard {
             expiryDuration = 600 // 10 minutes for standard mode
         }
-        
+
         return Signal(
             id: UUID(),
             type: scalpingSignal.type,
@@ -782,115 +813,120 @@ class RefactoredAppCoordinator: ObservableObject {
 
     func acceptSignal(_ signal: Signal) {
         Task {
+            // Normalize symbol
+            let normalizedSymbol = normalizeSymbol(signal.symbol)
+            var normalizedSignal = signal
+            normalizedSignal.symbol = normalizedSymbol
+
             // Use appropriate risk manager based on trading mode
             let currentRiskManager = tradingMode == .scalping ?
                 scalpingRiskManager as RiskManagerProtocol :
                 riskManager as RiskManagerProtocol
-            
-            guard await currentRiskManager.canOpenTrade(for: signal.symbol) else {
-                print("⚠️ Risk manager prevents accepting trade for \(signal.symbol)")
-                
+
+            guard await currentRiskManager.canOpenTrade(for: normalizedSymbol) else {
+                print("⚠️ Risk manager prevents accepting trade for \(normalizedSymbol)")
+
                 await MainActor.run {
-                    self.signals.removeAll { $0.id == signal.id }
+                    self.signals.removeAll { $0.id == normalizedSignal.id }
                 }
                 return
             }
-            
-            guard let positionSize = await currentRiskManager.calculatePositionSize(for: signal) else {
+
+            guard let positionSize = await currentRiskManager.calculatePositionSize(for: normalizedSignal) else {
                 return
             }
-            
+
             // Execute trade on appropriate service
             var externalDealId: String?
-            
+
             // MT5 Execution (God Mode)
-            if signal.source == .mt5 || selectedSignalSource == .mt5 || selectedSignalSource == .both {
+            if normalizedSignal.source == .mt5 || selectedSignalSource == .mt5 || selectedSignalSource == .both {
                 do {
-                    print("📤 Executing trade on MT5 for \(signal.symbol)...")
-                    var mt5Signal = signal
-                    
+                    print("📤 Executing trade on MT5 for \(normalizedSymbol)...")
+                    var mt5Signal = normalizedSignal
+
                     // Prioritize UI-adjusted values if they exist, otherwise use engine's
-                    mt5Signal.positionSize = signal.positionSize ?? positionSize.units
-                    mt5Signal.stopLoss = signal.stopLoss ?? positionSize.stopLoss
-                    mt5Signal.takeProfit = signal.takeProfit ?? positionSize.takeProfit
-                    
+                    mt5Signal.positionSize = normalizedSignal.positionSize ?? positionSize.units
+                    mt5Signal.stopLoss = normalizedSignal.stopLoss ?? positionSize.stopLoss
+                    mt5Signal.takeProfit = normalizedSignal.takeProfit ?? positionSize.takeProfit
+
                     mt5Signal.magicNumber = Int(UserDefaults.standard.integer(forKey: "mt5MagicNumber"))
                     if mt5Signal.magicNumber == 0 { mt5Signal.magicNumber = 888888 }
-                    
+
                     mt5Signal.comment = "GOD_MODE_SCALP"
-                    mt5Signal.executionMode = signal.executionMode ?? .market
-                    mt5Signal.filler = signal.filler ?? .ioc
-                    mt5Signal.deviation = signal.deviation ?? 10
-                    
+                    mt5Signal.executionMode = normalizedSignal.executionMode ?? .market
+                    mt5Signal.filler = normalizedSignal.filler ?? .ioc
+                    mt5Signal.deviation = normalizedSignal.deviation ?? 10
+
                     let tradeResult = try await MT5Service.shared.executeTrade(signal: mt5Signal)
                     externalDealId = tradeResult.deal != nil ? String(tradeResult.deal!) : String(tradeResult.order ?? 0)
                     print("✅ MT5 trade executed successfully. Ticket/Deal: \(externalDealId ?? "N/A")")
-                    
+
                     await MainActor.run {
                         NotificationCenter.default.post(name: .mt5TradeExecuted, object: tradeResult)
                     }
                 } catch {
                     print("❌ Failed to execute MT5 trade: \(error.localizedDescription)")
-                    
+
                     // PRODUCTION FIX: Handle "Trade Disabled" or 10044 (Real Only) by marking symbol restricted
-                    if error.localizedDescription.contains("trade disabled") || 
-                       error.localizedDescription.contains("10044") {
-                        print("🛡 GodMode: Auto-Restricting \(signal.symbol) (Broker Restriction Detected)")
+                    if error.localizedDescription.contains("trade disabled") ||
+                           error.localizedDescription.contains("10044") {
+                        print("🛡 GodMode: Auto-Restricting \(normalizedSymbol) (Broker Restriction Detected)")
                     }
 
-                    if signal.source == .mt5 {
+                    if normalizedSignal.source == .mt5 {
                         print("⚠️ MT5 execution failed - aborting")
                         await MainActor.run {
-                            self.signals.removeAll { $0.id == signal.id }
-                        }
-                        return
-                    }
-                }
-            } 
-            // IG Execution
-            else if signal.source == .ig || selectedSignalSource == .ig {
-                do {
-                    print("📤 Executing trade on IG for \(signal.symbol)...")
-                    let tradeResult = try await IGTradingService.shared.executeTrade(signal: signal)
-                    externalDealId = tradeResult.dealId
-                    print("✅ IG trade executed successfully. Deal ID: \(tradeResult.dealId ?? "N/A")")
-                    
-                    await MainActor.run {
-                        NotificationCenter.default.post(name: .igTradeExecuted, object: tradeResult)
-                    }
-                } catch {
-                    print("❌ Failed to execute IG trade: \(error)")
-                    if signal.source == .ig {
-                        await MainActor.run {
-                            self.signals.removeAll { $0.id == signal.id }
+                            self.signals.removeAll { $0.id == normalizedSignal.id }
                         }
                         return
                     }
                 }
             }
-            
+            // IG Execution
+            else if normalizedSignal.source == .ig || selectedSignalSource == .ig {
+                do {
+                    print("📤 Executing trade on IG for \(normalizedSymbol)...")
+                    let tradeResult = try await IGTradingService.shared.executeTrade(signal: normalizedSignal)
+                    externalDealId = tradeResult.dealId
+                    print("✅ IG trade executed successfully. Deal ID: \(tradeResult.dealId ?? "N/A")")
+
+                    await MainActor.run {
+                        NotificationCenter.default.post(name: .igTradeExecuted, object: tradeResult)
+                    }
+                } catch {
+                    print("❌ Failed to execute IG trade: \(error)")
+                    if normalizedSignal.source == .ig {
+                        await MainActor.run {
+                            self.signals.removeAll { $0.id == normalizedSignal.id }
+                        }
+                        return
+                    }
+                }
+            }
+
             // Create trade record with external deal ID if available
             let trade = TradeRecord(
-                signalId: signal.id,
-                symbol: signal.symbol,
-                type: signal.type,
-                entryPrice: signal.price,
+                signalId: normalizedSignal.id,
+                symbol: normalizedSymbol,
+                type: normalizedSignal.type,
+                entryPrice: normalizedSignal.price,
                 entryTime: Date(),
-                confidence: signal.confidence,
+                confidence: normalizedSignal.confidence,
                 takeProfit: positionSize.takeProfit,
                 stopLoss: positionSize.stopLoss,
                 positionSize: positionSize.units,
                 status: .active,
                 externalDealId: externalDealId
             )
-            
+
             // Update signal status and link to trade
             await MainActor.run {
-                if let index = signals.firstIndex(where: { $0.id == signal.id }) {
-                    var updatedSignal = signal
+                if let index = signals.firstIndex(where: { $0.id == normalizedSignal.id }) {
+                    var updatedSignal = normalizedSignal
                     updatedSignal.status = .accepted
                     updatedSignal.acceptedAt = Date()
-                    updatedSignal.acceptedPrice = signal.price
+                    updatedSignal.acceptedPrice = normalizedSignal.price
                     updatedSignal.positionSize = positionSize.units
                     updatedSignal.stopLoss = positionSize.stopLoss
                     updatedSignal.takeProfit = positionSize.takeProfit
@@ -900,13 +936,13 @@ class RefactoredAppCoordinator: ObservableObject {
                     objectWillChange.send()
                 }
             }
-            
+
             // Register with risk manager
             await currentRiskManager.registerTrade(trade)
-            
+
             // Add to appropriate trade monitor
             if tradingMode == .scalping {
-                if let indicators = await calculateLatestIndicators(symbol: signal.symbol) {
+                if let indicators = await calculateLatestIndicators(symbol: normalizedSymbol) {
                     await scalpingTradeMonitor.addTrade(trade, indicators: indicators)
                 } else {
                     await scalpingTradeMonitor.addTrade(trade, indicators: nil)
@@ -914,20 +950,20 @@ class RefactoredAppCoordinator: ObservableObject {
             } else {
                 await tradeMonitor.addTrade(trade)
             }
-            
+
             // Add to history - THIS IS CRITICAL
             await tradeHistory.addTrade(trade)
-            
+
             let riskAmount = tradingMode == .scalping ?
                 (positionSize.riskAmount) :
-                (positionSize.units * signal.price * 0.01)
-            
-            print("✅ \(tradingMode == .scalping ? "SCALPING" : "STANDARD") trade opened: \(signal.symbol) - Risk: KES \(String(format: "%.2f", riskAmount))")
-            
+                (positionSize.units * normalizedSignal.price * 0.01)
+
+            print("✅ \(tradingMode == .scalping ? "SCALPING" : "STANDARD") trade opened: \(normalizedSymbol) - Risk: KES \(String(format: "%.2f", riskAmount))")
+
             if let dealId = externalDealId {
-                print("📋 IG Deal ID: \(dealId)")
+                print("📋 MT5 Deal ID: \(dealId)")
             } else {
-                print("📋 Trade saved locally (no IG execution)")
+                print("📋 Trade saved locally (no MT5 execution)")
             }
         }
     }
@@ -939,7 +975,7 @@ class RefactoredAppCoordinator: ObservableObject {
             print("❌ Signal denied: \(signal.symbol)")
         }
     }
-    
+
     private func handleTradeClosed(_ trade: TradeRecord) async {
         // Update the corresponding signal
         await MainActor.run {
@@ -951,19 +987,19 @@ class RefactoredAppCoordinator: ObservableObject {
                 updatedSignal.pnl = trade.pnl
                 updatedSignal.pnlPercent = trade.pnlPercent
                 signals[index] = updatedSignal
-                
+
                 DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
                     self.signals.removeAll { $0.id == trade.signalId }
                 }
             }
         }
-        
+
         // Update risk metrics
         await updateRiskMetrics()
-        
+
         print("📊 Trade closed: \(trade.symbol) P&L: KES \(String(format: "%.2f", trade.pnl ?? 0))")
     }
-    
+
     func stop() async {
         isRunning = false
         signalGenerationTask?.cancel()
@@ -972,41 +1008,41 @@ class RefactoredAppCoordinator: ObservableObject {
         metricsUpdateTask = nil
         mt5PollingTask?.cancel()
         mt5PollingTask = nil
-        
+
         await binanceService.disconnect()
-        
+
         await MainActor.run {
             status = "Stopped"
             connectionStatus = "Disconnected"
         }
     }
-    
+
     func switchTradingMode(_ mode: TradingMode) async {
         guard mode != tradingMode else { return }
-        
+
         tradingMode = mode
         await MainActor.run {
             signals.removeAll()
             status = "Switching to \(mode == .scalping ? "SCALPING" : "STANDARD") mode..."
         }
-        
+
         // Reconnect with new timeframes
         await binanceService.disconnect()
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         await connectToDataSources()
     }
-    
+
 
     func switchSignalSource(_ source: SignalSource) {
         Task { @MainActor in
             self.selectedSignalSource = source
             self.status = "Signal source: \(source.displayName)"
-            
+
             // Clear signals when switching source to avoid confusion
             self.signals.removeAll()
-            
+
             print("🔄 Switched signal source to: \(source.displayName)")
-            
+
             // Post notification for UI update
             NotificationCenter.default.post(name: .signalSourceChanged, object: source)
         }
@@ -1014,7 +1050,7 @@ class RefactoredAppCoordinator: ObservableObject {
 
     func recordSignalLatency(source: SignalSource, latency: TimeInterval) {
         sourceLatency[source] = latency
-        
+
         // Update reliability based on latency (lower latency = higher reliability)
         let maxLatency: TimeInterval = 5.0 // 5 seconds max for good reliability
         let reliability = max(0.1, 1.0 - (latency / maxLatency))
@@ -1031,19 +1067,19 @@ class RefactoredAppCoordinator: ObservableObject {
         guard selectedSignalSource == .auto else {
             return selectedSignalSource
         }
-        
+
         // Don't switch too frequently
         guard Date().timeIntervalSince(lastSourceSwitch) > minSwitchInterval else {
             // Return current best guess without switching
             let bRel = sourceReliability[.binance] ?? 0
             let iRel = sourceReliability[.ig] ?? 0
             let mRel = sourceReliability[.mt5] ?? 0
-            
+
             if bRel >= iRel && bRel >= mRel { return .binance }
             if iRel >= bRel && iRel >= mRel { return .ig }
             return .mt5
         }
-        
+
         // Compare reliability and latency
         let binanceReliability = sourceReliability[.binance] ?? 1.0
         let igReliability = sourceReliability[.ig] ?? 1.0
@@ -1051,12 +1087,12 @@ class RefactoredAppCoordinator: ObservableObject {
         let binanceLatency = sourceLatency[.binance] ?? 0
         let igLatency = sourceLatency[.ig] ?? 0
         let mt5Latency = sourceLatency[.mt5] ?? 0
-        
+
         // Calculate combined score
         let binanceScore = binanceReliability * (1.0 / max(binanceLatency, 0.1))
         let igScore = igReliability * (1.0 / max(igLatency, 0.1))
         let mt5Score = mt5Reliability * (1.0 / max(mt5Latency, 0.1))
-        
+
         let bestSource: SignalSource
         if binanceScore >= igScore && binanceScore >= mt5Score {
             bestSource = .binance
@@ -1065,121 +1101,129 @@ class RefactoredAppCoordinator: ObservableObject {
         } else {
             bestSource = .mt5
         }
-        
+
         print("📊 Auto source selection - Binance score: \(String(format: "%.2f", binanceScore)), IG score: \(String(format: "%.2f", igScore)) - Selected: \(bestSource.displayName)")
-        
+
         lastSourceSwitch = Date()
         return bestSource
     }
 
     func processIncomingSignal(_ signal: Signal, from source: SignalSource) async {
+        // Normalize symbol
+        let normalizedSymbol = normalizeSymbol(signal.symbol)
+        var normalizedSignal = signal
+        normalizedSignal.symbol = normalizedSymbol
+
         // Record latency
-        let latency = Date().timeIntervalSince(signal.timestamp)
+        let latency = Date().timeIntervalSince(normalizedSignal.timestamp)
         recordSignalLatency(source: source, latency: latency)
-        
+
         // Store last signal from each source
         switch source {
         case .binance:
-            lastBinanceSignal[signal.symbol] = signal
+            lastBinanceSignal[normalizedSymbol] = normalizedSignal
         case .ig:
-            lastIGSignal[signal.symbol] = signal
+            lastIGSignal[normalizedSymbol] = normalizedSignal
         case .mt5:
-            lastMT5Signal[signal.symbol] = signal
+            lastMT5Signal[normalizedSymbol] = normalizedSignal
         default:
             break
         }
-        
+
         // Determine which signal to use based on selected mode
         let sourceToUse = getBestSignalSource()
-        
+
         // If source doesn't match selected/auto mode, ignore
         if selectedSignalSource == .auto {
             // In auto mode, only process signals from the best source
             if source == sourceToUse {
-                await handleNewSignal(signal)
+                await handleNewSignal(normalizedSignal)
             } else {
                 print("📊 Auto mode: Ignoring \(source.displayName) signal, using \(sourceToUse.displayName)")
             }
         } else if selectedSignalSource == .both {
             // In both mode, process all signals and let comparator decide
-            if let binanceSig = lastBinanceSignal[signal.symbol],
-               let igSig = lastIGSignal[signal.symbol],
-               let _ = lastMT5Signal[signal.symbol] {
+            if let binanceSig = lastBinanceSignal[normalizedSymbol],
+               let igSig = lastIGSignal[normalizedSymbol],
+               let _ = lastMT5Signal[normalizedSymbol] {
                 let comparison = signalComparator.compareSignals(
                     binanceSignal: binanceSig,
                     igSignal: igSig,
-                    newSignal: signal
+                    newSignal: normalizedSignal
                 )
-                
+
                 if comparison.shouldReplace, let bestSignal = comparison.bestSignal {
                     await handleNewSignal(bestSignal)
                 }
             }
         } else if source == selectedSignalSource {
             // Manual mode - only process from selected source
-            await handleNewSignal(signal)
+            await handleNewSignal(normalizedSignal)
         }
     }
 
     func handleKlineUpdate(symbol: String, timeframe: String, kline: Kline) async {
+        // Normalize symbol
+        let normalizedSymbol = normalizeSymbol(symbol)
+
         // ELITE PAIR FILTER: Completely ignore pairs not selected in Settings
-        guard activeSymbols.contains(symbol) else { return }
-        
+        guard activeSymbols.contains(normalizedSymbol) else { return }
+
         // FIXED: Additional whitelist check for scalping mode
         if tradingMode == .scalping {
-            guard allowedScalpingSymbols.contains(symbol) else {
-                // print("📊 \(symbol) ignored: Not in scalping whitelist")
+            guard allowedScalpingSymbols.contains(normalizedSymbol) else {
+                // print("📊 \(normalizedSymbol) ignored: Not in scalping whitelist")
                 return
             }
         }
 
         if let marketDataActor = marketData as? RefactoredMarketDataActor {
-            await marketDataActor.addCandle(symbol: symbol, timeframe: timeframe, candle: kline)
+            await marketDataActor.addCandle(symbol: normalizedSymbol, timeframe: timeframe, candle: kline)
         }
-        
+
         // PRODUCTION FIX: Only evaluate signals for current data (within last 2 minutes)
         // This prevents "ghost signals" from historical data loading
         let klineTime = Date(timeIntervalSince1970: TimeInterval(kline.closeTime))
         let isRecent = abs(Date().timeIntervalSince(klineTime)) < 120
-        
+
         guard isRecent else { return }
 
         switch tradingMode {
         case .scalping:
-            await handleScalpingUpdate(symbol: symbol, timeframe: timeframe, kline: kline)
+            await handleScalpingUpdate(symbol: normalizedSymbol, timeframe: timeframe, kline: kline)
         case .standard:
-            await handleStandardUpdate(symbol: symbol, timeframe: timeframe, kline: kline)
+            await handleStandardUpdate(symbol: normalizedSymbol, timeframe: timeframe, kline: kline)
         }
     }
-    
+
     func getScalpingMetrics() async -> String {
         let metrics = await scalpingRiskManager.getCurrentRiskMetrics()
-        
+
         var report = """
-        📊 SCALPING METRICS
-        Daily P&L: KES \(String(format: "%.2f", metrics.dailyPnL))
-        Daily Limit: KES \(String(format: "%.2f", metrics.dailyLossLimit))
-        Hourly Trades: \(metrics.hourlyTrades)/5
-        Active Trades: \(metrics.activeTrades)/\(metrics.maxConcurrentTrades)
-        
-        Consecutive Losses:
-        """
-        
+                     📊 SCALPING METRICS
+                     Daily P&L: KES \(String(format: "%.2f", metrics.dailyPnL))
+                     Daily Limit: KES \(String(format: "%.2f", metrics.dailyLossLimit))
+                     Hourly Trades: \(metrics.hourlyTrades)/5
+                     Active Trades: \(metrics.activeTrades)/\(metrics.maxConcurrentTrades)
+
+                     Consecutive Losses:
+                     """
+
         for (symbol, losses) in metrics.consecutiveLosses {
             report += "\n  \(symbol): \(losses)"
         }
-        
+
         return report
     }
 
     // MARK: - Trade Analysis
-    
+
     func analyzeTradeHistory() async {
         let trades = await tradeHistory.getAllTrades()
         let report = TradeAnalyzer.analyze(trades)
         let recommendations = TradeAnalyzer.generateRecommendations(report)
         let blacklistCode = TradeAnalyzer.generateBlacklistCode(report)
-        
+
         // Print to console
         print(recommendations)
         print("\n\n")
@@ -1187,12 +1231,12 @@ class RefactoredAppCoordinator: ObservableObject {
         print("// BLACKLIST CODE TO COPY INTO YOUR PROJECT")
         print("// ===========================================")
         print(blacklistCode)
-        
+
         // Also save to file
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let reportPath = documentsPath.appendingPathComponent("trade_analysis_report.txt")
         let codePath = documentsPath.appendingPathComponent("symbol_blacklist_code.swift")
-        
+
         do {
             try recommendations.write(to: reportPath, atomically: true, encoding: .utf8)
             try blacklistCode.write(to: codePath, atomically: true, encoding: .utf8)
@@ -1208,28 +1252,28 @@ class RefactoredAppCoordinator: ObservableObject {
     func parseTradeHistoryCSV(_ csvContent: String) -> [TradeRecord] {
         var trades: [TradeRecord] = []
         let rows = csvContent.components(separatedBy: "\n")
-        
+
         guard rows.count > 1 else { return trades }
-        
+
         // Skip header
         for row in rows.dropFirst() {
             let columns = row.components(separatedBy: ",")
             guard columns.count >= 12 else { continue }
-            
+
             // Parse data
-            let symbol = columns[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let symbol = normalizeSymbol(columns[0].trimmingCharacters(in: .whitespacesAndNewlines))
             let typeString = columns[1].trimmingCharacters(in: .whitespacesAndNewlines)
             let entryPrice = Double(columns[6]) ?? 0
             let exitPrice = Double(columns[7]) ?? 0
             let pnl = Double(columns[11]) ?? 0
             let result = columns[12].trimmingCharacters(in: .whitespacesAndNewlines)
-            
+
             // Determine status
             let status: TradeRecord.TradeStatus = (result == "ACTIVE" || result == "PENDING") ? .active : .completed
-            
+
             // Determine trade type
             let type: SignalType = typeString == "BUY" ? .buy : .sell
-            
+
             let trade = TradeRecord(
                 signalId: UUID(),
                 symbol: symbol,
@@ -1244,11 +1288,9 @@ class RefactoredAppCoordinator: ObservableObject {
             )
             trades.append(trade)
         }
-        
+
         return trades
     }
-    
+
     // MARK: - Status Update Methods
 }
-
-

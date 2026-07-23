@@ -203,7 +203,8 @@ class MT5Service {
                             low: candle.low,
                             close: candle.close,
                             volume: candle.totalVolume,
-                            closeTime: Int(candle.time)
+                            closeTime: Int(candle.time),
+                            spread: candle.spread != nil ? Double(candle.spread!) : nil
                         )
                     }
                 }
@@ -218,8 +219,13 @@ class MT5Service {
     // MARK: - Trading (God Mode Execution)
     
     func executeTrade(signal: Signal) async throws -> MT5TradeResult {
-        // Clean symbol (remove slashes, e.g., EUR/USD -> EURUSD)
-        let cleanSymbol = signal.symbol.replacingOccurrences(of: "/", with: "")
+        // Clean symbol and append broker suffix
+        var cleanSymbol = signal.symbol.replacingOccurrences(of: "/", with: "")
+        
+        let suffix = await MainActor.run { ScalpingConfig.shared.brokerSuffix }
+        if !suffix.isEmpty && !cleanSymbol.hasSuffix(suffix) {
+            cleanSymbol += suffix
+        }
         
         // Try the last working path first to ensure fast execution
         let paths = ["/v1/order"] // Standardized on /v1/order for God Mode

@@ -115,7 +115,7 @@ enum MT5ExecutionMode: String, Codable, Sendable {
 struct Signal: Identifiable, Sendable, Codable {
     let id: UUID
     let type: SignalType
-    let symbol: String
+    var symbol: String
     let price: Double
     let confidence: Double
     let timestamp: Date
@@ -313,13 +313,14 @@ struct Kline: Sendable, Codable {
     let close: Double
     let volume: Double
     let closeTime: Int
+    let spread: Double?
 }
 
 // MARK: - Trade Record
 struct TradeRecord: Identifiable, Codable, Sendable {
     let id: UUID
     let signalId: UUID
-    let symbol: String
+    var symbol: String
     let type: SignalType
     let entryPrice: Double
     let entryTime: Date
@@ -442,6 +443,7 @@ struct IndicatorSet: Sendable {
     let cci: Double
     let sar: Double
     let atr: Double
+    let spread: Double?
     let ema9: Double
     let ema21: Double
     let ema50: Double
@@ -466,15 +468,15 @@ struct IndicatorSet: Sendable {
 }
 
 struct ScalpingSignal: Sendable {
-    let type: SignalType
-    let symbol: String
-    let price: Double
-    let confidence: Double
-    let score: Int
-    let sellScore: Int
-    let indicators: IndicatorSet
-    let confidenceFactors: [String: Double]
-    let timestamp: Date
+    var type: SignalType
+    var symbol: String
+    var price: Double
+    var confidence: Double
+    var score: Int
+    var sellScore: Int
+    var indicators: IndicatorSet
+    var confidenceFactors: [String: Double]
+    var timestamp: Date
     
     // God Mode Fields
     var stopLoss: Double?

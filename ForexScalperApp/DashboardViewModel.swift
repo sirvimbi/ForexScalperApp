@@ -27,10 +27,10 @@ class DashboardViewModel: ObservableObject {
     @Published var mt5AuthToken: String = "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"
     @Published var mt5MagicNumber: Int = 888888
     
-    // MT5 Account Credentials
-    @Published var mt5Login: String = "436886946"
+    // MT5 Account Credentials (PROD REAL DEFAULTS)
+    @Published var mt5Login: String = "134522550"
     @Published var mt5Password: String = "Kenya@254"
-    @Published var mt5Server: String = "ExnessKE-MT5Trial9"
+    @Published var mt5Server: String = "ExnessKE-MT5Real9"
     
     @Published var isConnecting: Bool = false
     @Published var notifyOnSignal: Bool = true
@@ -39,9 +39,7 @@ class DashboardViewModel: ObservableObject {
     @Published var notifyOnExpiry: Bool = true
     @Published var selectedTimeFilter: DashboardTimeFilter = .allTime
     @Published var isRefreshing: Bool = false
-    @Published var minScalpingScore: Double = 15
-    @Published var maxSpreadBps: Double = 10
-    @Published var signalCooldownSeconds: Double = 120
+
     @Published var mandatoryConfluenceLevel: Double = 2 // Double for slider compatibility
     @Published var defaultStopLossPercent: Double = 1.0
     @Published var defaultRRRatio: Double = 2.0
@@ -129,14 +127,6 @@ class DashboardViewModel: ObservableObject {
         notifyOnExpiry = UserDefaults.standard.object(forKey: "notifyOnExpiry") != nil ?
             UserDefaults.standard.bool(forKey: "notifyOnExpiry") : true
         
-        // Load Scalping settings
-        minScalpingScore = UserDefaults.standard.double(forKey: "minScalpingScore") != 0 ?
-            UserDefaults.standard.double(forKey: "minScalpingScore") : 15
-        maxSpreadBps = UserDefaults.standard.double(forKey: "maxSpreadBps") != 0 ?
-            UserDefaults.standard.double(forKey: "maxSpreadBps") : 10
-        signalCooldownSeconds = UserDefaults.standard.double(forKey: "signalCooldownSeconds") != 0 ?
-            UserDefaults.standard.double(forKey: "signalCooldownSeconds") : 120
-        
         mandatoryConfluenceLevel = Double(scalpingConfig.mandatoryConfluenceLevel)
         
         // Load MT5 settings
@@ -144,9 +134,9 @@ class DashboardViewModel: ObservableObject {
         mt5AuthToken = UserDefaults.standard.string(forKey: "mt5AuthToken") ?? "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"
         mt5MagicNumber = UserDefaults.standard.integer(forKey: "mt5MagicNumber") != 0 ?
             UserDefaults.standard.integer(forKey: "mt5MagicNumber") : 888888
-        mt5Login = UserDefaults.standard.string(forKey: "mt5Login") ?? "436886946"
+        mt5Login = UserDefaults.standard.string(forKey: "mt5Login") ?? "134522550"
         mt5Password = UserDefaults.standard.string(forKey: "mt5Password") ?? "Kenya@254"
-        mt5Server = UserDefaults.standard.string(forKey: "mt5Server") ?? "ExnessKE-MT5Trial9"
+        mt5Server = UserDefaults.standard.string(forKey: "mt5Server") ?? "ExnessKE-MT5Real9"
         
         // Load Active Trading Pairs
         if let savedSymbols = UserDefaults.standard.array(forKey: "activeSymbols") as? [String] {
@@ -202,11 +192,6 @@ class DashboardViewModel: ObservableObject {
         UserDefaults.standard.set(notifyOnTrade, forKey: "notifyOnTrade")
         UserDefaults.standard.set(notifyOnClose, forKey: "notifyOnClose")
         UserDefaults.standard.set(notifyOnExpiry, forKey: "notifyOnExpiry")
-        
-        // Save Scalping settings
-        UserDefaults.standard.set(minScalpingScore, forKey: "minScalpingScore")
-        UserDefaults.standard.set(maxSpreadBps, forKey: "maxSpreadBps")
-        UserDefaults.standard.set(signalCooldownSeconds, forKey: "signalCooldownSeconds")
         
         // Sync to ScalpingConfig
         scalpingConfig.mandatoryConfluenceLevel = Int(mandatoryConfluenceLevel)

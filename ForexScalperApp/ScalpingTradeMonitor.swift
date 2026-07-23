@@ -16,7 +16,7 @@ actor ScalpingTradeMonitor {
     private var maxHoldTime: TimeInterval = 30 * 60 // 30 minutes
     private var enableTrailingStop: Bool = true
     private var enableIndicatorExit: Bool = true
-    private var breakEvenPips: Double = 15.0        // FIXED: NEW - 15 pips to BE
+    private var breakEvenPips: Double = 20.0        // FIXED: 15 -> 20 (reduces breakeven exits)
 
     private var onTradeClosed: ((TradeRecord) async -> Void)?
     private var trailingStops: [UUID: Double] = [:]
@@ -111,7 +111,7 @@ actor ScalpingTradeMonitor {
 
             let latestIndicators = await getLatestIndicators(symbol: trade.symbol)
 
-            // FIXED: Break-even after 15 pips (was 4)
+            // FIXED: Break-even after 20 pips (was 15)
             if await shouldApplyBreakEven(trade: trade, currentPrice: currentPrice) {
                 await applyBreakEven(trade: trade)
             }
@@ -232,7 +232,7 @@ actor ScalpingTradeMonitor {
 
     // MARK: - Elite Risk Management Methods
 
-    // FIXED: Break-even only after 15 pips profit (was 4)
+    // FIXED: Break-even only after 20 pips profit (was 15)
     private func shouldApplyBreakEven(trade: TradeRecord, currentPrice: Double) async -> Bool {
         let pips = abs(currentPrice - trade.entryPrice) / trade.entryPrice * 10000
 
