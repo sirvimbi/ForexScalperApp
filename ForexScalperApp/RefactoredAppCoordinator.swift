@@ -197,28 +197,29 @@ class RefactoredAppCoordinator: ObservableObject {
     }
 
     private func syncMT5Data() async {
-        print("🔄 Syncing MT5 Data (Deep Context)...")
+        godLog("🔄 Syncing MT5 Data (Deep Context)...", level: .info)
 
         // 1. PUSH WATCHLIST: Ensure EA knows which symbols we care about
         let symbolsArray = Array(activeSymbols)
         if !symbolsArray.isEmpty {
             do {
                 _ = try await MT5Service.shared.setTrackedSymbols(symbolsArray)
-                print("✅ MT5: Watchlist pushed to EA (\(symbolsArray.count) symbols)")
+                godLog("✅ MT5: Watchlist pushed to EA (\(symbolsArray.count) symbols)", level: .success)
             } catch {
-                print("⚠️ MT5: Failed to push watchlist: \(error)")
+                godLog("⚠️ MT5: Failed to push watchlist: \(error)", level: .warning)
             }
         }
 
         // 2. FETCH HISTORY: Serial sync to prevent socket saturation
-        for symbol in symbolsArray.prefix(15) { // Limit initial deep sync to top 15 pairs
+        // GOD MODE FIX: Increase limit to 20 pairs for better coverage
+        for symbol in symbolsArray.prefix(20) { 
             let tfs = ["1m", "5m", "15m", "30m", "1h", "4h", "D1", "W1"]
 
             for tf in tfs {
-                // Check if already cancelled
                 if Task.isCancelled { return }
 
-                let maxDepth = (tf == "1m" || tf == "5m") ? 1000 : 300 // Slightly reduced depth for minor TFs
+                // FIXED: Increase depth to ensure indicator stability
+                let maxDepth = (tf == "1m" || tf == "5m") ? 1500 : 500 
                 
                 // INTELLIGENT GAP CALCULATION
                 var depth = maxDepth
@@ -239,24 +240,33 @@ class RefactoredAppCoordinator: ObservableObject {
                     }()
                     
                     let gapCandles = Int(ceil(diffSeconds / (tfMinutes * 60)))
-                    depth = min(maxDepth, max(10, gapCandles + 5)) // Add 5 safety candles
+                    // GOD MODE: Fetch the gap PLUS enough bars for indicator calculation (minimum 200)
+                    depth = min(maxDepth, max(200, gapCandles + 20))
                     
                     if depth < maxDepth {
-                        print("🧠 Intelligence: Only fetching \(depth) missing bars for \(symbol) \(tf)")
+                        godLog("🧠 Intelligence: Fetching \(depth) bars to bridge gap for \(symbol) \(tf)", level: .diagnostic)
                     }
                 }
 
-                do {
-                    let candles = try await MT5Service.shared.getCandles(symbol: symbol, timeframe: tf, count: depth)
-                    if let marketDataActor = marketData as? RefactoredMarketDataActor {
-                        await marketDataActor.addCandles(symbol: symbol, timeframe: tf, newCandles: candles)
-                        print("📊 \(symbol) [\(tf)]: Loaded \(candles.count) bars")
+                var success = false
+                var retryCount = 0
+                while !success && retryCount < 3 {
+                    do {
+                        let candles = try await MT5Service.shared.getCandles(symbol: symbol, timeframe: tf, count: depth)
+                        if let marketDataActor = marketData as? RefactoredMarketDataActor {
+                            await marketDataActor.addCandles(symbol: symbol, timeframe: tf, newCandles: candles)
+                            // godLog("📊 \(symbol) [\(tf)]: Loaded \(candles.count) bars", level: .diagnostic)
+                        }
+                        success = true
+                    } catch {
+                        retryCount += 1
+                        godLog("⚠️ Retry \(retryCount): Failed to sync \(symbol) \(tf): \(error.localizedDescription)", level: .warning)
+                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s wait
                     }
-                    // CRITICAL: Small sleep to let MT5 socket breathe
-                    try? await Task.sleep(nanoseconds: 100_000_000)
-                } catch {
-                    print("⚠️ Failed to sync \(symbol) \(tf): \(error.localizedDescription)")
                 }
+                
+                // Let MT5 socket breathe
+                try? await Task.sleep(nanoseconds: 50_000_000)
             }
         }
 
