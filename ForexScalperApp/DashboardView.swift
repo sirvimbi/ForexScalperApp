@@ -2038,8 +2038,8 @@ struct DashboardView: View {
                                     settingsRow("Strategy Pillars") {
                                         HStack(spacing: 8) {
                                             Slider(value: Binding(
-                                                get: { Double(viewModel.scalpingConfig.minConfluencePillars) },
-                                                set: { viewModel.scalpingConfig.minConfluencePillars = Int($0) }
+                                                get: { viewModel.scalpingConfig.minConfluencePillars },
+                                                set: { viewModel.scalpingConfig.minConfluencePillars = $0 }
                                             ), in: 1...7, step: 1)
                                             .frame(width: 120)
                                             Text("\(viewModel.scalpingConfig.minConfluencePillars)/7")

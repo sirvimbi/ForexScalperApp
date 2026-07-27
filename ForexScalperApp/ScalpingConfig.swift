@@ -35,7 +35,7 @@ class ScalpingConfig: ObservableObject {
 
     // Confluence settings
     @Published var mandatoryConfluenceLevel: Int = 2 { didSet { saveConfig() } }
-    @Published var minConfluencePillars: Int = 2 { didSet { saveConfig() } } // Elite requirement (2 of 7)
+    @Published var minConfluencePillars: Double = 2.0 { didSet { saveConfig() } } // Elite requirement (2 of 7)
 
     @Published var minVolatilityATR: Double = 0.005 { didSet { saveConfig() } } // 0.5% (was 0.05)
     @Published var minVolumeRatio: Double = 0.8 { didSet { saveConfig() } }
@@ -95,7 +95,7 @@ class ScalpingConfig: ObservableObject {
         minVolatilityATR = 0.005
         minVolumeRatio = 0.8
         mandatoryConfluenceLevel = 2
-        minConfluencePillars = 2
+        minConfluencePillars = 2.0
         enableTrailingStop = true
         trailActivationPips = 15
         trailDistance = 8
@@ -198,7 +198,7 @@ class ScalpingConfig: ObservableObject {
             self.maxDailyTrades = config.maxDailyTrades
             self.maxConcurrentScalps = config.maxConcurrentScalps
             self.mandatoryConfluenceLevel = config.mandatoryConfluenceLevel
-            self.minConfluencePillars = config.minConfluencePillars ?? 2
+            self.minConfluencePillars = config.minConfluencePillars ?? 2.0
             self.minVolumeRatio = config.minVolumeRatio ?? 0.8
             self.useManualLot = config.useManualLot ?? false
             self.manualLotSize = config.manualLotSize ?? 0.01
@@ -229,7 +229,7 @@ class ScalpingConfig: ObservableObject {
         let maxSpreadBps: Double; let cooldownSeconds: Double; let maxDailyTrades: Int
         let maxConcurrentScalps: Int
         let mandatoryConfluenceLevel: Int
-        let minConfluencePillars: Int?
+        let minConfluencePillars: Double?
         let minVolumeRatio: Double?
         let useManualLot: Bool?
         let manualLotSize: Double?

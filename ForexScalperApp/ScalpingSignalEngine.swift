@@ -407,7 +407,7 @@ actor ScalpingSignalEngine {
             (
                 config.mandatoryConfluenceLevel,
                 config.minScore,
-                config.minConfluencePillars,
+                Int(config.minConfluencePillars),
                 (rsi: config.rsiWeight, stoch: config.stochasticWeight, cci: config.cciWeight,
                  ma: config.maWeight, bb: config.bbWeight, vol: config.volumeWeight,
                  pat: config.patternWeight)
