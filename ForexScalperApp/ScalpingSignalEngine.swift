@@ -155,7 +155,6 @@ actor ScalpingSignalEngine {
         let signal = await generateSignal(symbol: symbol, indicators: indicators)
 
         if signal.type == .none { 
-            // Diagnostic log already handled inside generateSignal
             return nil 
         }
 
@@ -382,8 +381,11 @@ actor ScalpingSignalEngine {
         
         // ADD DIAGNOSTIC LOG FOR PILLAR FAILURE
         let finalScore = max(buyScore, sellScore)
-        if finalScore > 10 { // Only log if there was some interest
-            let side = buyScore > sellScore ? "BUY" : "SELL"
+        let side = buyScore > sellScore ? "BUY" : "SELL"
+        
+        if !hasVolume {
+            print("📊 \(symbol) Rejected: No Institutional Volume (Ratio: \(String(format: "%.1f", indicators.volumeRatio))x < 1.3x)")
+        } else if finalScore < minReqScore || currentPillars < minPillars {
             print("📊 \(symbol) Pillar Check: \(currentPillars)/\(minPillars) Pillars aligned (\(side)). Score: \(Int(finalScore))/\(Int(minReqScore))")
         }
 
