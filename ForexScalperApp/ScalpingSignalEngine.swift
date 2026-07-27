@@ -197,10 +197,26 @@ actor ScalpingSignalEngine {
 
         // 13. SYMBOL-SPECIFIC CONFIDENCE ADJUSTMENT (NEW)
         let confidenceMultiplier = getSymbolConfidenceMultiplier(symbol)
+        
+        // 14. ULTIMATE TIMING OPTIMIZATION
+        let timing = await getOptimalEntryTiming(symbol: symbol, indicators: indicators)
+        if !timing.isGood {
+            godLog("📊 \(symbol) Rejected: \(timing.reason)", level: .diagnostic)
+            return nil
+        }
+        
         var adjustedSignal = finalSignal
         adjustedSignal.confidence = min(finalSignal.confidence * confidenceMultiplier, 100)
 
-        godLog("🚀 GOD MODE 2.0: Elite Signal for \(symbol) | Confidence: \(Int(adjustedSignal.confidence))%", level: .success)
+        // 15. PERFORMANCE ANALYSIS INTEGRATION
+        let rec = await PerformanceAnalyzer.shared.getRecommendation(symbol: symbol)
+        if !rec.shouldTrade {
+            godLog("📊 \(symbol) Rejected by AI: \(rec.reason)", level: .diagnostic)
+            return nil
+        }
+        adjustedSignal.confidence = min(adjustedSignal.confidence * rec.confidenceMultiplier, 100)
+
+        godLog("🚀 GOD MODE 2.0: Elite Signal for \(symbol) | Confidence: \(Int(adjustedSignal.confidence))% | Timing: \(timing.reason)", level: .success)
         await trackSignalQuality(adjustedSignal)
 
         return adjustedSignal
@@ -300,6 +316,73 @@ actor ScalpingSignalEngine {
             d1Trend: calculateHTFTrend(candles: cD1),
             w1Trend: calculateHTFTrend(candles: cW1)
         )
+    }
+
+    // MARK: - SMART ENTRY TIMING
+    private func getOptimalEntryTiming(symbol: String, indicators: IndicatorSet) async -> (isGood: Bool, waitSeconds: Int, reason: String) {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let minute = Calendar.current.component(.minute, from: Date())
+        
+        // 🎯 AVOID NEWS TIMES (High Impact)
+        let (impact, event) = await NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: 30)
+        if impact == .high {
+            return (false, 0, "High Impact News: \(event ?? "Unknown")")
+        }
+        
+        // 🎯 AVOID MARKET OPEN VOLATILITY (First 15 minutes of major sessions)
+        let isLondonOpen = (hour == 8 && minute < 15)
+        let isUSOpen = (hour == 14 && minute < 15)
+        let isAsianOpen = (hour == 0 && minute < 15)
+        
+        if isLondonOpen || isUSOpen || isAsianOpen {
+            return (false, 900 - (minute * 60), "Market Open Volatility - Wait 15 mins")
+        }
+        
+        // 🎯 AVOID FRIDAY AFTERNOON (Low liquidity)
+        let weekday = Calendar.current.component(.weekday, from: Date())
+        if weekday == 6 && hour >= 16 { // Friday 4pm+
+            return (false, 0, "Friday Afternoon - Low Liquidity")
+        }
+        
+        // 🎯 OPTIMAL ENTRY TIMES
+        let optimalTimes = [
+            // London Session (8am - 4pm)
+            (8...10, "London Open - High Liquidity"),
+            (10...14, "London Mid - Stable"),
+            (14...16, "London/US Overlap - Best"),
+            // US Session (14 - 22)
+            (14...16, "US Open - High Volatility"),
+            (16...20, "US Mid - Stable"),
+            (20...22, "US Close - Watch for Reversals"),
+            // Asian Session (0 - 8)
+            (0...3, "Asian Open - Low Volatility"),
+            (3...6, "Asian Mid - Steady"),
+            (6...8, "Asian/Europe Pre-Open - Watch for Breakouts")
+        ]
+        
+        for (range, description) in optimalTimes {
+            if range.contains(hour) {
+                // Check if price is near support/resistance
+                let distanceToSupport = abs(indicators.currentPrice - indicators.support) / indicators.currentPrice * 10000
+                let distanceToResistance = abs(indicators.resistance - indicators.currentPrice) / indicators.currentPrice * 10000
+                
+                // Better entries near levels
+                if distanceToSupport < 10 || distanceToResistance < 10 {
+                    return (true, 0, "Near S/R Level - \(description)")
+                }
+                
+                // Check if RSI is in optimal zone
+                if indicators.rsi < 40 || indicators.rsi > 60 {
+                    return (true, 0, "RSI Confirm - \(description)")
+                }
+                
+                // Default: good timing, wait 30 seconds for confirmation
+                return (true, 30, "Good Timing - \(description)")
+            }
+        }
+        
+        // Off-hours: still trade but with caution
+        return (true, 60, "Off-Hours Trading - Wait for Confirmation")
     }
 
     private func calculateHTFTrend(candles: [Kline]) -> SignalType {

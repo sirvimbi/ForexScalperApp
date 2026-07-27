@@ -140,9 +140,46 @@ actor ScalpingTradeMonitor {
                 continue
             }
             
-            // 8. Check Break-Even
-            if await shouldApplyBreakEven(trade: trade, currentPrice: currentPrice) {
-                await applyBreakEven(trade: trade)
+            // 9. ULTIMATE RISK EXITS (God Mode Ultimate)
+            await checkUltimateRiskExits(trade: trade, currentPrice: currentPrice)
+        }
+    }
+
+    // MARK: - ULTIMATE RISK EXITS
+    private func checkUltimateRiskExits(trade: TradeRecord, currentPrice: Double) async {
+        // 🎯 POSITION SIZE RISK - If losing > 50% of daily limit, close all
+        let metrics = await ScalpingRiskManager.shared.getCurrentRiskMetrics()
+        
+        if metrics.dailyPnL < metrics.dailyLossLimit * 0.5 {
+            godLog("⚠️ ULTIMATE RISK: Daily loss approaching limit - Closing all trades", level: .error)
+            await closeAllTrades(reason: "Daily Loss Limit Warning")
+            return
+        }
+        
+        // 🎯 TIME RISK - Close before major news
+        let (impact, event) = await NewsService.shared.getImpactForSymbol(trade.symbol, timeframeMinutes: 15)
+        if impact == .high {
+            godLog("⚠️ ULTIMATE RISK: High Impact News in 15 mins (\(event ?? "Unknown")) - Closing \(trade.symbol)", level: .warning)
+            await closeTrade(trade, exitPrice: currentPrice, reason: "News Protection", indicators: nil)
+            return
+        }
+        
+        // 🎯 VOLATILITY SPIKE - Unreasonable price movement
+        let atr = await getATRForSymbol(trade.symbol)
+        let dailyRange = atr * 2
+        let movement = abs(currentPrice - trade.entryPrice)
+        
+        if movement > dailyRange * 2 {
+            godLog("⚠️ ULTIMATE RISK: Extreme movement detected - Closing \(trade.symbol)", level: .warning)
+            await closeTrade(trade, exitPrice: currentPrice, reason: "Volatility Spike", indicators: nil)
+            return
+        }
+    }
+
+    private func closeAllTrades(reason: String) async {
+        for trade in activeTrades.values {
+            if let currentPrice = await marketData.getLatestPrice(symbol: trade.symbol) {
+                await closeTrade(trade, exitPrice: currentPrice, reason: reason, indicators: nil)
             }
         }
     }

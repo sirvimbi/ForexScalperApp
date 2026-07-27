@@ -837,6 +837,105 @@ class RefactoredAppCoordinator: ObservableObject {
 
     // In RefactoredAppCoordinator.swift, update the acceptSignal method:
 
+    // MARK: - SMART ORDER ROUTING
+    private func executeSmartOrder(signal: Signal, positionSize: PositionSize) async -> Bool {
+        let symbol = signal.symbol
+        
+        // 🎯 1. CORRELATION CHECK
+        guard await CorrelationFilter.shared.canOpenTrade(symbol: symbol) else {
+            godLog("🔄 Correlation Filter blocked \(symbol)", level: .warning)
+            return false
+        }
+        
+        // 🎯 2. GET BEST EXECUTION PRICE FROM MT5
+        // (Note: getBestPrices logic simplified using current bid/ask)
+        let info = try? await MT5Service.shared.getSymbolInfo(symbol)
+        let spreadPips = Double(info?.spread ?? 10) / (symbol.contains("JPY") ? 10.0 : 1.0)
+        
+        // Get volatility
+        let atr = try? await MT5Service.shared.getATR(symbol: symbol, period: 14)
+        let atrVal = atr ?? 0.0020
+        let atrPips = atrVal / signal.price * 10000
+        
+        // 🎯 3. SMART EXECUTION MODE SELECTION
+        var executionMode: MT5ExecutionMode = .market
+        var deviation: Int = 10
+        var filler: MT5FillingType = .ioc
+        
+        // Spread too high? Use instant execution with higher deviation
+        if spreadPips > 3.0 {
+            executionMode = .instant
+            deviation = Int(spreadPips * 2) + 5
+            filler = .ioc
+            godLog("📊 Wide spread: \(String(format: "%.1f", spreadPips)) pips - Using instant execution", level: .info)
+        }
+        
+        // High volatility? Use market orders with higher deviation
+        if atrPips > 50 {
+            executionMode = .market
+            deviation = 20
+            filler = .any // fok fallback
+            godLog("📊 High volatility: \(String(format: "%.1f", atrPips)) pips - Using market order", level: .info)
+        }
+        
+        // Low volatility? Use instant execution
+        if atrPips < 20 && spreadPips < 2.0 {
+            executionMode = .instant
+            deviation = 5
+            filler = .ioc
+            godLog("📊 Low volatility: \(String(format: "%.1f", atrPips)) pips - Using instant execution", level: .info)
+        }
+        
+        // Modify signal with optimal settings
+        var optimizedSignal = signal
+        optimizedSignal.executionMode = executionMode
+        optimizedSignal.deviation = deviation
+        optimizedSignal.filler = filler
+        optimizedSignal.positionSize = positionSize.units
+        optimizedSignal.stopLoss = positionSize.stopLoss
+        optimizedSignal.takeProfit = positionSize.takeProfit
+        
+        // Execute with optimized settings
+        do {
+            let result = try await MT5Service.shared.executeTrade(signal: optimizedSignal)
+            let externalDealId = result.deal != nil ? String(result.deal!) : String(result.order ?? 0)
+            godLog("✅ Smart order executed (#\(externalDealId)): Mode: \(executionMode.rawValue), Dev: \(deviation)", level: .success)
+            
+            // Register for correlation tracking
+            await CorrelationFilter.shared.registerTrade(symbol: symbol)
+            
+            await MainActor.run {
+                NotificationCenter.default.post(name: .mt5TradeExecuted, object: result)
+            }
+            return true
+        } catch {
+            // Fallback: Try market order
+            godLog("⚠️ Smart order failed: \(error.localizedDescription). Falling back to market order", level: .warning)
+            var fallbackSignal = signal
+            fallbackSignal.executionMode = .market
+            fallbackSignal.deviation = 25
+            fallbackSignal.filler = .ioc
+            fallbackSignal.positionSize = positionSize.units
+            fallbackSignal.stopLoss = positionSize.stopLoss
+            fallbackSignal.takeProfit = positionSize.takeProfit
+            
+            do {
+                let result = try await MT5Service.shared.executeTrade(signal: fallbackSignal)
+                godLog("✅ Fallback market order executed", level: .success)
+                
+                await CorrelationFilter.shared.registerTrade(symbol: symbol)
+                
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .mt5TradeExecuted, object: result)
+                }
+                return true
+            } catch {
+                godLog("❌ All execution attempts failed: \(error.localizedDescription)", level: .error)
+                return false
+            }
+        }
+    }
+
     func acceptSignal(_ signal: Signal) {
         Task {
             // Normalize symbol
@@ -865,43 +964,13 @@ class RefactoredAppCoordinator: ObservableObject {
             // Execute trade on appropriate service
             var externalDealId: String?
 
-            // MT5 Execution (God Mode)
+            // MT5 Execution (God Mode Ultimate)
             if normalizedSignal.source == .mt5 || selectedSignalSource == .mt5 || selectedSignalSource == .both {
-                do {
-                    godLog("📤 Executing trade on MT5 for \(normalizedSymbol)...")
-                    var mt5Signal = normalizedSignal
-
-                    // Prioritize UI-adjusted values if they exist, otherwise use engine's
-                    mt5Signal.positionSize = normalizedSignal.positionSize ?? positionSize.units
-                    mt5Signal.stopLoss = normalizedSignal.stopLoss ?? positionSize.stopLoss
-                    mt5Signal.takeProfit = normalizedSignal.takeProfit ?? positionSize.takeProfit
-
-                    mt5Signal.magicNumber = Int(UserDefaults.standard.integer(forKey: "mt5MagicNumber"))
-                    if mt5Signal.magicNumber == 0 { mt5Signal.magicNumber = 888888 }
-
-                    mt5Signal.comment = "GOD_MODE_SCALP"
-                    mt5Signal.executionMode = normalizedSignal.executionMode ?? .market
-                    mt5Signal.filler = normalizedSignal.filler ?? .ioc
-                    mt5Signal.deviation = normalizedSignal.deviation ?? 10
-
-                    let tradeResult = try await MT5Service.shared.executeTrade(signal: mt5Signal)
-                    externalDealId = tradeResult.deal != nil ? String(tradeResult.deal!) : String(tradeResult.order ?? 0)
-                    godLog("✅ MT5 trade executed successfully. Ticket/Deal: \(externalDealId ?? "N/A")", level: .success)
-
-                    await MainActor.run {
-                        NotificationCenter.default.post(name: .mt5TradeExecuted, object: tradeResult)
-                    }
-                } catch {
-                    godLog("❌ Failed to execute MT5 trade: \(error.localizedDescription)", level: .error)
-
-                    // PRODUCTION FIX: Handle "Trade Disabled" or 10044 (Real Only) by marking symbol restricted
-                    if error.localizedDescription.contains("trade disabled") ||
-                           error.localizedDescription.contains("10044") {
-                        print("🛡 GodMode: Auto-Restricting \(normalizedSymbol) (Broker Restriction Detected)")
-                    }
-
+                let success = await executeSmartOrder(signal: normalizedSignal, positionSize: positionSize)
+                
+                if !success {
                     if normalizedSignal.source == .mt5 {
-                        print("⚠️ MT5 execution failed - aborting")
+                        godLog("⚠️ MT5 execution failed - aborting", level: .warning)
                         await MainActor.run {
                             self.signals.removeAll { $0.id == normalizedSignal.id }
                         }
@@ -1027,6 +1096,12 @@ class RefactoredAppCoordinator: ObservableObject {
 
         // Update risk metrics
         await updateRiskMetrics()
+
+        // RECORD PERFORMANCE (God Mode Learning)
+        await PerformanceAnalyzer.shared.recordTrade(trade)
+        
+        // Remove from correlation filter
+        await CorrelationFilter.shared.removeTrade(symbol: trade.symbol)
 
         godLog("📊 Trade closed: \(trade.symbol) P&L: KES \(String(format: "%.2f", trade.pnl ?? 0))", level: trade.isWin == true ? .success : .warning)
         
