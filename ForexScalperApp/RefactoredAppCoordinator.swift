@@ -105,16 +105,6 @@ class RefactoredAppCoordinator: ObservableObject {
             config: ScalpingConfig.shared
         )
         
-        Task {
-            await self.scalpingTradeMonitor.setPendingReconciliationCallback { [weak self] trade in
-                guard let self = self, let dealId = trade.externalDealId else { return }
-                await MainActor.run {
-                    self.pendingReconciliation[dealId] = trade
-                    godLog("⏳ Added #\(dealId) to pending reconciliation buffer", level: .diagnostic)
-                }
-            }
-        }
-
         self.signalEngine = RefactoredSignalEngine(
             marketData: marketData,
             regimeDetector: regimeDetector,
@@ -122,6 +112,9 @@ class RefactoredAppCoordinator: ObservableObject {
             tradeHistory: tradeHistory,
             riskManager: riskManager
         )
+        
+        // Setup monitors post-initialization to avoid self-capture issues
+        setupMonitorCallbacks()
 
         // Set up trade monitor callbacks
         Task {
@@ -485,6 +478,18 @@ class RefactoredAppCoordinator: ObservableObject {
     private var mt5TradeSyncTask: Task<Void, Never>?
     private var htfRefreshTask: Task<Void, Never>?
 
+    private func setupMonitorCallbacks() {
+        Task {
+            await self.scalpingTradeMonitor.setPendingReconciliationCallback { [weak self] trade in
+                guard let self = self, let dealId = trade.externalDealId else { return }
+                await MainActor.run {
+                    self.pendingReconciliation[dealId] = trade
+                    godLog("⏳ Added #\(dealId) to pending reconciliation buffer", level: .diagnostic)
+                }
+            }
+        }
+    }
+
     func start() async {
         guard !isRunning else {
             await syncMT5Data()
@@ -732,7 +737,7 @@ class RefactoredAppCoordinator: ObservableObject {
                     await tradeHistory.updateTrade(completed)
                     await handleTradeClosed(completed)
                     
-                    await MainActor.run {
+                    _ = await MainActor.run {
                         self.pendingReconciliation.removeValue(forKey: ticketId)
                     }
                 }
