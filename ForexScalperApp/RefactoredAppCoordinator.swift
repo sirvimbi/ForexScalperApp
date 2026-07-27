@@ -534,17 +534,25 @@ class RefactoredAppCoordinator: ObservableObject {
                 let stillPending = mt5Data.pending.contains { String($0.ticket) == dealId }
 
                 if !stillActive && !stillPending {
-                    print("🧹 Reconciliation: Internal trade \(internalTrade.symbol) #\(dealId) no longer in MT5. Marking as completed.")
+                    // SAFETY DOUBLE-CHECK: Check MT5 history before marking as completed
+                    // This prevents momentary bridge lag from killing active trades locally.
+                    let history = (try? await MT5Service.shared.getTradeHistory(days: 1)) ?? []
+                    let inHistory = history.contains { String($0.ticket) == dealId || $0.comment?.contains(dealId) == true }
+                    
+                    if inHistory {
+                        print("🧹 Reconciliation: Internal trade \(internalTrade.symbol) #\(dealId) found in MT5 History. Marking as completed.")
+                        var closedTrade = internalTrade
+                        closedTrade.status = .completed
+                        await tradeHistory.updateTrade(closedTrade)
 
-                    var closedTrade = internalTrade
-                    closedTrade.status = .completed
-                    await tradeHistory.updateTrade(closedTrade)
+                        await scalpingTradeMonitor.removeTrade(id: internalTrade.id)
+                        await tradeMonitor.removeTrade(id: internalTrade.id)
 
-                    await scalpingTradeMonitor.removeTrade(id: internalTrade.id)
-                    await tradeMonitor.removeTrade(id: internalTrade.id)
-
-                    await scalpingRiskManager.closeTrade(closedTrade)
-                    await riskManager.closeTrade(closedTrade)
+                        await scalpingRiskManager.closeTrade(closedTrade)
+                        await riskManager.closeTrade(closedTrade)
+                    } else {
+                        print("⚠️ Reconciliation Warning: Internal trade \(internalTrade.symbol) #\(dealId) missing from positions but NOT found in history. Assuming network lag and keeping active.")
+                    }
                 }
             }
 

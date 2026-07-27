@@ -234,11 +234,10 @@ actor ScalpingTradeMonitor {
 
     // FIXED: Break-even only after 20 pips profit (was 15)
     private func shouldApplyBreakEven(trade: TradeRecord, currentPrice: Double) async -> Bool {
-        let pips = abs(currentPrice - trade.entryPrice) / trade.entryPrice * 10000
+        let diff = currentPrice - trade.entryPrice
+        let profitPips = (trade.type == .buy ? diff : -diff) / trade.entryPrice * 10000
 
-        let isProfit = trade.type == .buy ? currentPrice > trade.entryPrice : currentPrice < trade.entryPrice
-
-        if isProfit && pips >= breakEvenPips {
+        if profitPips >= breakEvenPips {
             if let sl = trade.stopLoss {
                 if trade.type == .buy && sl >= trade.entryPrice { return false }
                 if trade.type == .sell && sl <= trade.entryPrice { return false }

@@ -413,10 +413,11 @@ actor ScalpingSignalEngine {
         let finalScore = max(buyScore, sellScore)
         let side = buyScore > sellScore ? "BUY" : "SELL"
         
-        if !hasVolume {
-            print("📊 \(symbol) Rejected: No Institutional Volume (Ratio: \(String(format: "%.1f", indicators.volumeRatio))x < \(String(format: "%.1f", minVolRatio))x)")
-        } else if finalScore < minReqScore || currentPillars < minPillars {
+        if finalScore < minReqScore || currentPillars < minPillars {
             print("📊 \(symbol) Pillar Check: \(currentPillars)/\(minPillars) Pillars aligned (\(side)). Score: \(Int(finalScore))/\(Int(minReqScore))")
+            if !hasVolume {
+                print("   └─ Note: Institutional Volume also missing (\(String(format: "%.1f", indicators.volumeRatio))x)")
+            }
         }
 
         return ScalpingSignal(type: .none, symbol: symbol, price: indicators.currentPrice, confidence: 0, score: 0, sellScore: 0, indicators: indicators, confidenceFactors: [:], timestamp: Date())
