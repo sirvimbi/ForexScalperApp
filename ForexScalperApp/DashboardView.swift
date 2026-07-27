@@ -193,8 +193,8 @@ struct DashboardView: View {
     @StateObject private var newsService = NewsService.shared
     @State private var isNotificationBannerDismissed = false
     
-    private let tabs     = ["Signals", "History", "Performance", "Settings"]
-    private let tabIcons = ["bolt.fill", "clock.fill", "chart.bar.fill", "gearshape.fill"]
+    private let tabs     = ["Signals", "History", "Performance", "Logs", "Settings"]
+    private let tabIcons = ["bolt.fill", "clock.fill", "chart.bar.fill", "terminal.fill", "gearshape.fill"]
     
     init() {
         _viewModel = StateObject(wrappedValue: DashboardViewModel(coordinator: nil))
@@ -429,13 +429,114 @@ struct DashboardView: View {
                 case 0: liveSignalsView
                 case 1: historyView
                 case 2: performanceView
-                case 3: settingsView
+                case 3: systemLogsView
+                case 4: settingsView
                 default: EmptyView()
                 }
             }
         }
     }
     #endif
+    
+    // MARK: - System Logs View
+    var systemLogsView: some View {
+        VStack(spacing: 0) {
+            #if os(macOS)
+            HStack {
+                Text("SYSTEM LOGS & DIAGNOSTICS")
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundColor(.accentCyan)
+                    .tracking(2)
+                Spacer()
+                
+                Button(action: {
+                    ConsoleLogger.shared.clearLogs()
+                }) {
+                    Label("CLEAR", systemImage: "trash.fill")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.accentRed)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Color.accentRed.opacity(0.1))
+                .cornerRadius(4)
+                
+                Button(action: {
+                    exportLogs()
+                }) {
+                    Label("EXPORT (.TXT)", systemImage: "square.and.arrow.down.fill")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.bgPrimary)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.accentCyan)
+                .cornerRadius(4)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            
+            Divider().background(Color.borderSubtle)
+            #endif
+            
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(ConsoleLogger.shared.logs) { entry in
+                            HStack(alignment: .top, spacing: 10) {
+                                Text(formatLogTime(entry.timestamp))
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.textMuted)
+                                    .frame(width: 80, alignment: .leading)
+                                
+                                Text(entry.message)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(entry.level == .error ? .accentRed : (entry.level == .warning ? .accentGold : (entry.level == .success ? .accentGreen : .textPrimary)))
+                                    .textSelection(.enabled)
+                                
+                                Spacer()
+                            }
+                            .padding(.horizontal, 20)
+                            .id(entry.id)
+                        }
+                    }
+                    .padding(.vertical, 14)
+                }
+                .onChange(of: ConsoleLogger.shared.logs.count) { old, newValue in
+                    if let last = ConsoleLogger.shared.logs.last {
+                        withAnimation {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    }
+                }
+            }
+            .background(Color.black.opacity(0.3))
+        }
+        .fileExporter(
+            isPresented: $isExportingLogs,
+            document: logDocument,
+            contentType: .plainText,
+            defaultFilename: "GodMode_Logs_\(Int(Date().timeIntervalSince1970)).txt"
+        ) { result in
+            if case .success(let url) = result {
+                print("✅ Logs exported to: \(url.path)")
+            }
+        }
+    }
+    
+    @State private var isExportingLogs = false
+    @State private var logDocument = LogDocument(text: "")
+    
+    private func exportLogs() {
+        logDocument.text = ConsoleLogger.shared.exportLogs()
+        isExportingLogs = true
+    }
+    
+    private func formatLogTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        return formatter.string(from: date)
+    }
     
     // MARK: - Live Signals
     // MARK: - News Ticker

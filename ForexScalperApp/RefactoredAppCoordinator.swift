@@ -218,14 +218,38 @@ class RefactoredAppCoordinator: ObservableObject {
                 // Check if already cancelled
                 if Task.isCancelled { return }
 
-                let depth = (tf == "1m" || tf == "5m") ? 1000 : 300 // Slightly reduced depth for minor TFs
+                let maxDepth = (tf == "1m" || tf == "5m") ? 1000 : 300 // Slightly reduced depth for minor TFs
+                
+                // INTELLIGENT GAP CALCULATION
+                var depth = maxDepth
+                if let lastTime = CandlePersistenceManager.shared.getLatestCandleTime(for: symbol, timeframe: tf) {
+                    let diffSeconds = Date().timeIntervalSince(Date(timeIntervalSince1970: TimeInterval(lastTime)))
+                    let tfMinutes: Double = {
+                        switch tf {
+                        case "1m": return 1
+                        case "5m": return 5
+                        case "15m": return 15
+                        case "30m": return 30
+                        case "1h": return 60
+                        case "4h": return 240
+                        case "D1": return 1440
+                        case "W1": return 10080
+                        default: return 1
+                        }
+                    }()
+                    
+                    let gapCandles = Int(ceil(diffSeconds / (tfMinutes * 60)))
+                    depth = min(maxDepth, max(10, gapCandles + 5)) // Add 5 safety candles
+                    
+                    if depth < maxDepth {
+                        print("🧠 Intelligence: Only fetching \(depth) missing bars for \(symbol) \(tf)")
+                    }
+                }
 
                 do {
                     let candles = try await MT5Service.shared.getCandles(symbol: symbol, timeframe: tf, count: depth)
                     if let marketDataActor = marketData as? RefactoredMarketDataActor {
-                        for candle in candles {
-                            await marketDataActor.addCandle(symbol: symbol, timeframe: tf, candle: candle)
-                        }
+                        await marketDataActor.addCandles(symbol: symbol, timeframe: tf, newCandles: candles)
                         print("📊 \(symbol) [\(tf)]: Loaded \(candles.count) bars")
                     }
                     // CRITICAL: Small sleep to let MT5 socket breathe
@@ -540,7 +564,7 @@ class RefactoredAppCoordinator: ObservableObject {
                     let inHistory = history.contains { String($0.ticket) == dealId || $0.comment?.contains(dealId) == true }
                     
                     if inHistory {
-                        print("🧹 Reconciliation: Internal trade \(internalTrade.symbol) #\(dealId) found in MT5 History. Marking as completed.")
+                        godLog("🧹 Reconciliation: Internal trade \(internalTrade.symbol) #\(dealId) found in MT5 History. Marking as completed.", level: .info)
                         var closedTrade = internalTrade
                         closedTrade.status = .completed
                         await tradeHistory.updateTrade(closedTrade)
@@ -551,7 +575,7 @@ class RefactoredAppCoordinator: ObservableObject {
                         await scalpingRiskManager.closeTrade(closedTrade)
                         await riskManager.closeTrade(closedTrade)
                     } else {
-                        print("⚠️ Reconciliation Warning: Internal trade \(internalTrade.symbol) #\(dealId) missing from positions but NOT found in history. Assuming network lag and keeping active.")
+                        godLog("⚠️ Reconciliation Warning: Internal trade \(internalTrade.symbol) #\(dealId) missing from positions but NOT found in history. Assuming network lag and keeping active.", level: .warning)
                     }
                 }
             }
@@ -749,14 +773,14 @@ class RefactoredAppCoordinator: ObservableObject {
             // ELITE UI REFRESH: Notify listeners that signals array changed
             self.objectWillChange.send()
 
-            print("✅ New \(tradingMode == .scalping ? "SCALPING" : "STANDARD") signal generated: \(normalizedSymbol) \(normalizedSignal.type) @ \(normalizedSignal.price) (Confidence: \(String(format: "%.1f", normalizedSignal.confidence))%)")
+            godLog("✅ New \(tradingMode == .scalping ? "SCALPING" : "STANDARD") signal generated: \(normalizedSymbol) \(normalizedSignal.type) @ \(normalizedSignal.price) (Confidence: \(String(format: "%.1f", normalizedSignal.confidence))%)", level: .info)
 
             // ELITE AUTO-TRADE EXECUTION
             let isAutoTradeEnabled = UserDefaults.standard.bool(forKey: "isAutoTradeEnabled")
             let minConfidence = UserDefaults.standard.double(forKey: "minAutoTradeConfidence")
 
             if isAutoTradeEnabled && normalizedSignal.confidence >= minConfidence {
-                print("⚡️ AUTO-TRADE: Signal confidence (\(Int(normalizedSignal.confidence))%) >= Threshold (\(Int(minConfidence))%). Executing immediately.")
+                godLog("⚡️ AUTO-TRADE: Signal confidence (\(Int(normalizedSignal.confidence))%) >= Threshold (\(Int(minConfidence))%). Executing immediately.", level: .success)
                 self.acceptSignal(normalizedSignal)
             }
         }
@@ -850,7 +874,7 @@ class RefactoredAppCoordinator: ObservableObject {
             // MT5 Execution (God Mode)
             if normalizedSignal.source == .mt5 || selectedSignalSource == .mt5 || selectedSignalSource == .both {
                 do {
-                    print("📤 Executing trade on MT5 for \(normalizedSymbol)...")
+                    godLog("📤 Executing trade on MT5 for \(normalizedSymbol)...")
                     var mt5Signal = normalizedSignal
 
                     // Prioritize UI-adjusted values if they exist, otherwise use engine's
@@ -868,13 +892,13 @@ class RefactoredAppCoordinator: ObservableObject {
 
                     let tradeResult = try await MT5Service.shared.executeTrade(signal: mt5Signal)
                     externalDealId = tradeResult.deal != nil ? String(tradeResult.deal!) : String(tradeResult.order ?? 0)
-                    print("✅ MT5 trade executed successfully. Ticket/Deal: \(externalDealId ?? "N/A")")
+                    godLog("✅ MT5 trade executed successfully. Ticket/Deal: \(externalDealId ?? "N/A")", level: .success)
 
                     await MainActor.run {
                         NotificationCenter.default.post(name: .mt5TradeExecuted, object: tradeResult)
                     }
                 } catch {
-                    print("❌ Failed to execute MT5 trade: \(error.localizedDescription)")
+                    godLog("❌ Failed to execute MT5 trade: \(error.localizedDescription)", level: .error)
 
                     // PRODUCTION FIX: Handle "Trade Disabled" or 10044 (Real Only) by marking symbol restricted
                     if error.localizedDescription.contains("trade disabled") ||
@@ -971,7 +995,7 @@ class RefactoredAppCoordinator: ObservableObject {
                 (positionSize.riskAmount) :
                 (positionSize.units * normalizedSignal.price * 0.01)
 
-            print("✅ \(tradingMode == .scalping ? "SCALPING" : "STANDARD") trade opened: \(normalizedSymbol) - Risk: KES \(String(format: "%.2f", riskAmount))")
+            godLog("✅ \(tradingMode == .scalping ? "SCALPING" : "STANDARD") trade opened: \(normalizedSymbol) - Risk: KES \(String(format: "%.2f", riskAmount))", level: .success)
 
             if let dealId = externalDealId {
                 print("📋 MT5 Deal ID: \(dealId)")
@@ -1010,7 +1034,7 @@ class RefactoredAppCoordinator: ObservableObject {
         // Update risk metrics
         await updateRiskMetrics()
 
-        print("📊 Trade closed: \(trade.symbol) P&L: KES \(String(format: "%.2f", trade.pnl ?? 0))")
+        godLog("📊 Trade closed: \(trade.symbol) P&L: KES \(String(format: "%.2f", trade.pnl ?? 0))", level: trade.isWin == true ? .success : .warning)
     }
 
     func stop() async {

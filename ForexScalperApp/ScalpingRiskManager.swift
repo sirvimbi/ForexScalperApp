@@ -43,7 +43,7 @@ actor ScalpingRiskManager: RiskManagerProtocol {
         let todayPnL = dailyPnL[today] ?? 0
 
         if todayPnL <= -parameters.accountBalance * parameters.maxDailyRisk {
-            print("⚠️ Daily loss limit reached: \(String(format: "%.2f", todayPnL))")
+            godLog("⚠️ Daily loss limit reached: \(String(format: "%.2f", todayPnL))", level: .warning)
             return false
         }
 
@@ -54,31 +54,31 @@ actor ScalpingRiskManager: RiskManagerProtocol {
         let maxHourlyTrades = max(2, min(10, baseHourlyLimit * 2))
 
         if hourlyTrades >= maxHourlyTrades {
-            print("⚠️ Hourly trade limit reached: \(hourlyTrades)/\(maxHourlyTrades)")
+            godLog("⚠️ Hourly trade limit reached: \(hourlyTrades)/\(maxHourlyTrades)", level: .warning)
             return false
         }
 
         // Check concurrent trades
         if activeTrades.count >= parameters.maxConcurrentTrades {
-            print("⚠️ Max concurrent trades reached: \(activeTrades.count)/\(parameters.maxConcurrentTrades)")
+            godLog("⚠️ Max concurrent trades reached: \(activeTrades.count)/\(parameters.maxConcurrentTrades)", level: .warning)
             return false
         }
 
         // Check consecutive losses - REDUCED tolerance
         let losses = consecutiveLosses[symbol] ?? 0
         if losses >= 3 { // FIXED: Reduced from 5 to 3
-            print("⚠️ Too many consecutive losses (\(losses)) for \(symbol) - COOLDOWN ACTIVATED")
+            godLog("⚠️ Too many consecutive losses (\(losses)) for \(symbol) - COOLDOWN ACTIVATED", level: .warning)
             return false
         }
 
         // Check cooldown per symbol (3 minutes for scalping - FIXED)
         if let lastTrade = tradeOpenTime[symbol],
            now.timeIntervalSince(lastTrade) < 180 { // FIXED: 120 -> 180 seconds
-            print("⚠️ Cooldown active for \(symbol): \(Int(now.timeIntervalSince(lastTrade)))s/180s")
+            godLog("⚠️ Cooldown active for \(symbol): \(Int(now.timeIntervalSince(lastTrade)))s/180s", level: .warning)
             return false
         }
 
-        print("✅ Risk check PASSED for \(symbol)")
+        godLog("✅ Risk check PASSED for \(symbol)")
         return true
     }
 

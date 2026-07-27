@@ -80,13 +80,13 @@ class MT5Service {
             
             do {
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)
-                print("🌐 MT5: Attempting optional initialization at \(url.absoluteString)...")
+                godLog("🌐 MT5: Attempting optional initialization at \(url.absoluteString)...")
                 
                 let (data, response) = try await session.data(for: request)
                 
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 {
-                        print("✅ MT5: Initialization successful at \(path)")
+                        godLog("✅ MT5: Initialization successful at \(path)", level: .success)
                         return
                     } else if httpResponse.statusCode == 404 {
                         print("ℹ️ MT5: Path \(path) not found (404), trying next...")
@@ -128,7 +128,7 @@ class MT5Service {
                     if path.contains("status") {
                         let status = try JSONDecoder().decode(MT5StatusResponse.self, from: data)
                         if status.connected {
-                            print("✅ MT5: Connected via \(url.absoluteString)")
+                            godLog("✅ MT5: Connected via \(url.absoluteString)", level: .success)
                             return true
                         }
                     } else {
@@ -258,7 +258,7 @@ class MT5Service {
             
             do {
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)
-                print("🌐 MT5: Sending trade to \(url.absoluteString)...")
+                godLog("🌐 MT5: Sending trade to \(url.absoluteString)...")
                 
                 let (data, response) = try await session.data(for: request)
                 
@@ -266,7 +266,7 @@ class MT5Service {
                     if httpResponse.statusCode == 200 {
                         let tradeResult = try JSONDecoder().decode(MT5TradeResult.self, from: data)
                         if tradeResult.retcode != 10009 && tradeResult.retcode != 10008 {
-                            print("❌ MT5: Execution failed with retcode \(tradeResult.retcode): \(tradeResult.comment ?? "No comment")")
+                            godLog("❌ MT5: Execution failed with retcode \(tradeResult.retcode): \(tradeResult.comment ?? "No comment")", level: .error)
                             throw TradingError.apiError("MT5 Error \(tradeResult.retcode): \(tradeResult.comment ?? "Execution failed")")
                         }
                         return tradeResult

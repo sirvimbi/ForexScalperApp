@@ -7,38 +7,44 @@ actor RefactoredMarketDataActor: MarketDataProvider {
     private let maxCandles = 3000 // Deep memory for long-term indicators and God Mode patterns
     private let priceCache = NSCache<NSString, NSNumber>() // For quick price lookups
     
-    func addCandle(symbol: String, timeframe: String, candle: Kline) {
+    func addCandles(symbol: String, timeframe: String, newCandles: [Kline]) {
         if candles[symbol] == nil {
             candles[symbol] = [:]
         }
         if candles[symbol]?[timeframe] == nil {
-            candles[symbol]?[timeframe] = []
+            candles[symbol]?[timeframe] = CandlePersistenceManager.shared.loadCandles(for: symbol, timeframe: timeframe)
         }
         
         var array = candles[symbol]![timeframe]!
+        var addedCount = 0
         
-        // Update or append
-        if let index = array.lastIndex(where: { $0.closeTime == candle.closeTime }) {
-            array[index] = candle
-        } else {
-            array.append(candle)
-            if array.count > maxCandles {
-                array.removeFirst()
+        for candle in newCandles {
+            if let index = array.lastIndex(where: { $0.closeTime == candle.closeTime }) {
+                array[index] = candle
+            } else {
+                array.append(candle)
+                addedCount += 1
             }
+        }
+        
+        if array.count > maxCandles {
+            array.removeFirst(array.count - maxCandles)
         }
         
         candles[symbol]![timeframe] = array
         
-        // Update latest price
-        if timeframe == "1m" {
-            latestPrices[symbol] = candle.close
-            priceCache.setObject(NSNumber(value: candle.close), forKey: symbol as NSString)
-            
-            // Print occasional debug info
-            if array.count % 100 == 0 {
-                print("📊 Market data: \(symbol) 1m now has \(array.count) candles, last price: \(candle.close)")
-            }
+        if addedCount > 0 {
+            CandlePersistenceManager.shared.saveCandles(newCandles, for: symbol, timeframe: timeframe)
         }
+        
+        if timeframe == "1m", let last = array.last {
+            latestPrices[symbol] = last.close
+            priceCache.setObject(NSNumber(value: last.close), forKey: symbol as NSString)
+        }
+    }
+    
+    func addCandle(symbol: String, timeframe: String, candle: Kline) {
+        addCandles(symbol: symbol, timeframe: timeframe, newCandles: [candle])
     }
     
     func getCandles(symbol: String, timeframe: String) async -> [Kline] {

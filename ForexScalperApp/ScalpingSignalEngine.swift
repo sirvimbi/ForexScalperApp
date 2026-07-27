@@ -86,7 +86,7 @@ actor ScalpingSignalEngine {
             let perf = symbolPerformance[symbol]
             let total = Double((perf?.wins ?? 0) + (perf?.losses ?? 0))
             let winRate = total > 0 ? (Double(perf?.wins ?? 0) / total) * 100 : 0
-            print("📊 \(symbol) Rejected: Poor historical performance (\(String(format: "%.1f", winRate))% win rate)")
+            godLog("📊 \(symbol) Rejected: Poor historical performance (\(String(format: "%.1f", winRate))% win rate)")
             return nil
         }
 
@@ -109,11 +109,11 @@ actor ScalpingSignalEngine {
             let (impact, event) = await NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: Int(max(newsCheck.highMin, newsCheck.medMin)))
             
             if impact == .high {
-                print("🌍 \(symbol) PAUSED: High Impact News Incoming - \(event ?? "Unknown Event")")
+                godLog("🌍 \(symbol) PAUSED: High Impact News Incoming - \(event ?? "Unknown Event")", level: .warning)
                 return nil
             } else if impact == .medium && newsCheck.medMin > 0 {
                 // For medium, we could also pause or just log
-                print("🌍 \(symbol) CAUTION: Medium Impact News Incoming - \(event ?? "Unknown Event")")
+                godLog("🌍 \(symbol) CAUTION: Medium Impact News Incoming - \(event ?? "Unknown Event")", level: .warning)
                 // Optional: Decide whether to pause or just proceed with higher caution
             }
         }
@@ -141,7 +141,7 @@ actor ScalpingSignalEngine {
         ]
 
         guard validateData(candlesByTimeframe, symbol: symbol) else { 
-            print("📊 \(symbol) Rejected: Insufficient MT5 candle data for analysis")
+            godLog("📊 \(symbol) Rejected: Insufficient MT5 candle data for analysis", level: .warning)
             return nil 
         }
 
@@ -171,7 +171,7 @@ actor ScalpingSignalEngine {
         }
         
         if actualSpread > effectiveTolerance {
-            print("📊 \(symbol) Rejected: Spread too high (\(String(format: "%.1f", actualSpread)) bps) - Limit: \(effectiveTolerance) bps")
+            godLog("📊 \(symbol) Rejected: Spread too high (\(String(format: "%.1f", actualSpread)) bps) - Limit: \(effectiveTolerance) bps", level: .warning)
             return nil
         }
 
@@ -194,7 +194,7 @@ actor ScalpingSignalEngine {
 
         // 12. R:R VALIDATION
         guard validateRiskReward(finalSignal) else {
-            print("📊 \(symbol) Rejected: Poor risk/reward ratio")
+            godLog("📊 \(symbol) Rejected: Poor risk/reward ratio", level: .warning)
             return nil
         }
 
@@ -203,7 +203,7 @@ actor ScalpingSignalEngine {
         var adjustedSignal = finalSignal
         adjustedSignal.confidence = min(finalSignal.confidence * confidenceMultiplier, 100)
 
-        print("🚀 GOD MODE 2.0: Elite Signal for \(symbol) | Confidence: \(Int(adjustedSignal.confidence))%")
+        godLog("🚀 GOD MODE 2.0: Elite Signal for \(symbol) | Confidence: \(Int(adjustedSignal.confidence))%", level: .success)
         await trackSignalQuality(adjustedSignal)
 
         return adjustedSignal
@@ -216,13 +216,13 @@ actor ScalpingSignalEngine {
 
         // Skip if volatility is too low (no movement to profit from)
         if atrPercentage < minVol {
-            print("📊 \(symbol) Rejected: Low volatility (\(String(format: "%.3f", atrPercentage))%) - Threshold: \(minVol)%")
+            godLog("📊 \(symbol) Rejected: Low volatility (\(String(format: "%.3f", atrPercentage))%) - Threshold: \(minVol)%", level: .warning)
             return false
         }
 
         // Skip if volatility is too high (unsafe for 10 pip SL)
         if atrPercentage > 0.5 {
-            print("📊 \(symbol) Rejected: High volatility (\(String(format: "%.2f", atrPercentage))%)")
+            godLog("📊 \(symbol) Rejected: High volatility (\(String(format: "%.2f", atrPercentage))%)", level: .warning)
             return false
         }
 
@@ -414,9 +414,9 @@ actor ScalpingSignalEngine {
         let side = buyScore > sellScore ? "BUY" : "SELL"
         
         if finalScore < minReqScore || currentPillars < minPillars {
-            print("📊 \(symbol) Pillar Check: \(currentPillars)/\(minPillars) Pillars aligned (\(side)). Score: \(Int(finalScore))/\(Int(minReqScore))")
+            godLog("📊 \(symbol) Pillar Check: \(currentPillars)/\(minPillars) Pillars aligned (\(side)). Score: \(Int(finalScore))/\(Int(minReqScore))", level: .diagnostic)
             if !hasVolume {
-                print("   └─ Note: Institutional Volume also missing (\(String(format: "%.1f", indicators.volumeRatio))x)")
+                godLog("   └─ Note: Institutional Volume also missing (\(String(format: "%.1f", indicators.volumeRatio))x)", level: .diagnostic)
             }
         }
 

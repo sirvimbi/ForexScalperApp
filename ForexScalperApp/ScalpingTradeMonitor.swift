@@ -248,7 +248,7 @@ actor ScalpingTradeMonitor {
     }
 
     private func applyBreakEven(trade: TradeRecord) async {
-        print("🛡 PROTECTION: Moving \(trade.symbol) to Break-Even (+2 pips buffer)")
+        godLog("🛡 PROTECTION: Moving \(trade.symbol) to Break-Even (+2 pips buffer)", level: .success)
         var updatedTrade = trade
         let buffer = 2.0 * (trade.entryPrice * 0.0001)
         updatedTrade.stopLoss = trade.type == .buy ? trade.entryPrice + buffer : trade.entryPrice - buffer
@@ -257,12 +257,12 @@ actor ScalpingTradeMonitor {
         await tradeHistory.updateTrade(updatedTrade)
 
         if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
-            print("📤 MT5: Syncing Break-Even SL to terminal...")
+            godLog("📤 MT5: Syncing Break-Even SL to terminal...")
             let success = try? await MT5Service.shared.modifyPosition(ticket: ticket, sl: updatedTrade.stopLoss!, tp: trade.takeProfit ?? 0)
             if success == true {
-                print("✅ MT5: Break-Even SL confirmed on terminal")
+                godLog("✅ MT5: Break-Even SL confirmed on terminal", level: .success)
             } else {
-                print("⚠️ MT5: Break-Even SL modification REJECTED (Check Terminal Logs)")
+                godLog("⚠️ MT5: Break-Even SL modification REJECTED (Check Terminal Logs)", level: .error)
             }
         }
     }
@@ -306,13 +306,13 @@ actor ScalpingTradeMonitor {
     }
 
     private func syncTrailingStopToMT5(trade: TradeRecord, newSL: Double) async {
-        print("🏃‍♂️ TRAIL: Chasing \(trade.symbol) @ \(String(format: "%.5f", newSL))")
+        godLog("🏃‍♂️ TRAIL: Chasing \(trade.symbol) @ \(String(format: "%.5f", newSL))", level: .info)
         if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
             let success = try? await MT5Service.shared.modifyPosition(ticket: ticket, sl: newSL, tp: trade.takeProfit ?? 0)
             if success == true {
-                print("✅ MT5: Trailing SL confirmed on terminal")
+                godLog("✅ MT5: Trailing SL confirmed on terminal", level: .success)
             } else {
-                print("⚠️ MT5: Trailing SL modification REJECTED")
+                godLog("⚠️ MT5: Trailing SL modification REJECTED", level: .error)
             }
         }
     }
