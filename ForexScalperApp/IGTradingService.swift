@@ -32,15 +32,8 @@ actor IGTradingService {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             
-            // Debug: Print raw response
-            if let responseString = String(data: data, encoding: .utf8) {
-                print("📥 Raw auth response: \(responseString)")
-            }
-            
             // Check HTTP status code
             if let httpResponse = response as? HTTPURLResponse {
-                print("📥 HTTP Status: \(httpResponse.statusCode)")
-                
                 guard httpResponse.statusCode == 200 else {
                     throw TradingError.apiError("Server returned status \(httpResponse.statusCode)")
                 }
@@ -72,7 +65,7 @@ actor IGTradingService {
     
     // MARK: - Account Info
     
-    func getAccountInfo() async throws -> AccountInfo {
+    func getAccountInfo() async throws -> IGAccountInfo {
         guard let url = URL(string: "\(baseURL)/account") else {
             throw TradingError.invalidURL
         }
@@ -87,28 +80,23 @@ actor IGTradingService {
         
         let (data, _) = try await URLSession.shared.data(from: url)
         
-        // Debug: Print raw response
-        if let responseString = String(data: data, encoding: .utf8) {
-            print("📥 Raw account response: \(responseString)")
-        }
-        
         // Check if response is HTML (starts with <)
         if let firstChar = String(data: data.prefix(1), encoding: .utf8), firstChar == "<" {
             throw TradingError.apiError("Backend returned HTML instead of JSON. Make sure your Node.js server is running at \(baseURL)")
         }
         
-        let apiResponse = try decode(IGAPIResponse<AccountInfo>.self, from: data)
+        let apiResponse = try decode(IGAPIResponse<IGAccountInfo>.self, from: data)
         
-        guard apiResponse.success else {
+        guard apiResponse.success, let accountData = apiResponse.data else {
             throw TradingError.apiError(apiResponse.error ?? "Unknown error")
         }
         
-        return apiResponse.data!
+        return accountData
     }
     
     // MARK: - Trading
     
-    func executeTrade(signal: Signal) async throws -> TradeResult {
+    func executeTrade(signal: Signal) async throws -> IGTradeResult {
         guard let url = URL(string: "\(baseURL)/trades/execute") else {
             throw TradingError.invalidURL
         }
@@ -121,11 +109,9 @@ actor IGTradingService {
         if let sessionId = sessionId {
             request.setValue(sessionId, forHTTPHeaderField: "x-session-id")
         } else {
-            print("⚠️ No session ID available - authentication required for IG trading")
             throw TradingError.notAuthenticated
         }
         
-        // Use a default size if positionSize is nil (this happens before acceptance)
         let positionSize = signal.positionSize ?? 1000
         
         let body: [String: Any] = [
@@ -143,11 +129,6 @@ actor IGTradingService {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             
-            // Debug print
-            if let responseString = String(data: data, encoding: .utf8) {
-                print("📥 IG execute trade response: \(responseString)")
-            }
-            
             // Check HTTP status
             if let httpResponse = response as? HTTPURLResponse {
                 if httpResponse.statusCode == 401 {
@@ -157,21 +138,20 @@ actor IGTradingService {
                 }
             }
             
-            let apiResponse = try decode(IGAPIResponse<TradeResult>.self, from: data)
+            let apiResponse = try decode(IGAPIResponse<IGTradeResult>.self, from: data)
             
-            guard apiResponse.success else {
+            guard apiResponse.success, let tradeResult = apiResponse.data else {
                 throw TradingError.apiError(apiResponse.error ?? "Unknown error")
             }
             
-            print("✅ IG trade executed successfully. Deal Reference: \(apiResponse.data?.dealReference ?? "N/A")")
-            return apiResponse.data!
+            return tradeResult
         } catch {
             print("❌ IG execute trade error: \(error)")
             throw error
         }
     }
     
-    func getOpenPositions() async throws -> [Position] {
+    func getOpenPositions() async throws -> [IGPosition] {
         guard let url = URL(string: "\(baseURL)/trades/positions") else {
             throw TradingError.invalidURL
         }
@@ -187,13 +167,13 @@ actor IGTradingService {
         }
         
         let (data, _) = try await URLSession.shared.data(for: request)
-        let response = try decode(IGAPIResponse<[Position]>.self, from: data)
+        let response = try decode(IGAPIResponse<[IGPosition]>.self, from: data)
         
-        guard response.success else {
+        guard response.success, let positions = response.data else {
             throw TradingError.apiError(response.error ?? "Unknown error")
         }
         
-        return response.data!
+        return positions
     }
     
     func closePosition(dealId: String) async throws -> Bool {
@@ -240,10 +220,9 @@ actor IGTradingService {
     }
 }
 
-// MARK: - Models
+// MARK: - Models (Moved to NetworkModels.swift)
 
 // MARK: - Extension for Config (if not already defined)
-// This is a placeholder - you should store API key securely
 extension UserDefaults {
     var igAPIKey: String {
         get { string(forKey: "igAPIKey") ?? "23ca12562ccdbef0e9ab24d55c4f423b604bddd9" }

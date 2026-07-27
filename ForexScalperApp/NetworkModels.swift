@@ -3,26 +3,35 @@ import Foundation
 
 // MARK: - MT5 Models
 
-struct MT5AccountInfo: Sendable {
+struct MT5AccountInfo: Codable, Sendable {
     let login: Int
-    let balance, equity, margin, margin_free, profit: Double
-    let currency, server: String
-}
-extension MT5AccountInfo: Codable {
+    let balance: Double
+    let equity: Double
+    let margin: Double
+    let margin_free: Double
+    let profit: Double
+    let currency: String
+    let server: String
+    
     enum CodingKeys: String, CodingKey {
         case login, balance, equity, margin, margin_free, profit, currency, server
     }
 }
 
-struct MT5Position: Sendable {
+struct MT5Position: Codable, Sendable {
     let ticket: Int64
-    let symbol, type: String
-    let volume, priceOpen, sl, tp, priceCurrent, profit: Double
+    let symbol: String
+    let type: String
+    let volume: Double
+    let priceOpen: Double
+    let sl: Double
+    let tp: Double
+    let priceCurrent: Double
+    let profit: Double
     let magic: Int64?
     let comment: String?
     let openTime: Int64?
-}
-extension MT5Position: Codable {
+    
     enum CodingKeys: String, CodingKey {
         case ticket, symbol, type, volume, sl, tp, magic, comment, profit
         case priceOpen = "price_open", priceCurrent = "price_current", openTime = "open_time"
@@ -31,8 +40,12 @@ extension MT5Position: Codable {
 
 struct MT5TradeResult: Codable, Sendable {
     let retcode: Int
-    let order, deal: Int64?
-    let volume, price, bid, ask: Double
+    let order: Int64?
+    let deal: Int64?
+    let volume: Double
+    let price: Double
+    let bid: Double
+    let ask: Double
     let comment: String?
 }
 
@@ -46,10 +59,14 @@ struct MT5PriceHistoryResponse: Codable, Sendable {
     let data: [MT5Candle]
 }
 
-struct MT5Candle: Sendable {
+struct MT5Candle: Codable, Sendable {
     let time: TimeInterval
-    let open, high, low, close: Double
-    let volume, tick_volume: Double?
+    let open: Double
+    let high: Double
+    let low: Double
+    let close: Double
+    let volume: Double?
+    let tick_volume: Double?
     let spread: Int?
     let real_volume: Double?
     
@@ -57,7 +74,6 @@ struct MT5Candle: Sendable {
         return volume ?? tick_volume ?? 0
     }
 }
-extension MT5Candle: Codable {}
 
 struct MT5OrderListResponse: Codable, Sendable {
     let opened: [MT5Position]
@@ -73,9 +89,13 @@ struct MT5HistoryPosition: Codable, Sendable {
     let ticket: Int64
     let type: String
     let volume: Double
-    let open_price, close_price: Double
-    let open_time, close_time: Int64
-    let profit, commission, swap: Double
+    let open_price: Double
+    let close_price: Double
+    let open_time: Int64
+    let close_time: Int64
+    let profit: Double
+    let commission: Double
+    let swap: Double
     let comment: String?
     let magic: Int64?
 }
@@ -92,30 +112,27 @@ struct MT5SymbolInfo: Codable, Sendable {
 
 // MARK: - IG Models
 
-struct IGAuthResponse: Sendable {
+struct IGAuthResponse: Codable, Sendable {
     let success: Bool
     let data: IGAuthData?
     let error: String?
 }
-extension IGAuthResponse: Codable {}
 
-struct IGAuthData: Sendable {
+struct IGAuthData: Codable, Sendable {
     let cst: String
     let xSecurityToken: String
     let accountId: String
     let lightstreamerEndpoint: String?
     let sessionId: String?
 }
-extension IGAuthData: Codable {}
 
-struct IGAPIResponse<T: Codable & Sendable>: Sendable {
+struct IGAPIResponse<T: Codable & Sendable>: Codable, Sendable {
     let success: Bool
     let data: T?
     let error: String?
 }
-extension IGAPIResponse: Codable {}
 
-struct AccountInfo: Sendable {
+struct IGAccountInfo: Codable, Sendable {
     let accountId: String
     let accountName: String
     let balance: Double
@@ -124,9 +141,8 @@ struct AccountInfo: Sendable {
     let available: Double
     let currency: String
 }
-extension AccountInfo: Codable {}
 
-struct TradeResult: Sendable {
+struct IGTradeResult: Codable, Sendable {
     let dealReference: String
     let dealId: String?
     let symbol: String
@@ -135,9 +151,8 @@ struct TradeResult: Sendable {
     let status: String?
     let timestamp: String?
 }
-extension TradeResult: Codable {}
 
-struct Position: Sendable {
+struct IGPosition: Codable, Sendable {
     let dealId: String
     let epic: String
     let marketName: String
@@ -150,7 +165,8 @@ struct Position: Sendable {
     let currency: String
     let profitLoss: Double?
 }
-extension Position: Codable {}
+
+// MARK: - Shared Errors
 
 enum TradingError: Error {
     case invalidURL
