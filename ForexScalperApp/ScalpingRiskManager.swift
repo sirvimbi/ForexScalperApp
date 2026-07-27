@@ -133,10 +133,13 @@ actor ScalpingRiskManager: RiskManagerProtocol {
 
         // Align with volume_step
         let steps = round(lotSize / limits.step)
-        var finalLotSize = max(limits.min, min(steps * limits.step, limits.max))
+        let finalLotSize = max(limits.min, min(steps * limits.step, limits.max))
 
-        // Force 2 decimal places for standard brokers
-        finalLotSize = Double(String(format: "%.2f", finalLotSize)) ?? finalLotSize
+        // PRODUCTION FIX: Remove hard 2-decimal rounding to allow for 0.005 etc. if broker permits.
+        // We now rely on the 'steps * limits.step' logic above which respects broker precision.
+        if limits.step < 0.01 {
+            print("🔬 High-Precision Lot detected: \(String(format: "%.3f", finalLotSize)) (Step: \(limits.step))")
+        }
 
         // FIXED: Calculate SL and TP based on fixed pip values
         let sl = signal.type == .buy ? signal.price - slDistance : signal.price + slDistance

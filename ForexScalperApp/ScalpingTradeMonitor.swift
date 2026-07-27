@@ -257,7 +257,13 @@ actor ScalpingTradeMonitor {
         await tradeHistory.updateTrade(updatedTrade)
 
         if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
-            _ = try? await MT5Service.shared.modifyPosition(ticket: ticket, sl: updatedTrade.stopLoss!, tp: trade.takeProfit ?? 0)
+            print("📤 MT5: Syncing Break-Even SL to terminal...")
+            let success = try? await MT5Service.shared.modifyPosition(ticket: ticket, sl: updatedTrade.stopLoss!, tp: trade.takeProfit ?? 0)
+            if success == true {
+                print("✅ MT5: Break-Even SL confirmed on terminal")
+            } else {
+                print("⚠️ MT5: Break-Even SL modification REJECTED (Check Terminal Logs)")
+            }
         }
     }
 
@@ -302,7 +308,12 @@ actor ScalpingTradeMonitor {
     private func syncTrailingStopToMT5(trade: TradeRecord, newSL: Double) async {
         print("🏃‍♂️ TRAIL: Chasing \(trade.symbol) @ \(String(format: "%.5f", newSL))")
         if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
-            _ = try? await MT5Service.shared.modifyPosition(ticket: ticket, sl: newSL, tp: trade.takeProfit ?? 0)
+            let success = try? await MT5Service.shared.modifyPosition(ticket: ticket, sl: newSL, tp: trade.takeProfit ?? 0)
+            if success == true {
+                print("✅ MT5: Trailing SL confirmed on terminal")
+            } else {
+                print("⚠️ MT5: Trailing SL modification REJECTED")
+            }
         }
     }
 

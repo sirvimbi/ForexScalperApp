@@ -914,6 +914,11 @@ class RefactoredAppCoordinator: ObservableObject {
             }
 
             // Create trade record with external deal ID if available
+            // PRODUCTION FIX: Ensure TradeRecord uses the FINAL values used for execution (in case of UI overrides)
+            let finalVolume = normalizedSignal.positionSize ?? positionSize.units
+            let finalSL = normalizedSignal.stopLoss ?? positionSize.stopLoss
+            let finalTP = normalizedSignal.takeProfit ?? positionSize.takeProfit
+
             let trade = TradeRecord(
                 signalId: normalizedSignal.id,
                 symbol: normalizedSymbol,
@@ -921,9 +926,9 @@ class RefactoredAppCoordinator: ObservableObject {
                 entryPrice: normalizedSignal.price,
                 entryTime: Date(),
                 confidence: normalizedSignal.confidence,
-                takeProfit: positionSize.takeProfit,
-                stopLoss: positionSize.stopLoss,
-                positionSize: positionSize.units,
+                takeProfit: finalTP,
+                stopLoss: finalSL,
+                positionSize: finalVolume,
                 status: .active,
                 externalDealId: externalDealId
             )
