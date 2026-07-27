@@ -1811,7 +1811,18 @@ struct DashboardView: View {
                             .foregroundColor(.accentCyan)
                             .tracking(2)
                         Spacer()
-                        Button(action: { viewModel.saveSettings() }) {
+                        Button(action: { 
+                            // Ensure ScalpingConfig is updated before saving
+                            ScalpingConfig.shared.confidenceThreshold = viewModel.scalpingConfig.confidenceThreshold
+                            ScalpingConfig.shared.spreadTolerance = viewModel.scalpingConfig.spreadTolerance
+                            ScalpingConfig.shared.minVolatilityATR = viewModel.scalpingConfig.minVolatilityATR
+                            ScalpingConfig.shared.minVolumeRatio = viewModel.scalpingConfig.minVolumeRatio
+                            ScalpingConfig.shared.cooldownSeconds = viewModel.scalpingConfig.cooldownSeconds
+                            ScalpingConfig.shared.minConfluencePillars = viewModel.scalpingConfig.minConfluencePillars
+                            ScalpingConfig.shared.brokerSuffix = viewModel.scalpingConfig.brokerSuffix
+                            
+                            viewModel.saveSettings() 
+                        }) {
                             HStack(spacing: 6) {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.system(size: 13))

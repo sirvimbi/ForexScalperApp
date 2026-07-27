@@ -1,4 +1,3 @@
-// NewsService.swift - Autonomous Economic Calendar Integration
 import Foundation
 import Combine
 
@@ -6,108 +5,140 @@ import Combine
 class NewsService: ObservableObject {
     static let shared = NewsService()
     
-    @Published var upcomingEvents: [NewsEvent] = []
-    @Published var isFetching = false
-    @Published var lastFetch: Date?
+    @Published private(set) var upcomingEvents: [NewsEvent] = []
+    @Published private(set) var isFetching = false
+    private var lastFetch: Date?
     
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15.0
+        config.timeoutIntervalForRequest = 10
         return URLSession(configuration: config)
     }()
     
     private init() {
-        // Initial fetch
-        Task { await fetchNews() }
+        Task {
+            await fetchNews()
+        }
         
-        // Auto-refresh every 30 minutes
-        Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { _ in
-            Task { await self.fetchNews() }
+        // Refresh every hour
+        Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { _ in
+            Task { await NewsService.shared.fetchNews() }
         }
     }
     
     func fetchNews() async {
         guard !isFetching else { return }
         
-        await MainActor.run { isFetching = true }
-        defer { DispatchQueue.main.async { self.isFetching = false } }
+        isFetching = true
+        defer { isFetching = false }
         
-        print("🌍 NewsService: Fetching economic calendar...")
+        godLog("🌍 NewsService: Fetching economic calendar...", level: .diagnostic)
         
-        // Use a public economic calendar feed (This is a common public JSON feed for demo/dev purposes)
-        // In production, you might want to use a more robust paid API or a reliable scraper
         let urlString = "https://nfs.forexfactory.com/ffcal_week_this.xml"
-        
         guard let url = URL(string: urlString) else { return }
         
         do {
             let (data, _) = try await session.data(from: url)
             let events = parseForexFactoryXML(data)
             
-            await MainActor.run {
+            if !events.isEmpty {
                 self.upcomingEvents = events.sorted { $0.time < $1.time }
                 self.lastFetch = Date()
-                print("✅ NewsService: Loaded \(events.count) events")
+                godLog("✅ NewsService: Loaded \(events.count) economic events", level: .success)
+                return
             }
         } catch {
-            print("❌ NewsService: Failed to fetch news: \(error)")
+            godLog("❌ NewsService: Failed to fetch news: \(error.localizedDescription)", level: .error)
         }
+        
+        // FALLBACK: Use a hardcoded calendar based on standard market times
+        godLog("⚠️ NewsService: Using fallback institutional calendar", level: .warning)
+        self.upcomingEvents = generateFallbackEvents()
+    }
+    
+    private func generateFallbackEvents() -> [NewsEvent] {
+        let now = Date()
+        let calendar = Calendar.current
+        let weekday = calendar.component(.weekday, from: now)
+        
+        var events: [NewsEvent] = []
+        
+        // Standard high-impact windows (Monday-Friday)
+        if weekday >= 2 && weekday <= 6 {
+            let currencies = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD"]
+            let windows = [
+                (hour: 0, min: 30, impact: NewsImpact.medium, name: "Asian Session Open"),
+                (hour: 8, min: 0, impact: NewsImpact.high, name: "London Session Open"),
+                (hour: 13, min: 30, impact: NewsImpact.high, name: "US Pre-Market Data"),
+                (hour: 15, min: 0, impact: NewsImpact.high, name: "US Open Volatility"),
+                (hour: 19, min: 0, impact: NewsImpact.medium, name: "Late US Session")
+            ]
+            
+            for window in windows {
+                var components = calendar.dateComponents([.year, .month, .day], from: now)
+                components.hour = window.hour
+                components.minute = window.min
+                
+                if let eventTime = calendar.date(from: components) {
+                    for curr in currencies {
+                        events.append(NewsEvent(
+                            title: window.name,
+                            currency: curr,
+                            impact: window.impact,
+                            time: eventTime,
+                            actual: nil, forecast: nil, previous: nil
+                        ))
+                    }
+                }
+            }
+        }
+        
+        return events
     }
     
     private func parseForexFactoryXML(_ data: Data) -> [NewsEvent] {
-        // Since Swift doesn't have a built-in XML to Object mapper without complex boilerplate, 
-        // and we want to keep it lightweight, we'll use a simple XML Parser approach 
-        // OR a regex-based approach for this specific structure.
+        guard let xmlString = String(data: data, encoding: .utf8) else { return [] }
         
-        let xmlString = String(data: data, encoding: .utf8) ?? ""
         var events: [NewsEvent] = []
+        let itemPattern = "<event>(.*?)</event>"
         
-        // Regex patterns for FF XML fields
-        let eventPattern = "<event>(.*?)</event>"
-        let titlePattern = "<title>(.*?)</title>"
-        let countryPattern = "<country>(.*?)</country>"
-        let datePattern = "<date><!\\[CDATA\\[(.*?)\\]\\]></date>"
-        let timePattern = "<time><!\\[CDATA\\[(.*?)\\]\\]></time>"
-        let impactPattern = "<impact><!\\[CDATA\\[(.*?)\\]\\]></impact>"
-        
-        let eventRegex = try? NSRegularExpression(pattern: eventPattern, options: [.dotMatchesLineSeparators])
-        let nsString = xmlString as NSString
-        let matches = eventRegex?.matches(in: xmlString, options: [], range: NSRange(location: 0, length: nsString.length)) ?? []
-        
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "MM-dd-yyyy h:mma" // Example: 07-23-2026 8:30am
-        dateFormatter.timeZone = TimeZone(abbreviation: "EST") // FF XML is usually EST
-        
-        for match in matches {
-            let eventContent = nsString.substring(with: match.range(at: 1))
+        do {
+            let regex = try NSRegularExpression(pattern: itemPattern, options: [.dotMatchesLineSeparators])
+            let matches = regex.matches(in: xmlString, options: [], range: NSRange(xmlString.startIndex..., in: xmlString))
             
-            let title = extract(pattern: titlePattern, from: eventContent)
-            let country = extract(pattern: countryPattern, from: eventContent)
-            let dateStr = extract(pattern: datePattern, from: eventContent)
-            let timeStr = extract(pattern: timePattern, from: eventContent)
-            let impactStr = extract(pattern: impactPattern, from: eventContent)
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "MM-dd-yyyy HH:mm"
+            dateFormatter.timeZone = TimeZone(identifier: "EST") // Forex Factory is usually EST
             
-            // Convert impact string to enum
-            let impact: NewsImpact
-            switch impactStr.lowercased() {
-            case "high": impact = .high
-            case "medium": impact = .medium
-            case "low": impact = .low
-            default: impact = .none
+            for match in matches {
+                let range = Range(match.range(at: 1), in: xmlString)!
+                let content = String(xmlString[range])
+                
+                let title = extract(pattern: "<title>(.*?)</title>", from: content)
+                let currency = extract(pattern: "<country>(.*?)</currency>", from: content)
+                let dateStr = extract(pattern: "<date>(.*?)</date>", from: content)
+                let timeStr = extract(pattern: "<time>(.*?)</time>", from: content)
+                let impactStr = extract(pattern: "<impact>(.*?)</impact>", from: content)
+                
+                if let time = dateFormatter.date(from: "\(dateStr) \(timeStr)") {
+                    let impact: NewsImpact
+                    switch impactStr.lowercased() {
+                    case "high": impact = .high
+                    case "medium": impact = .medium
+                    default: impact = .none
+                    }
+                    
+                    events.append(NewsEvent(
+                        title: title,
+                        currency: currency,
+                        impact: impact,
+                        time: time,
+                        actual: nil, forecast: nil, previous: nil
+                    ))
+                }
             }
-            
-            // Parse Date
-            if let date = dateFormatter.date(from: "\(dateStr) \(timeStr)") {
-                events.append(NewsEvent(
-                    title: title,
-                    currency: country,
-                    impact: impact,
-                    time: date,
-                    actual: nil,
-                    forecast: nil,
-                    previous: nil
-                ))
-            }
+        } catch {
+            print("❌ XML Parse Error: \(error)")
         }
         
         return events
@@ -115,20 +146,20 @@ class NewsService: ObservableObject {
     
     private func extract(pattern: String, from: String) -> String {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return "" }
-        let nsString = from as NSString
-        if let match = regex.firstMatch(in: from, options: [], range: NSRange(location: 0, length: nsString.length)) {
-            return nsString.substring(with: match.range(at: 1))
+        if let match = regex.firstMatch(in: from, options: [], range: NSRange(from.startIndex..., in: from)) {
+            let range = Range(match.range(at: 1), in: from)!
+            return String(from[range])
         }
         return ""
     }
     
     // MARK: - Analysis Methods
     
-    func getImpactForSymbol(_ symbol: String, timeframeMinutes: Int = 60) -> (impact: NewsImpact, event: String?) {
+    func getImpactForSymbol(_ symbol: String, timeframeMinutes: Int) -> (impact: NewsImpact, event: String?) {
         let now = Date()
         let windowEnd = now.addingTimeInterval(TimeInterval(timeframeMinutes * 60))
         
-        // Filter events for this symbol's currencies (e.g. EUR and USD for EURUSD)
+        // Extract relevant currencies for this symbol (e.g., "EURUSD" -> ["EUR", "USD"])
         let base = String(symbol.prefix(3))
         let quote = String(symbol.suffix(3))
         
@@ -137,11 +168,12 @@ class NewsService: ObservableObject {
             event.time >= now && event.time <= windowEnd
         }
         
-        if let highest = relevantEvents.max(by: { a, b in
-            let impacts: [NewsImpact: Int] = [.none: 0, .low: 1, .medium: 2, .high: 3]
-            return (impacts[a.impact] ?? 0) < (impacts[b.impact] ?? 0)
-        }) {
-            return (highest.impact, highest.title)
+        if let high = relevantEvents.first(where: { $0.impact == .high }) {
+            return (.high, high.title)
+        }
+        
+        if let medium = relevantEvents.first(where: { $0.impact == .medium }) {
+            return (.medium, medium.title)
         }
         
         return (.none, nil)

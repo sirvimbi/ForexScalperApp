@@ -323,11 +323,15 @@ actor ScalpingTradeMonitor {
             godLog("🎯 PARTIAL TP HIT: \(trade.symbol) - Closing 50% position", level: .success)
             partialTPExecuted[trade.id] = true
             
-            // Close 50% of position
+            // Close 50% of position via MT5 (using volume_step rounding)
             if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
+                let limits = await MT5Service.shared.getVolumeLimits(for: trade.symbol)
                 let volume = trade.positionSize ?? 0.01
-                let halfVolume = Double(String(format: "%.2f", volume / 2)) ?? 0.01
-                _ = try? await MT5Service.shared.closePosition(ticket: ticket, volume: max(0.01, halfVolume))
+                let halfVolumeRaw = volume / 2
+                let steps = round(halfVolumeRaw / limits.step)
+                let halfVolume = max(limits.min, min(steps * limits.step, limits.max))
+                
+                _ = try? await MT5Service.shared.closePosition(ticket: ticket, volume: halfVolume)
             }
             
             // Move SL to breakeven for remaining position
@@ -414,6 +418,7 @@ actor ScalpingTradeMonitor {
 
         if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
             _ = try? await MT5Service.shared.closePosition(ticket: ticket)
+            await onPendingReconciliation?(trade)
         }
 
         activeTrades.removeValue(forKey: trade.id)
@@ -447,6 +452,12 @@ actor ScalpingTradeMonitor {
         trailingStops.removeValue(forKey: id)
         partialTPExecuted.removeValue(forKey: id)
     }
+
+    func setPendingReconciliationCallback(_ callback: @escaping (TradeRecord) async -> Void) {
+        self.onPendingReconciliation = callback
+    }
+    
+    private var onPendingReconciliation: ((TradeRecord) async -> Void)?
 
     func getTradeStatus(_ tradeId: UUID) -> (currentPrice: Double?, trailingStop: Double?)? {
         guard activeTrades[tradeId] != nil else { return nil }

@@ -526,7 +526,8 @@ class MT5Service {
     }
 
     func getATR(symbol: String, period: Int = 14) async throws -> Double {
-        let candles = try await getCandles(symbol: symbol, timeframe: "1h", count: period + 1)
+        // GOD MODE V3.2: Use 5m timeframe for faster responsiveness in scalping
+        let candles = try await getCandles(symbol: symbol, timeframe: "5m", count: period * 2)
         guard candles.count >= period else { return symbol.contains("JPY") ? 0.20 : 0.0020 }
         
         let closes = candles.map { $0.close }

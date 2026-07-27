@@ -470,8 +470,18 @@ actor ScalpingSignalEngine {
         let minVolRatio = await MainActor.run { config.minVolumeRatio }
         let hasVolume = indicators.volumeRatio > minVolRatio
         if hasVolume {
-            activePillarsBuy += 1; activePillarsSell += 1
-            buyScore += weights.vol; sellScore += weights.vol
+            // Volume confirms the dominant direction
+            if buyScore > sellScore {
+                activePillarsBuy += 1
+                buyScore += weights.vol
+            } else if sellScore > buyScore {
+                activePillarsSell += 1
+                sellScore += weights.vol
+            } else {
+                // Equal scores - adds to both (neutral)
+                activePillarsBuy += 1; activePillarsSell += 1
+                buyScore += weights.vol * 0.5; sellScore += weights.vol * 0.5
+            }
             confidenceFactors["Institutional Volume"] = 1.2
         }
 

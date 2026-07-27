@@ -17,6 +17,9 @@ class RefactoredAppCoordinator: ObservableObject {
 
     // Published properties for SwiftUI
     @Published var signals: [Signal] = []
+    
+    // 🔥 Reconciliation & Risk Protection
+    private var pendingReconciliation: [String: TradeRecord] = [:] // Ticket -> Trade
     @Published var lastSignal: String = "No signal yet"
     @Published var status: String = "Starting..."
     @Published var connectionStatus: String = "Disconnected"
@@ -101,6 +104,16 @@ class RefactoredAppCoordinator: ObservableObject {
             signalEngine: scalpingEngine,
             config: ScalpingConfig.shared
         )
+        
+        Task {
+            await self.scalpingTradeMonitor.setPendingReconciliationCallback { [weak self] trade in
+                guard let self = self, let dealId = trade.externalDealId else { return }
+                await MainActor.run {
+                    self.pendingReconciliation[dealId] = trade
+                    godLog("⏳ Added #\(dealId) to pending reconciliation buffer", level: .diagnostic)
+                }
+            }
+        }
 
         self.signalEngine = RefactoredSignalEngine(
             marketData: marketData,
@@ -689,6 +702,41 @@ class RefactoredAppCoordinator: ObservableObject {
             }
         } catch {
             print("⚠️ MT5 History sync failed: \(error)")
+        }
+        
+        // 🔥 NEW: Check pending reconciliation
+        let pendingTickets = Array(pendingReconciliation.keys)
+        for ticketId in pendingTickets {
+            guard let pendingTrade = pendingReconciliation[ticketId] else { continue }
+            
+            // Check if ticket is still active on terminal
+            let positions = try? await MT5Service.shared.getPositionsAndOrders()
+            let activeTickets = (positions?.active ?? [] + (positions?.pending ?? [])).map { String($0.ticket) }
+            
+            if activeTickets.contains(ticketId) {
+                // Still active - MT5 terminal hasn't finished closure yet
+                continue
+            } else {
+                // No longer active in MT5 - must be closed.
+                // Re-fetch history specifically for this ticket
+                let history = try? await MT5Service.shared.getTradeHistory(days: 1)
+                if let historyTrade = history?.first(where: { String($0.ticket) == ticketId }) {
+                    godLog("💎 Verified closure for \(pendingTrade.symbol) Ticket #\(ticketId)", level: .success)
+                    
+                    var completed = pendingTrade
+                    completed.exitPrice = historyTrade.close_price
+                    completed.pnl = historyTrade.profit + historyTrade.commission + historyTrade.swap
+                    completed.status = .completed
+                    completed.exitTime = parseMT5Time(historyTrade.close_time) ?? Date()
+                    
+                    await tradeHistory.updateTrade(completed)
+                    await handleTradeClosed(completed)
+                    
+                    await MainActor.run {
+                        self.pendingReconciliation.removeValue(forKey: ticketId)
+                    }
+                }
+            }
         }
     }
 

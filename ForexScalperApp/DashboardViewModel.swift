@@ -159,7 +159,7 @@ class DashboardViewModel: ObservableObject {
         // Load Auto-Trade settings
         isAutoTradeEnabled = UserDefaults.standard.bool(forKey: "isAutoTradeEnabled")
         minAutoTradeConfidence = UserDefaults.standard.double(forKey: "minAutoTradeConfidence") != 0 ?
-            UserDefaults.standard.double(forKey: "minAutoTradeConfidence") : 85.0
+            UserDefaults.standard.double(forKey: "minAutoTradeConfidence") : 70.0
         
         // CRITICAL: Push loaded settings to Risk Managers immediately on launch
         let params = RiskParameters(
