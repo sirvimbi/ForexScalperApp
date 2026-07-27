@@ -508,7 +508,7 @@ class MT5Service {
             request.httpBody = try? JSONSerialization.data(withJSONObject: body)
             
             do {
-                let (data, response) = try await session.data(for: request)
+                let (_, response) = try await session.data(for: request)
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                     return true
                 }

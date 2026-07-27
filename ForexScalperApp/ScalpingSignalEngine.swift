@@ -106,7 +106,7 @@ actor ScalpingSignalEngine {
         }
         
         if newsCheck.enabled {
-            let (impact, event) = NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: Int(max(newsCheck.highMin, newsCheck.medMin)))
+            let (impact, event) = await NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: Int(max(newsCheck.highMin, newsCheck.medMin)))
             
             if impact == .high {
                 print("🌍 \(symbol) PAUSED: High Impact News Incoming - \(event ?? "Unknown Event")")
@@ -156,7 +156,7 @@ actor ScalpingSignalEngine {
         var effectiveTolerance = spreadSettings.tolerance
         
         // Adjust tolerance if news is active (allowing wider spreads if preferred, or tightening if safer)
-        let (impact, _) = NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: 30)
+        let (impact, _) = await NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: 30)
         if impact != .none && spreadSettings.autoRaise {
             effectiveTolerance *= spreadSettings.multiplier
             print("🌍 \(symbol) News Active: Increasing spread tolerance to \(String(format: "%.1f", effectiveTolerance)) bps")
@@ -307,7 +307,7 @@ actor ScalpingSignalEngine {
         var confidenceFactors: [String: Double] = [:]
 
         // Load dynamic configuration from MainActor
-        let (confluenceLevel, minReqScore, minPillars, weights) = await MainActor.run {
+        let (_, minReqScore, minPillars, weights) = await MainActor.run {
             (
                 config.mandatoryConfluenceLevel,
                 config.minScore,
@@ -489,7 +489,7 @@ actor ScalpingSignalEngine {
         guard candles.count >= 3 else { return .none }
         let last = candles.last!
         let prev = candles[candles.count-2]
-        let prev2 = candles[candles.count-3]
+        _ = candles[candles.count-3]
 
         // Bullish Engulfing
         if last.close > last.open && prev.close < prev.open &&

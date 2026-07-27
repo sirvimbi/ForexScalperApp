@@ -1,7 +1,8 @@
-import UserNotifications
+@preconcurrency import UserNotifications
 import SwiftUI
 import Combine
 
+@MainActor
 class NotificationManager: NSObject, ObservableObject {
     static let shared = NotificationManager()
     
@@ -171,7 +172,7 @@ class NotificationManager: NSObject, ObservableObject {
 }
 
 // MARK: - UNUserNotificationCenterDelegate
-extension NotificationManager: UNUserNotificationCenterDelegate {
+extension NotificationManager: @preconcurrency UNUserNotificationCenterDelegate {
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,

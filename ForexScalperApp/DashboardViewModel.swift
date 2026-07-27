@@ -10,9 +10,9 @@ class DashboardViewModel: ObservableObject {
     @Published var activeTrades: [TradeRecord] = []
     @Published var accountBalance: Double = 10000
     @Published var accountCurrency: String = "USD"
-    @Published var riskPerTrade: Double = 0.01
-    @Published var maxDailyRisk: Double = 0.03
-    @Published var maxConcurrentTrades: Int = 3
+    @Published var riskPerTrade: Double = 0.01 { didSet { syncRiskParameters() } }
+    @Published var maxDailyRisk: Double = 0.03 { didSet { syncRiskParameters() } }
+    @Published var maxConcurrentTrades: Int = 3 { didSet { syncRiskParameters() } }
     @Published var igAPIKey: String = ""
     @Published var igAccountID: String = ""
     @Published var igEnvironment: String = "demo"
@@ -160,7 +160,19 @@ class DashboardViewModel: ObservableObject {
         minAutoTradeConfidence = UserDefaults.standard.double(forKey: "minAutoTradeConfidence") != 0 ?
             UserDefaults.standard.double(forKey: "minAutoTradeConfidence") : 85.0
         
-        print("✅ Settings loaded from UserDefaults")
+        // CRITICAL: Push loaded settings to Risk Managers immediately on launch
+        let params = RiskParameters(
+            accountBalance: accountBalance,
+            riskPerTrade: riskPerTrade,
+            maxDailyRisk: maxDailyRisk,
+            maxConcurrentTrades: maxConcurrentTrades
+        )
+        Task {
+            await RefactoredRiskManager.shared.updateParameters(params)
+            await ScalpingRiskManager.shared.updateParameters(params)
+        }
+        
+        print("✅ Settings loaded from UserDefaults and synced to Risk Managers")
     }
     
     func saveSettings() {
@@ -805,6 +817,19 @@ class DashboardViewModel: ObservableObject {
     private func handleTradeUpdate(_ trade: TradeRecord) {
         // Update the trade in history if needed
         loadTradeHistory()
+    }
+    
+    private func syncRiskParameters() {
+        let params = RiskParameters(
+            accountBalance: accountBalance,
+            riskPerTrade: riskPerTrade,
+            maxDailyRisk: maxDailyRisk,
+            maxConcurrentTrades: maxConcurrentTrades
+        )
+        Task {
+            await RefactoredRiskManager.shared.updateParameters(params)
+            await ScalpingRiskManager.shared.updateParameters(params)
+        }
     }
     
     deinit {

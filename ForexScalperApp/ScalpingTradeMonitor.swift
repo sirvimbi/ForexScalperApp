@@ -361,7 +361,7 @@ actor ScalpingTradeMonitor {
             NotificationCenter.default.post(name: .tradeHistoryUpdated, object: nil)
             print("📢 Posted scalping trade closed notifications for \(trade.symbol)")
         }
-        NotificationManager.shared.sendTradeClosedNotification(trade)
+        await NotificationManager.shared.sendTradeClosedNotification(trade)
     }
 
     private func calculatePnL(trade: TradeRecord, exitPrice: Double) -> Double {

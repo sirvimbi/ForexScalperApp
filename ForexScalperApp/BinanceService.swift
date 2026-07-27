@@ -5,13 +5,13 @@ actor BinanceService: MarketDataProvider {
     private var symbols: [String] = []
     private var timeframes: [String] = []
     private var webSocketTask: URLSessionWebSocketTask?
-    private var onKlineReceived: ((String, String, Kline) -> Void)?
+    private var onKlineReceived: (@Sendable (String, String, Kline) -> Void)?
     private var pingTimer: Task<Void, Never>?
     
     private let baseURL = "https://api.binance.com/api/v3"
     private let wsURL = "wss://stream.binance.com:9443/stream?streams="
     
-    func connect(symbols: [String], timeframes: [String], onKline: @escaping (String, String, Kline) -> Void) {
+    func connect(symbols: [String], timeframes: [String], onKline: @escaping @Sendable (String, String, Kline) -> Void) {
         self.symbols = symbols
         self.timeframes = timeframes
         self.onKlineReceived = onKline
@@ -263,19 +263,19 @@ actor BinanceService: MarketDataProvider {
 }
 
 // MARK: - Stream Models
-struct BinanceStreamResponse: Codable {
+struct BinanceStreamResponse: Codable, Sendable {
     let stream: String
     let data: BinanceKlineData
 }
 
-struct BinanceKlineData: Codable {
+struct BinanceKlineData: Codable, Sendable {
     let e: String // Event type
     let E: Int64  // Event time
     let s: String // Symbol
     let k: BinanceKlineDetail
 }
 
-struct BinanceKlineDetail: Codable {
+struct BinanceKlineDetail: Codable, Sendable {
     let t: Int64  // Kline start time
     let T: Int    // Kline close time
     let s: String // Symbol

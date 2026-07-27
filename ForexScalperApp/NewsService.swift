@@ -2,6 +2,7 @@
 import Foundation
 import Combine
 
+@MainActor
 class NewsService: ObservableObject {
     static let shared = NewsService()
     
@@ -79,7 +80,6 @@ class NewsService: ObservableObject {
         
         for match in matches {
             let eventContent = nsString.substring(with: match.range(at: 1))
-            let contentNS = eventContent as NSString
             
             let title = extract(pattern: titlePattern, from: eventContent)
             let country = extract(pattern: countryPattern, from: eventContent)

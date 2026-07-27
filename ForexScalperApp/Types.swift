@@ -31,7 +31,7 @@ struct CSVDocument: FileDocument {
 enum SignalType: String, Codable, Sendable, CaseIterable {
     case buy, sell, none
     
-    var displayName: String {
+    nonisolated var displayName: String {
         switch self {
         case .buy: return "BUY"
         case .sell: return "SELL"
@@ -243,7 +243,7 @@ struct Signal: Identifiable, Sendable, Codable {
         try container.encodeIfPresent(executionMode, forKey: .executionMode)
     }
     
-    init(id: UUID = UUID(),
+    nonisolated init(id: UUID = UUID(),
          type: SignalType,
          symbol: String,
          price: Double,

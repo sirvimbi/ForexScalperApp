@@ -3,7 +3,7 @@ import Foundation
 
 // MARK: - Calendar Extension
 extension Calendar {
-    func startOfHour(for date: Date) -> Date {
+    nonisolated func startOfHour(for date: Date) -> Date {
         let components = dateComponents([.year, .month, .day, .hour], from: date)
         return self.date(from: components) ?? date
     }

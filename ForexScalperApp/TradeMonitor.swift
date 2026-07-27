@@ -115,7 +115,7 @@ actor TradeMonitor {
         }
         
         // Send push notification
-        NotificationManager.shared.sendTradeClosedNotification(trade)
+        await NotificationManager.shared.sendTradeClosedNotification(trade)
     }
     
     private func calculatePnL(trade: TradeRecord, exitPrice: Double) -> Double {
