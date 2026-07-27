@@ -593,6 +593,51 @@ struct BacktestResultData {
     let profitFactor: Double
 }
 
+// MARK: - Risk Metrics
+struct RiskMetrics: Sendable {
+    let dailyPnL: Double
+    let dailyLossLimit: Double
+    let hourlyTrades: Int
+    let maxHourlyTrades: Int
+    let activeTrades: Int
+    let maxConcurrentTrades: Int
+    let consecutiveLosses: [String: Int]
+}
+
+// MARK: - God Mode Logging
+enum LogLevel: String, Sendable {
+    case info = "ℹ️"
+    case success = "✅"
+    case warning = "⚠️"
+    case error = "❌"
+    case diagnostic = "🔍"
+    case trade = "📊"
+}
+
+func godLog(_ message: String, level: LogLevel = .info, file: String = #file, line: Int = #line) {
+    let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+    let fileName = (file as NSString).lastPathComponent
+    let fullMessage = "[\(timestamp)] \(level.rawValue) \(fileName):\(line) - \(message)"
+    
+    // Original print for console
+    print(fullMessage)
+    
+    // Route to in-app console
+    Task { @MainActor in
+        ConsoleLogger.shared.log(fullMessage, level: convertLogLevel(level))
+    }
+}
+
+private func convertLogLevel(_ level: LogLevel) -> ConsoleLogger.LogEntry.LogLevel {
+    switch level {
+    case .info, .trade: return .info
+    case .success: return .success
+    case .warning: return .warning
+    case .error: return .error
+    case .diagnostic: return .diagnostic
+    }
+}
+
 // MARK: - MT5 & IG Models
 struct MT5AccountInfo: Codable {
     let login: Int

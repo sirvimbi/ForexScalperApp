@@ -176,7 +176,7 @@ actor ScalpingSignalEngine {
         }
 
         // 9. VOLATILITY FILTER (NEW)
-        guard await validateVolatility(symbol: symbol, indicators: indicators) else {
+        guard await validateVolatility(symbol, indicators: indicators) else {
             return nil
         }
 
@@ -210,22 +210,47 @@ actor ScalpingSignalEngine {
     }
 
     // MARK: - Volatility Filter (NEW)
-    private func validateVolatility(symbol: String, indicators: IndicatorSet) async -> Bool {
+    private func validateVolatility(_ symbol: String, indicators: IndicatorSet) async -> Bool {
         let atrPercentage = indicators.atr / indicators.currentPrice * 100
-        let minVol = await MainActor.run { config.minVolatilityATR }
-
-        // Skip if volatility is too low (no movement to profit from)
+        
+        // 🎯 DYNAMIC THRESHOLD based on time of day
+        let hour = Calendar.current.component(.hour, from: Date())
+        let isAsianSession = hour >= 0 && hour < 8
+        let isLondonSession = hour >= 8 && hour < 16
+        let isUSSession = hour >= 16 && hour < 24
+        
+        var minVol: Double
+        var maxVol: Double
+        
+        switch (isAsianSession, isLondonSession, isUSSession) {
+        case (true, false, false):  // Asian - low volatility is NORMAL
+            minVol = 0.005  // 0.5% - Much lower threshold
+            maxVol = 0.30   // 30% - High threshold
+            godLog("🌏 Asian Session: Using wider volatility range", level: .diagnostic)
+        case (false, true, false):  // London - medium
+            minVol = 0.008
+            maxVol = 0.50
+        case (false, false, true):  // US - medium-high
+            minVol = 0.010
+            maxVol = 0.60
+        default:
+            minVol = 0.008
+            maxVol = 0.50
+        }
+        
+        // Skip if volatility too low (no movement)
         if atrPercentage < minVol {
-            godLog("📊 \(symbol) Rejected: Low volatility (\(String(format: "%.3f", atrPercentage))%) - Threshold: \(minVol)%", level: .warning)
+            godLog("📊 \(symbol) Rejected: Low volatility (\(String(format: "%.3f", atrPercentage))%) - Session min: \(minVol)%", level: .warning)
             return false
         }
-
-        // Skip if volatility is too high (unsafe for 10 pip SL)
-        if atrPercentage > 0.5 {
-            godLog("📊 \(symbol) Rejected: High volatility (\(String(format: "%.2f", atrPercentage))%)", level: .warning)
+        
+        // Skip if volatility too high (unsafe)
+        if atrPercentage > maxVol {
+            godLog("📊 \(symbol) Rejected: High volatility (\(String(format: "%.2f", atrPercentage))%) - Session max: \(maxVol)%", level: .warning)
             return false
         }
-
+        
+        godLog("✅ Volatility check PASSED: \(String(format: "%.3f", atrPercentage))% (Session range: \(minVol)-\(maxVol)%)", level: .diagnostic)
         return true
     }
 
@@ -388,12 +413,33 @@ actor ScalpingSignalEngine {
             let sl = indicators.currentPrice - (indicators.atr * 0.8)
             let tp = indicators.currentPrice + (indicators.atr * 4.0)
 
-            return ScalpingSignal(
+            let signal = ScalpingSignal(
                 type: .buy, symbol: symbol, price: indicators.currentPrice,
                 confidence: adjustedConfidence, score: Int(buyScore), sellScore: 0,
                 indicators: indicators, confidenceFactors: confidenceFactors, timestamp: Date(),
                 stopLoss: sl, takeProfit: tp
             )
+
+            // 🎯 HIGH CONFIDENCE = TIGHTER TP (lock in profits faster)
+            if adjustedConfidence >= 80 {
+                let tighterTP = signal.type == .buy ? 
+                    indicators.currentPrice + (indicators.atr * 2.5) :  // Reduce TP distance
+                    indicators.currentPrice - (indicators.atr * 2.5)
+                return ScalpingSignal(
+                    type: signal.type,
+                    symbol: symbol,
+                    price: indicators.currentPrice,
+                    confidence: adjustedConfidence,
+                    score: Int(buyScore),
+                    sellScore: 0,
+                    indicators: indicators,
+                    confidenceFactors: confidenceFactors,
+                    timestamp: Date(),
+                    stopLoss: signal.stopLoss,
+                    takeProfit: tighterTP
+                )
+            }
+            return signal
         } else if sellScore > buyScore && currentPillars >= minPillars && sellScore >= minReqScore {
             let baseConfidence = min(sellScore / 80.0 * 100, 100)
             let adjustedConfidence = min(baseConfidence * confidenceFactors.values.reduce(1.0, *), 100)
@@ -401,12 +447,33 @@ actor ScalpingSignalEngine {
             let sl = indicators.currentPrice + (indicators.atr * 0.8)
             let tp = indicators.currentPrice - (indicators.atr * 4.0)
 
-            return ScalpingSignal(
+            let signal = ScalpingSignal(
                 type: .sell, symbol: symbol, price: indicators.currentPrice,
                 confidence: adjustedConfidence, score: Int(sellScore), sellScore: 0,
                 indicators: indicators, confidenceFactors: confidenceFactors, timestamp: Date(),
                 stopLoss: sl, takeProfit: tp
             )
+
+            // 🎯 HIGH CONFIDENCE = TIGHTER TP (lock in profits faster)
+            if adjustedConfidence >= 80 {
+                let tighterTP = signal.type == .buy ? 
+                    indicators.currentPrice + (indicators.atr * 2.5) :  // Reduce TP distance
+                    indicators.currentPrice - (indicators.atr * 2.5)
+                return ScalpingSignal(
+                    type: signal.type,
+                    symbol: symbol,
+                    price: indicators.currentPrice,
+                    confidence: adjustedConfidence,
+                    score: Int(buyScore),
+                    sellScore: 0,
+                    indicators: indicators,
+                    confidenceFactors: confidenceFactors,
+                    timestamp: Date(),
+                    stopLoss: signal.stopLoss,
+                    takeProfit: tighterTP
+                )
+            }
+            return signal
         }
         
         // ADD DIAGNOSTIC LOG FOR PILLAR FAILURE

@@ -37,7 +37,7 @@ class ScalpingConfig: ObservableObject {
     @Published var mandatoryConfluenceLevel: Int = 2 { didSet { saveConfig() } }
     @Published var minConfluencePillars: Int = 5 { didSet { saveConfig() } }
 
-    @Published var minVolatilityATR: Double = 0.05 { didSet { saveConfig() } }
+    @Published var minVolatilityATR: Double = 0.008 { didSet { saveConfig() } }
     @Published var minVolumeRatio: Double = 1.3 { didSet { saveConfig() } }
 
     // News Filter settings (NEW)

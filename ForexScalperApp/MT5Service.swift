@@ -352,7 +352,7 @@ class MT5Service {
         throw TradingError.apiError("Failed to fetch account info")
     }
     
-    func closePosition(ticket: Int) async throws -> Bool {
+    func closePosition(ticket: Int, volume: Double? = nil) async throws -> Bool {
         let paths = ["/v1/order/close", "/api/mt5/close", "/close"]
         
         for path in paths {
@@ -362,7 +362,13 @@ class MT5Service {
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue(authBuffer, forHTTPHeaderField: "Authorization")
-            request.httpBody = try JSONSerialization.data(withJSONObject: ["ticket": ticket])
+            
+            var body: [String: Any] = ["ticket": ticket]
+            if let vol = volume {
+                body["volume"] = vol
+            }
+            
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
             
             do {
                 let (data, response) = try await session.data(for: request)
@@ -517,6 +523,25 @@ class MT5Service {
             }
         }
         return false
+    }
+
+    func getATR(symbol: String, period: Int = 14) async throws -> Double {
+        let candles = try await getCandles(symbol: symbol, timeframe: "1h", count: period + 1)
+        guard candles.count >= period else { return symbol.contains("JPY") ? 0.20 : 0.0020 }
+        
+        let closes = candles.map { $0.close }
+        let highs = candles.map { $0.high }
+        let lows = candles.map { $0.low }
+        
+        var trs: [Double] = []
+        for i in 1..<candles.count {
+            let hl = highs[i] - lows[i]
+            let hpc = abs(highs[i] - closes[i-1])
+            let lpc = abs(lows[i] - closes[i-1])
+            trs.append(max(hl, hpc, lpc))
+        }
+        
+        return trs.reduce(0, +) / Double(trs.count)
     }
 }
 
