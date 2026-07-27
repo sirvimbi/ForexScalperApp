@@ -46,7 +46,7 @@ actor IGTradingService {
                 }
             }
             
-            let authResponse = try JSONDecoder().decode(IGAuthResponse.self, from: data)
+            let authResponse = try decode(IGAuthResponse.self, from: data)
             
             // Store session information
             if let sessionId = authResponse.data?.sessionId {
@@ -97,7 +97,7 @@ actor IGTradingService {
             throw TradingError.apiError("Backend returned HTML instead of JSON. Make sure your Node.js server is running at \(baseURL)")
         }
         
-        let apiResponse = try JSONDecoder().decode(IGAPIResponse<AccountInfo>.self, from: data)
+        let apiResponse = try decode(IGAPIResponse<AccountInfo>.self, from: data)
         
         guard apiResponse.success else {
             throw TradingError.apiError(apiResponse.error ?? "Unknown error")
@@ -157,7 +157,7 @@ actor IGTradingService {
                 }
             }
             
-            let apiResponse = try JSONDecoder().decode(IGAPIResponse<TradeResult>.self, from: data)
+            let apiResponse = try decode(IGAPIResponse<TradeResult>.self, from: data)
             
             guard apiResponse.success else {
                 throw TradingError.apiError(apiResponse.error ?? "Unknown error")
@@ -187,7 +187,7 @@ actor IGTradingService {
         }
         
         let (data, _) = try await URLSession.shared.data(for: request)
-        let response = try JSONDecoder().decode(IGAPIResponse<[Position]>.self, from: data)
+        let response = try decode(IGAPIResponse<[Position]>.self, from: data)
         
         guard response.success else {
             throw TradingError.apiError(response.error ?? "Unknown error")
@@ -212,7 +212,7 @@ actor IGTradingService {
         }
         
         let (data, _) = try await URLSession.shared.data(for: request)
-        let response = try JSONDecoder().decode(IGAPIResponse<Bool>.self, from: data)
+        let response = try decode(IGAPIResponse<Bool>.self, from: data)
         
         return response.success
     }
@@ -231,6 +231,12 @@ actor IGTradingService {
         sessionId = nil
         cst = nil
         xSecurityToken = nil
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func decode<T: Decodable & Sendable>(_ type: T.Type, from data: Data) throws -> T {
+        return try JSONDecoder().decode(type, from: data)
     }
 }
 

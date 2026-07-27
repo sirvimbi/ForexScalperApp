@@ -625,5 +625,4 @@ extension Notification.Name {
     static let mt5TradeExecuted = Notification.Name("mt5TradeExecuted")
     static let signalSourceChanged = Notification.Name("signalSourceChanged")
     static let sourceMetricsUpdated = Notification.Name("sourceMetricsUpdated")
-    static let newLogEntry = Notification.Name("newLogEntry")
 }

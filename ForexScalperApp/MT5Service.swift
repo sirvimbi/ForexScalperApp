@@ -126,7 +126,7 @@ actor MT5Service {
                 
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                     if path.contains("status") {
-                        let status = try JSONDecoder().decode(MT5StatusResponse.self, from: data)
+                        let status = try decode(MT5StatusResponse.self, from: data)
                         if status.connected {
                             godLog("✅ MT5: Connected via \(url.absoluteString)", level: .success)
                             return true
@@ -186,7 +186,7 @@ actor MT5Service {
                 let (data, response) = try await session.data(for: request)
                 
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    let priceResponse = try JSONDecoder().decode(MT5PriceHistoryResponse.self, from: data)
+                    let priceResponse = try decode(MT5PriceHistoryResponse.self, from: data)
                     let mt5Candles = priceResponse.data
                     
                     self.lastWorkingPath = path // Cache success
@@ -264,7 +264,7 @@ actor MT5Service {
                 
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 {
-                        let tradeResult = try JSONDecoder().decode(MT5TradeResult.self, from: data)
+                        let tradeResult = try decode(MT5TradeResult.self, from: data)
                         if tradeResult.retcode != 10009 && tradeResult.retcode != 10008 {
                             godLog("❌ MT5: Execution failed with retcode \(tradeResult.retcode): \(tradeResult.comment ?? "No comment")", level: .error)
                             throw TradingError.apiError("MT5 Error \(tradeResult.retcode): \(tradeResult.comment ?? "Execution failed")")
@@ -314,7 +314,7 @@ actor MT5Service {
             do {
                 let (data, response) = try await session.data(for: request)
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    let wrapper = try JSONDecoder().decode(MT5OrderListResponse.self, from: data)
+                    let wrapper = try decode(MT5OrderListResponse.self, from: data)
                     return (active: wrapper.opened, pending: wrapper.pending)
                 }
             } catch {
@@ -342,7 +342,7 @@ actor MT5Service {
                     if let jsonString = String(data: data, encoding: .utf8) {
                         print("📊 MT5 Account Raw: \(jsonString)")
                     }
-                    return try JSONDecoder().decode(MT5AccountInfo.self, from: data)
+                    return try decode(MT5AccountInfo.self, from: data)
                 }
             } catch {
                 continue
@@ -373,7 +373,7 @@ actor MT5Service {
             do {
                 let (data, response) = try await session.data(for: request)
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    let result = try JSONDecoder().decode(MT5TradeResult.self, from: data)
+                    let result = try decode(MT5TradeResult.self, from: data)
                     return result.retcode == 10009
                 }
             } catch {
@@ -426,7 +426,7 @@ actor MT5Service {
         
         let (data, response) = try await session.data(for: request)
         if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-            return try JSONDecoder().decode(MT5SymbolInfo.self, from: data)
+            return try decode(MT5SymbolInfo.self, from: data)
         }
         throw TradingError.apiError("Symbol info unavailable")
     }
@@ -453,7 +453,7 @@ actor MT5Service {
             do {
                 let (data, response) = try await session.data(for: request)
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    let result = try JSONDecoder().decode(MT5TradeResult.self, from: data)
+                    let result = try decode(MT5TradeResult.self, from: data)
                     return result.retcode == 10009
                 }
             } catch {
@@ -487,7 +487,7 @@ actor MT5Service {
                 let (data, response) = try await session.data(for: request)
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                     // The bridge returns a wrapped object with a "data" array
-                    let historyResponse = try JSONDecoder().decode(MT5HistoryResponse.self, from: data)
+                    let historyResponse = try decode(MT5HistoryResponse.self, from: data)
                     return historyResponse.data
                 }
             } catch {
@@ -558,6 +558,10 @@ actor MT5Service {
         if hour >= 0 && hour < 8 { return "Asian" }
         if hour >= 8 && hour < 16 { return "London" }
         return "US"
+    }
+    
+    private func decode<T: Decodable & Sendable>(_ type: T.Type, from data: Data) throws -> T {
+        return try JSONDecoder().decode(type, from: data)
     }
 }
 
