@@ -455,19 +455,39 @@ class DashboardViewModel: ObservableObject {
 
     func prepareCSVExport() async {
         let csvString = await RefactoredTradeHistoryManager.shared.generateCSV()
-        let fileName = "TradeHistory_\(Int(Date().timeIntervalSince1970)).csv"
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        let fileName = "GodMode_History_\(Int(Date().timeIntervalSince1970)).csv"
         
+        #if os(macOS)
+        // DIRECT DOWNLOAD TO DOWNLOADS FOLDER
+        let downloadsFolder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        let fileURL = downloadsFolder.appendingPathComponent(fileName)
+        
+        do {
+            try csvString.write(to: fileURL, atomically: true, encoding: .utf8)
+            godLog("📁 CSV Downloaded: \(fileURL.path)", level: .success)
+            showNotification(title: "Export Successful", message: "CSV saved to your Downloads folder.")
+            
+            // Still set exportURL for the UI button state if needed
+            await MainActor.run {
+                self.exportURL = fileURL
+            }
+        } catch {
+            godLog("❌ Failed to export CSV to Downloads: \(error.localizedDescription)", level: .error)
+            showNotification(title: "Export Failed", message: error.localizedDescription)
+        }
+        #else
+        // iOS: Still use temporary directory for ShareSheet
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         do {
             try csvString.write(to: tempURL, atomically: true, encoding: .utf8)
             await MainActor.run {
                 self.exportURL = tempURL
                 self.isShowingShareSheet = true
             }
-            print("📁 CSV prepared at: \(tempURL.path)")
         } catch {
             print("❌ Failed to write temp CSV: \(error)")
         }
+        #endif
     }
 
     func connectToIG() async {

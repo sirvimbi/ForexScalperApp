@@ -1242,28 +1242,19 @@ struct DashboardView: View {
                             .tracking(2)
                         Spacer()
                         
-                        if let url = viewModel.exportURL {
-                            ShareLink("EXPORT CSV", item: url)
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .padding(.horizontal, 10).padding(.vertical, 5)
-                                .background(Color.accentCyan.opacity(0.1))
-                                .foregroundColor(.accentCyan)
-                                .cornerRadius(5)
-                        } else {
-                            Button(action: {
-                                Task {
-                                    await viewModel.prepareCSVExport()
-                                }
-                            }) {
-                                Label("PREPARE CSV", systemImage: "doc.text.fill")
-                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                    .padding(.horizontal, 10).padding(.vertical, 5)
-                                    .background(Color.accentCyan.opacity(0.1))
-                                    .foregroundColor(.accentCyan)
-                                    .cornerRadius(5)
+                        Button(action: {
+                            Task {
+                                await viewModel.prepareCSVExport()
                             }
-                            .buttonStyle(.plain)
+                        }) {
+                            Label("DOWNLOAD CSV", systemImage: "arrow.down.doc.fill")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .padding(.horizontal, 12).padding(.vertical, 7)
+                                .background(Color.accentCyan)
+                                .foregroundColor(.bgPrimary)
+                                .cornerRadius(5)
                         }
+                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
