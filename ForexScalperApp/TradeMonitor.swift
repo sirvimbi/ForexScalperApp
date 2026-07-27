@@ -77,45 +77,18 @@ actor TradeMonitor {
     }
     
     private func closeTrade(_ trade: TradeRecord, exitPrice: Double, reason: String) async {
-        var updatedTrade = trade
-        let pnl = calculatePnL(trade: trade, exitPrice: exitPrice)
-        let pnlPercent = (pnl / (trade.entryPrice * (trade.positionSize ?? 1000))) * 100
-        
-        updatedTrade.exitPrice = exitPrice
-        updatedTrade.exitTime = Date()
-        updatedTrade.pnl = pnl
-        updatedTrade.pnlPercent = pnlPercent
-        updatedTrade.status = .completed
-        
-        // Update in history
-        await tradeHistory.updateTrade(updatedTrade)
-        
-        // Remove from active trades
-        activeTrades.removeValue(forKey: trade.id)
-        
-        // Notify callback
-        await onTradeClosed?(updatedTrade)
-        
-        // Send notifications for UI to update immediately
-        await postTradeClosedNotifications(updatedTrade)
-        
-        print("📊 Trade closed: \(trade.symbol) \(reason) | P&L: KES \(String(format: "%.2f", pnl)) (\(String(format: "%.2f", pnlPercent))%)")
-    }
-    
-    // Helper method to post notifications
-    private func postTradeClosedNotifications(_ trade: TradeRecord) async {
-        await MainActor.run {
-            // Post trade updated notification with the trade object
-            NotificationCenter.default.post(name: .tradeUpdated, object: trade)
-            
-            // Also post trade history updated notification for general refresh
-            NotificationCenter.default.post(name: .tradeHistoryUpdated, object: nil)
-            
-            print("📢 Posted trade closed notifications for \(trade.symbol)")
+        godLog("🎯 EXIT TRIGGER: \(trade.symbol) (\(reason)) @ \(exitPrice). Requesting MT5 closure...", level: .info)
+
+        // 1. Send closure command to MT5
+        if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
+            _ = try? await MT5Service.shared.closePosition(ticket: ticket)
         }
-        
-        // Send push notification
-        await NotificationManager.shared.sendTradeClosedNotification(trade)
+
+        // 2. Stop local monitoring immediately
+        activeTrades.removeValue(forKey: trade.id)
+
+        // GOD MODE FIX: Let the coordinator handle the final verified sync
+        godLog("🧹 Monitor: Stopped tracking \(trade.symbol). Waiting for broker verification.", level: .diagnostic)
     }
     
     private func calculatePnL(trade: TradeRecord, exitPrice: Double) -> Double {

@@ -330,49 +330,22 @@ actor ScalpingTradeMonitor {
     }
 
     private func closeTrade(_ trade: TradeRecord, exitPrice: Double, reason: String, indicators: IndicatorSet?) async {
-        var updatedTrade = trade
-        let pnl = calculatePnL(trade: trade, exitPrice: exitPrice)
-        let pnlPercent = (pnl / (trade.entryPrice * (trade.positionSize ?? 1000))) * 100
+        godLog("🎯 EXIT TRIGGER: \(trade.symbol) (\(reason)) @ \(exitPrice). Requesting MT5 closure...", level: .info)
 
-        updatedTrade.exitPrice = exitPrice
-        updatedTrade.exitTime = Date()
-        updatedTrade.pnl = pnl
-        updatedTrade.pnlPercent = pnlPercent
-        updatedTrade.status = .completed
+        // 1. Send closure command to MT5
+        if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
+            _ = try? await MT5Service.shared.closePosition(ticket: ticket)
+        }
 
-        // FIXED: Log exit details
-        let pips = abs(exitPrice - trade.entryPrice) / trade.entryPrice * 10000
-        let holdTime = Int(Date().timeIntervalSince(trade.entryTime) / 60)
-        print("""
-              📊 EXIT LOG | \(trade.symbol) | \(reason)
-                 Entry: \(trade.entryPrice) | Exit: \(exitPrice)
-                 Pips: \(String(format: "%.1f", pips)) | Hold: \(holdTime)m
-                 P&L: KES \(String(format: "%.2f", pnl))
-              """)
-
-        await tradeHistory.updateTrade(updatedTrade)
+        // 2. Stop local monitoring immediately
         activeTrades.removeValue(forKey: trade.id)
         tradeEntryIndicators.removeValue(forKey: trade.id)
         trailingStops.removeValue(forKey: trade.id)
 
-        await signalEngine.updateSignalQuality(
-            symbol: trade.symbol,
-            type: trade.type,
-            confidence: trade.confidence,
-            wasWin: pnl > 0
-        )
-
-        await onTradeClosed?(updatedTrade)
-        await postTradeClosedNotifications(updatedTrade)
-    }
-
-    private func postTradeClosedNotifications(_ trade: TradeRecord) async {
-        await MainActor.run {
-            NotificationCenter.default.post(name: .tradeUpdated, object: trade)
-            NotificationCenter.default.post(name: .tradeHistoryUpdated, object: nil)
-            print("📢 Posted scalping trade closed notifications for \(trade.symbol)")
-        }
-        await NotificationManager.shared.sendTradeClosedNotification(trade)
+        // GOD MODE FIX: We DO NOT update tradeHistory or notify closure here. 
+        // We let the RefactoredAppCoordinator.syncMT5Trades handle the final verified 
+        // reconciliation using real broker P&L.
+        godLog("🧹 Monitor: Stopped tracking \(trade.symbol). Waiting for broker verification.", level: .diagnostic)
     }
 
     private func calculatePnL(trade: TradeRecord, exitPrice: Double) -> Double {
@@ -396,7 +369,6 @@ actor ScalpingTradeMonitor {
         activeTrades.removeValue(forKey: id)
         tradeEntryIndicators.removeValue(forKey: id)
         trailingStops.removeValue(forKey: id)
-        print("🧹 Monitor: Removed trade \(id) from tracking")
     }
 
     func getTradeStatus(_ tradeId: UUID) -> (currentPrice: Double?, trailingStop: Double?)? {

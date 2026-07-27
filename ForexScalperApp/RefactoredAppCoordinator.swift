@@ -550,7 +550,7 @@ class RefactoredAppCoordinator: ObservableObject {
             let mt5Data = try await MT5Service.shared.getPositionsAndOrders()
             let internalActiveTrades = allInternalTrades.filter { $0.status == .active }
 
-            // ELITE RECONCILIATION: Close internal trades that are no longer in MT5 (Active OR Pending)
+            // ELITE RECONCILIATION: Safety check for trades no longer in MT5 positions
             for internalTrade in internalActiveTrades {
                 guard let dealId = internalTrade.externalDealId else { continue }
 
@@ -558,25 +558,9 @@ class RefactoredAppCoordinator: ObservableObject {
                 let stillPending = mt5Data.pending.contains { String($0.ticket) == dealId }
 
                 if !stillActive && !stillPending {
-                    // SAFETY DOUBLE-CHECK: Check MT5 history before marking as completed
-                    // This prevents momentary bridge lag from killing active trades locally.
-                    let history = (try? await MT5Service.shared.getTradeHistory(days: 1)) ?? []
-                    let inHistory = history.contains { String($0.ticket) == dealId || $0.comment?.contains(dealId) == true }
-                    
-                    if inHistory {
-                        godLog("🧹 Reconciliation: Internal trade \(internalTrade.symbol) #\(dealId) found in MT5 History. Marking as completed.", level: .info)
-                        var closedTrade = internalTrade
-                        closedTrade.status = .completed
-                        await tradeHistory.updateTrade(closedTrade)
-
-                        await scalpingTradeMonitor.removeTrade(id: internalTrade.id)
-                        await tradeMonitor.removeTrade(id: internalTrade.id)
-
-                        await scalpingRiskManager.closeTrade(closedTrade)
-                        await riskManager.closeTrade(closedTrade)
-                    } else {
-                        godLog("⚠️ Reconciliation Warning: Internal trade \(internalTrade.symbol) #\(dealId) missing from positions but NOT found in history. Assuming network lag and keeping active.", level: .warning)
-                    }
+                    // GOD MODE FIX: Do NOT mark as completed yet. 
+                    // Let the History Sync (below) handle the final closure with real P&L.
+                    godLog("🔍 Reconciliation: Trade #\(dealId) is missing from active list. Waiting for History Sync to confirm final result...", level: .info)
                 }
             }
 
@@ -649,9 +633,9 @@ class RefactoredAppCoordinator: ObservableObject {
 
                 // Find if we already have this trade
                 if let existingTrade = await tradeHistory.getTradeByExternalId(dealId) {
-                    // If it was previously active, update it with final P&L
+                    // If it was previously active, update it with final P&L and MARK AS COMPLETED
                     if existingTrade.status == .active || existingTrade.status == .pending || (existingTrade.pnl == nil) {
-                        print("📊 Updating closed MT5 trade: \(normalizedSymbol) P&L: \(pos.profit)")
+                        godLog("📊 Verifying closure for \(normalizedSymbol): P&L KES \(String(format: "%.2f", pos.profit)) (MT5 Verified)", level: .success)
                         var updatedTrade = existingTrade
                         updatedTrade.exitPrice = pos.close_price
                         updatedTrade.exitTime = parseMT5Time(pos.close_time) ?? Date()
@@ -659,11 +643,21 @@ class RefactoredAppCoordinator: ObservableObject {
                         updatedTrade.swap = pos.swap
                         updatedTrade.commission = pos.commission
                         updatedTrade.status = .completed
+                        
                         await tradeHistory.updateTrade(updatedTrade)
+                        
+                        // Cleanup monitors and risk
+                        await scalpingTradeMonitor.removeTrade(id: existingTrade.id)
+                        await tradeMonitor.removeTrade(id: existingTrade.id)
+                        await scalpingRiskManager.closeTrade(updatedTrade)
+                        await riskManager.closeTrade(updatedTrade)
+                        
+                        // ONLY NOW trigger the notification
+                        await handleTradeClosed(updatedTrade)
                     }
                 } else {
                     // It's a completely new historical trade we don't have
-                    print("📊 Syncing new historical MT5 trade: \(normalizedSymbol) P&L: \(pos.profit)")
+                    godLog("📊 Syncing external MT5 trade: \(normalizedSymbol) P&L: KES \(String(format: "%.2f", pos.profit))", level: .info)
 
                     let trade = TradeRecord(
                         signalId: UUID(),
@@ -1035,6 +1029,9 @@ class RefactoredAppCoordinator: ObservableObject {
         await updateRiskMetrics()
 
         godLog("📊 Trade closed: \(trade.symbol) P&L: KES \(String(format: "%.2f", trade.pnl ?? 0))", level: trade.isWin == true ? .success : .warning)
+        
+        // Notify user with verified P&L
+        NotificationManager.shared.sendTradeClosedNotification(trade)
     }
 
     func stop() async {
