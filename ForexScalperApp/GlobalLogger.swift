@@ -29,6 +29,12 @@ nonisolated func godLog(_ message: String, level: LogLevel = .info, file: String
     // Original print for console (stdout is thread-safe)
     print(fullMessage)
     
-    // Route to in-app console via notification (NotificationCenter is thread-safe)
-    NotificationCenter.default.post(name: .newLogEntry, object: LogEntry(message: fullMessage, level: level))
+    // Route to in-app console via notification
+    // We use NotificationCenter.default.post which is thread-safe.
+    // However, the Name we use must be nonisolated.
+    NotificationCenter.default.post(name: NSNotification.Name.newLogEntryInternal, object: LogEntry(message: fullMessage, level: level))
+}
+
+extension NSNotification.Name {
+    static let newLogEntryInternal = NSNotification.Name("newLogEntryInternal")
 }

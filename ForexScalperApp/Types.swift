@@ -611,39 +611,6 @@ extension Double {
         return (self * multiplier).rounded() / multiplier
     }
 }
-
-// MARK: - MT5 & IG Models
-struct MT5AccountInfo: Codable {
-    let login: Int
-    let balance, equity, margin, margin_free, profit: Double
-    let currency, server: String
-    
-    enum CodingKeys: String, CodingKey {
-        case login, balance, equity, margin, margin_free, profit, currency, server
-    }
-}
-
-struct MT5Position: Codable {
-    let ticket: Int64
-    let symbol, type: String
-    let volume, priceOpen, sl, tp, priceCurrent, profit: Double
-    let magic: Int64?
-    let comment: String?
-    let openTime: Int64?
-    
-    enum CodingKeys: String, CodingKey {
-        case ticket, symbol, type, volume, sl, tp, magic, comment, profit
-        case priceOpen = "price_open", priceCurrent = "price_current", openTime = "open_time"
-    }
-}
-
-struct MT5TradeResult: Codable {
-    let retcode: Int
-    let order, deal: Int64?
-    let volume, price, bid, ask: Double
-    let comment: String?
-}
-
 // MARK: - Notifications
 extension Notification.Name {
     static let newSignalGenerated = Notification.Name("newSignalGenerated")
