@@ -2,6 +2,7 @@
 import SwiftUI
 import Combine
 import UserNotifications
+import UniformTypeIdentifiers
 
 @MainActor
 class DashboardViewModel: ObservableObject {
