@@ -259,7 +259,9 @@ struct DashboardView: View {
             queue: .main
         ) { notification in
             if let signal = notification.object as? Signal {
-                handleNotificationAccept(signal)
+                Task { @MainActor in
+                    handleNotificationAccept(signal)
+                }
             }
         }
         NotificationCenter.default.addObserver(
@@ -268,7 +270,9 @@ struct DashboardView: View {
             queue: .main
         ) { notification in
             if let signal = notification.object as? Signal {
-                handleNotificationDeny(signal)
+                Task { @MainActor in
+                    handleNotificationDeny(signal)
+                }
             }
         }
         NotificationCenter.default.addObserver(
@@ -276,7 +280,9 @@ struct DashboardView: View {
             object: nil,
             queue: .main
         ) { _ in
-            selectedTab = 0
+            Task { @MainActor in
+                selectedTab = 0
+            }
         }
     }
     

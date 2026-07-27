@@ -1,7 +1,7 @@
 // IGTradingService.swift
 import Foundation
 
-class IGTradingService {
+actor IGTradingService {
     static let shared = IGTradingService()
     private let baseURL = "http://localhost:3000/api" // Your Node.js backend
     private var sessionId: String?

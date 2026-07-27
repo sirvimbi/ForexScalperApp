@@ -1,7 +1,7 @@
 // MT5Service.swift - MetaTrader 5 "God Mode" Integration
 import Foundation
 
-class MT5Service {
+actor MT5Service {
     static let shared = MT5Service()
     
     // PRODUCTION NETWORK OPTIMIZATION: Reuse session to prevent nw_path evaluation errors

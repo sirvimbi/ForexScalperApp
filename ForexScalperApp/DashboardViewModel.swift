@@ -549,10 +549,10 @@ class DashboardViewModel: ObservableObject {
     
     func disconnectFromIG() async {
         // Implement disconnect logic
+        await IGTradingService.shared.clearSession()
         await MainActor.run {
             igConnected = false
             isConnecting = false
-            IGTradingService.shared.clearSession()
         }
     }
 
@@ -593,8 +593,8 @@ class DashboardViewModel: ObservableObject {
         }
         
         do {
-            MT5Service.shared.setBaseURL(mt5BridgeURL)
-            MT5Service.shared.setAuthToken(mt5AuthToken)
+            await MT5Service.shared.setBaseURL(mt5BridgeURL)
+            await MT5Service.shared.setAuthToken(mt5AuthToken)
             
             let connected = try await MT5Service.shared.checkConnection()
             

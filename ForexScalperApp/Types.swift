@@ -604,33 +604,6 @@ struct RiskMetrics: Sendable {
     let consecutiveLosses: [String: Int]
 }
 
-// MARK: - God Mode Logging
-enum LogLevel: String, Sendable {
-    case info = "ℹ️"
-    case success = "✅"
-    case warning = "⚠️"
-    case error = "❌"
-    case diagnostic = "🔍"
-    case trade = "📊"
-}
-
-func godLog(_ message: String, level: LogLevel = .info, file: String = #file, line: Int = #line) {
-    let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-    let fileName = (file as NSString).lastPathComponent
-    let fullMessage = "[\(timestamp)] \(level.rawValue) \(fileName):\(line) - \(message)"
-    
-    // Original print for console
-    print(fullMessage)
-    
-    // Route to in-app console via notification to decouple from MainActor timing
-    NotificationCenter.default.post(name: .newLogEntry, object: LogEntry(message: fullMessage, level: level))
-}
-
-struct LogEntry: Sendable {
-    let message: String
-    let level: LogLevel
-}
-
 // MARK: - Extensions
 extension Double {
     func rounded(to places: Int) -> Double {

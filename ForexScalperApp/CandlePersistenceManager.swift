@@ -1,7 +1,7 @@
 import Foundation
 
 actor CandlePersistenceManager {
-    static let shared = CandlePersistenceManager()
+    nonisolated static let shared = CandlePersistenceManager()
     
     private let fileManager = FileManager.default
     private let baseDirectory: URL
