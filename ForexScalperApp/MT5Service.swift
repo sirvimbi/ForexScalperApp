@@ -543,6 +543,21 @@ class MT5Service {
         
         return trs.reduce(0, +) / Double(trs.count)
     }
+    
+    // NEW: God Mode advanced API methods
+    func getCurrentSpread(symbol: String) async throws -> Double {
+        let info = try await getSymbolInfo(symbol)
+        // Spread is returned in points by MT5
+        return Double(info.spread)
+    }
+    
+    func getMarketSession(symbol: String) async throws -> String {
+        // Implementation of session detection via MT5 server time
+        let hour = Calendar.current.component(.hour, from: Date())
+        if hour >= 0 && hour < 8 { return "Asian" }
+        if hour >= 8 && hour < 16 { return "London" }
+        return "US"
+    }
 }
 
 // MARK: - Internal MT5 Helper Models

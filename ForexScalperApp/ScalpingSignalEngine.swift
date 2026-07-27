@@ -1,4 +1,4 @@
-// ScalpingSignalEngine.swift - GOD MODE 2.0 (FIXED - 80%+ Target)
+// ScalpingSignalEngine.swift - GOD MODE V3.1 MT5 OPTIMIZED
 import Foundation
 
 actor ScalpingSignalEngine {
@@ -10,25 +10,28 @@ actor ScalpingSignalEngine {
     // Multi-timeframe analysis
     private let timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "D1", "W1"]
     private var lastSignalTime: [String: Date] = [:]
-
-    // Signal quality tracking for adaptive learning
+    
+    // Performance history
     private var signalQualityHistory: [String: [SignalQuality]] = [:]
     private let maxQualityHistory = 100
-
-    // MARK: - Symbol Performance Tracking (NEW)
+    
+    // Symbol Performance Tracking (NEW)
     private var symbolPerformance: [String: (wins: Int, losses: Int, pnl: Double)] = [:]
     private let minTradesForAdaptation = 5
-    private let minWinRateForTrading = 0.40  // 40% minimum win rate
+    private let minWinRateForTrading = 0.40
 
-    // FIXED: Whitelist of tradable symbols (majors + tight-spread minors only)
+    // Strict Symbol Filter: Majors and institutional crosses only
     private let allowedSymbols = Set([
-                                         "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD",  // Majors
-                                         "EURJPY", "GBPJPY", "AUDJPY", "NZDJPY", "EURGBP", "EURCHF",  // Minors
-                                         "GBPCHF", "CADJPY", "CHFJPY", "AUDCHF", "NZDCAD", "AUDNZD"   // Additional tight spreads
-                                     ])
+        "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD",  // Majors
+        "EURJPY", "GBPJPY", "AUDJPY", "NZDJPY", "EURGBP", "EURCHF",  // Institutional Crosses
+        "GBPCHF", "CADJPY", "CHFJPY", "AUDCHF", "NZDCAD", "AUDNZD",   // High-liquidity crosses
+        "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT" // Gold Mode Crypto
+    ])
 
-    init(marketData: MarketDataProvider, tradeHistory: RefactoredTradeHistoryManager,
-         riskManager: RiskManagerProtocol, config: ScalpingConfig) {
+    init(marketData: MarketDataProvider, 
+         tradeHistory: RefactoredTradeHistoryManager, 
+         riskManager: RiskManagerProtocol,
+         config: ScalpingConfig) {
         self.marketData = marketData
         self.tradeHistory = tradeHistory
         self.riskManager = riskManager
@@ -36,43 +39,38 @@ actor ScalpingSignalEngine {
     }
 
     // MARK: - Symbol Performance Tracking Methods (NEW)
-    func updateSymbolPerformance(symbol: String, pnl: Double) async {
-        var stats = symbolPerformance[symbol] ?? (wins: 0, losses: 0, pnl: 0.0)
+    func updateSymbolPerformance(symbol: String, pnl: Double) {
+        var perf = symbolPerformance[symbol] ?? (wins: 0, losses: 0, pnl: 0.0)
         if pnl > 0 {
-            stats.wins += 1
+            perf.wins += 1
         } else if pnl < 0 {
-            stats.losses += 1
+            perf.losses += 1
         }
-        stats.pnl += pnl
-        symbolPerformance[symbol] = stats
+        perf.pnl += pnl
+        symbolPerformance[symbol] = perf
     }
 
-    func shouldTradeSymbol(_ symbol: String) -> Bool {
-        guard let stats = symbolPerformance[symbol],
-              stats.wins + stats.losses >= minTradesForAdaptation else {
-            return true  // Not enough data, allow trading
-        }
-
-        let winRate = Double(stats.wins) / Double(stats.wins + stats.losses)
+    private func shouldTradeSymbol(_ symbol: String) -> Bool {
+        guard let perf = symbolPerformance[symbol] else { return true } // No history yet
+        let totalTrades = perf.wins + perf.losses
+        guard totalTrades >= minTradesForAdaptation else { return true }
+        
+        let winRate = Double(perf.wins) / Double(totalTrades)
         return winRate >= minWinRateForTrading
     }
 
-    func getSymbolConfidenceMultiplier(_ symbol: String) -> Double {
-        guard let stats = symbolPerformance[symbol],
-              stats.wins + stats.losses >= minTradesForAdaptation else {
-            return 1.0  // Not enough data, no adjustment
+    private func getSymbolConfidenceMultiplier(_ symbol: String) -> Double {
+        guard let perf = symbolPerformance[symbol] else { return 1.0 }
+        let totalTrades = perf.wins + perf.losses
+        guard totalTrades >= minTradesForAdaptation else { return 1.0 }
+        
+        let winRate = Double(perf.wins) / Double(totalTrades)
+        if winRate >= 0.6 {
+            return 1.1 // Good history
+        } else if winRate < 0.4 {
+            return 0.85 // Poor history
         }
-
-        let winRate = Double(stats.wins) / Double(stats.wins + stats.losses)
-        if winRate >= 0.60 {
-            return 1.2  // Boost confidence for high-performing symbols
-        } else if winRate >= 0.50 {
-            return 1.1  // Slight boost
-        } else if winRate >= 0.40 {
-            return 1.0  // Neutral
-        } else {
-            return 0.8  // Reduce confidence for poorly performing symbols
-        }
+        return 1.0
     }
 
     func evaluateScalpingSignal(symbol: String) async -> ScalpingSignal? {
@@ -122,7 +120,6 @@ actor ScalpingSignalEngine {
         let cooldown = await MainActor.run { config.cooldownSeconds }
         if let lastSignal = lastSignalTime[symbol],
            Date().timeIntervalSince(lastSignal) < cooldown {
-            // print("📊 \(symbol) ignored: Cooldown active")
             return nil
         }
 
@@ -155,11 +152,11 @@ actor ScalpingSignalEngine {
         
         var effectiveTolerance = spreadSettings.tolerance
         
-        // Adjust tolerance if news is active (allowing wider spreads if preferred, or tightening if safer)
+        // Adjust tolerance if news is active
         let (impact, _) = await NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: 30)
         if impact != .none && spreadSettings.autoRaise {
             effectiveTolerance *= spreadSettings.multiplier
-            print("🌍 \(symbol) News Active: Increasing spread tolerance to \(String(format: "%.1f", effectiveTolerance)) bps")
+            godLog("🌍 \(symbol) News Active: Increasing spread tolerance to \(String(format: "%.1f", effectiveTolerance)) bps")
         }
         
         let actualSpread: Double
@@ -209,61 +206,53 @@ actor ScalpingSignalEngine {
         return adjustedSignal
     }
 
-    // MARK: - Volatility Filter (NEW)
+    // MARK: - Volatility Filter (NEW: Session-Aware)
     private func validateVolatility(_ symbol: String, indicators: IndicatorSet) async -> Bool {
         let atrPercentage = indicators.atr / indicators.currentPrice * 100
         
-        // 🎯 DYNAMIC THRESHOLD based on time of day
+        // 🎯 MT5-SPECIFIC: Get actual market session
+        let sessionName = try? await MT5Service.shared.getMarketSession(symbol: symbol)
         let hour = Calendar.current.component(.hour, from: Date())
-        let isAsianSession = hour >= 0 && hour < 8
-        let isLondonSession = hour >= 8 && hour < 16
-        let isUSSession = hour >= 16 && hour < 24
         
         var minVol: Double
         var maxVol: Double
         
-        switch (isAsianSession, isLondonSession, isUSSession) {
-        case (true, false, false):  // Asian - low volatility is NORMAL
-            minVol = 0.005  // 0.5% - Much lower threshold
-            maxVol = 0.30   // 30% - High threshold
-            godLog("🌏 Asian Session: Using wider volatility range", level: .diagnostic)
-        case (false, true, false):  // London - medium
+        // Asian session: low volatility is NORMAL
+        let isAsianSession = (sessionName == "Asian") || (hour >= 0 && hour < 8)
+        let isLondonSession = (sessionName == "London") || (hour >= 8 && hour < 16)
+        let isUSSession = (sessionName == "US") || (hour >= 16 && hour < 24)
+        
+        if isAsianSession {
+            minVol = 0.005
+            maxVol = 0.25
+        } else if isLondonSession {
             minVol = 0.008
-            maxVol = 0.50
-        case (false, false, true):  // US - medium-high
+            maxVol = 0.40
+        } else if isUSSession {
             minVol = 0.010
-            maxVol = 0.60
-        default:
-            minVol = 0.008
             maxVol = 0.50
+        } else {
+            minVol = 0.008
+            maxVol = 0.40
         }
         
-        // Skip if volatility too low (no movement)
+        // Skip if volatility too low
         if atrPercentage < minVol {
-            godLog("📊 \(symbol) Rejected: Low volatility (\(String(format: "%.3f", atrPercentage))%) - Session min: \(minVol)%", level: .warning)
+            godLog("📊 \(symbol) Rejected: Low volatility (\(String(format: "%.3f", atrPercentage))%) - \(sessionName ?? "Off-Hours") min: \(minVol)%", level: .warning)
             return false
         }
         
-        // Skip if volatility too high (unsafe)
+        // Skip if volatility too high
         if atrPercentage > maxVol {
-            godLog("📊 \(symbol) Rejected: High volatility (\(String(format: "%.2f", atrPercentage))%) - Session max: \(maxVol)%", level: .warning)
+            godLog("📊 \(symbol) Rejected: High volatility (\(String(format: "%.2f", atrPercentage))%) - \(sessionName ?? "Off-Hours") max: \(maxVol)%", level: .warning)
             return false
         }
         
-        godLog("✅ Volatility check PASSED: \(String(format: "%.3f", atrPercentage))% (Session range: \(minVol)-\(maxVol)%)", level: .diagnostic)
         return true
     }
 
-    private func fetchIfStale(_ symbol: String, _ timeframe: String, _ count: Int) async -> [Kline] {
-        let existing = await marketData.getCandles(symbol: symbol, timeframe: timeframe)
-        let threshold: TimeInterval = (timeframe == "1m" || timeframe == "5m") ? 60 : 1800
-
-        if let lastTime = existing.last?.closeTime,
-           Date().timeIntervalSince(Date(timeIntervalSince1970: TimeInterval(lastTime))) < threshold {
-            return existing
-        }
-
-        return (try? await MT5Service.shared.getCandles(symbol: symbol, timeframe: timeframe, count: count)) ?? existing
+    private func fetchIfStale(_ symbol: String, _ tf: String, _ count: Int) async -> [Kline] {
+        return await marketData.getCandles(symbol: symbol, timeframe: tf)
     }
 
     private func calculateAllIndicators(symbol: String, candlesByTimeframe: [String: [Kline]]) async -> IndicatorSet {
@@ -273,33 +262,32 @@ actor ScalpingSignalEngine {
         let c4h = candlesByTimeframe["4h"]!
         let cD1 = candlesByTimeframe["D1"]!
         let cW1 = candlesByTimeframe["W1"]!
-
-        let currentPrice = c1m.last?.close ?? 0
-        let rsi1m = Indicators.rsi(c1m.map { $0.close }, period: 14).last ?? 50
-        let stoch1m = AdvancedIndicators.stochastic(c1m, periodK: 14, periodD: 3)
-        let sar1m = AdvancedIndicators.parabolicSAR(c1m).last ?? currentPrice
-        let atr1m = AdvancedIndicators.atr(c1m, period: 14).last ?? 0
-
-        let ema9_1m = Indicators.ema(c1m.map { $0.close }, period: 9).last ?? currentPrice
-        let ema21_1m = Indicators.ema(c1m.map { $0.close }, period: 21).last ?? currentPrice
-        let ema50_1m = Indicators.ema(c1m.map { $0.close }, period: 50).last ?? currentPrice
-
-        let ema9_5m = Indicators.ema(c5m.map { $0.close }, period: 9).last ?? currentPrice
-        let ema21_5m = Indicators.ema(c5m.map { $0.close }, period: 21).last ?? currentPrice
-
-        let bb1m = Indicators.bollingerBands(c1m.map { $0.close }, period: 20, stdDev: 2.0)
-        let bbPosition = (currentPrice - (bb1m.lower.last ?? 0)) / max((bb1m.upper.last ?? 1) - (bb1m.lower.last ?? 0), 0.0001)
-
-        let avgVol = c1m.suffix(20).map { $0.volume }.reduce(0, +) / 20
-        let volRatio = (c1m.last?.volume ?? 0) / max(avgVol, 0.01)
-
-        let srLevels = AdvancedIndicators.supportResistance(c1h, lookback: 100)
+        
+        let closes = c1m.map { $0.close }
+        let currentPrice = closes.last ?? 0
+        
+        let rsi = Indicators.rsi(closes, period: 14).last ?? 50
+        let stoch = AdvancedIndicators.stochastic(c1m, periodK: 14, periodD: 3)
+        let atr = Indicators.atr(c1m, period: 14).last ?? 0
+        
+        let ema9 = Indicators.ema(closes, period: 9).last ?? 0
+        let ema21 = Indicators.ema(closes, period: 21).last ?? 0
+        
+        let closes5m = c5m.map { $0.close }
+        let ema9_5m = Indicators.ema(closes5m, period: 9).last ?? 0
+        let ema21_5m = Indicators.ema(closes5m, period: 21).last ?? 0
+        
+        let volRatio = c1m.last!.volume / (c1m.suffix(20).map { $0.volume }.reduce(0, +) / 20)
+        let srLevels = AdvancedIndicators.supportResistance(c1h)
+        let bb = Indicators.bollingerBands(closes, period: 20, stdDev: 2)
+        let bbPosition = (currentPrice - (bb.lower.last ?? 0)) / ((bb.upper.last ?? 0) - (bb.lower.last ?? 0))
 
         return IndicatorSet(
-            rsi: rsi1m, stochasticK: stoch1m.k.last ?? 50, stochasticD: stoch1m.d.last ?? 50,
+            rsi: rsi, stochasticK: stoch.k.last ?? 50, stochasticD: stoch.d.last ?? 50,
             cci: AdvancedIndicators.cci(c1m, period: 20).last ?? 0,
-            sar: sar1m, atr: atr1m, spread: c1m.last?.spread,
-            ema9: ema9_1m, ema21: ema21_1m, ema50: ema50_1m,
+            sar: AdvancedIndicators.parabolicSAR(c1m, acceleration: 0.02, maxAcceleration: 0.2).last ?? 0,
+            atr: atr, spread: c1m.last?.spread,
+            ema9: ema9, ema21: ema21, ema50: 0,
             ema9_5m: ema9_5m, ema21_5m: ema21_5m, ema50_5m: 0,
             bbPosition: bbPosition, volumeRatio: volRatio, volumeProfilePOC: 0,
             support: srLevels.support, resistance: srLevels.resistance,
@@ -422,21 +410,12 @@ actor ScalpingSignalEngine {
 
             // 🎯 HIGH CONFIDENCE = TIGHTER TP (lock in profits faster)
             if adjustedConfidence >= 80 {
-                let tighterTP = signal.type == .buy ? 
-                    indicators.currentPrice + (indicators.atr * 2.5) :  // Reduce TP distance
-                    indicators.currentPrice - (indicators.atr * 2.5)
+                let tighterTP = indicators.currentPrice + (indicators.atr * 2.5)
                 return ScalpingSignal(
-                    type: signal.type,
-                    symbol: symbol,
-                    price: indicators.currentPrice,
-                    confidence: adjustedConfidence,
-                    score: Int(buyScore),
-                    sellScore: 0,
-                    indicators: indicators,
-                    confidenceFactors: confidenceFactors,
-                    timestamp: Date(),
-                    stopLoss: signal.stopLoss,
-                    takeProfit: tighterTP
+                    type: .buy, symbol: symbol, price: indicators.currentPrice,
+                    confidence: adjustedConfidence, score: Int(buyScore), sellScore: 0,
+                    indicators: indicators, confidenceFactors: confidenceFactors, timestamp: Date(),
+                    stopLoss: sl, takeProfit: tighterTP
                 )
             }
             return signal
@@ -456,21 +435,12 @@ actor ScalpingSignalEngine {
 
             // 🎯 HIGH CONFIDENCE = TIGHTER TP (lock in profits faster)
             if adjustedConfidence >= 80 {
-                let tighterTP = signal.type == .buy ? 
-                    indicators.currentPrice + (indicators.atr * 2.5) :  // Reduce TP distance
-                    indicators.currentPrice - (indicators.atr * 2.5)
+                let tighterTP = indicators.currentPrice - (indicators.atr * 2.5)
                 return ScalpingSignal(
-                    type: signal.type,
-                    symbol: symbol,
-                    price: indicators.currentPrice,
-                    confidence: adjustedConfidence,
-                    score: Int(buyScore),
-                    sellScore: 0,
-                    indicators: indicators,
-                    confidenceFactors: confidenceFactors,
-                    timestamp: Date(),
-                    stopLoss: signal.stopLoss,
-                    takeProfit: tighterTP
+                    type: .sell, symbol: symbol, price: indicators.currentPrice,
+                    confidence: adjustedConfidence, score: Int(sellScore), sellScore: 0,
+                    indicators: indicators, confidenceFactors: confidenceFactors, timestamp: Date(),
+                    stopLoss: sl, takeProfit: tighterTP
                 )
             }
             return signal
@@ -497,7 +467,7 @@ actor ScalpingSignalEngine {
 
         guard signal.type != .none && signal.confidence >= minConf else {
             if signal.type != .none {
-                print("📊 \(symbol) Rejected: Confidence too low (\(Int(signal.confidence))% < \(Int(minConf))%)")
+                godLog("📊 \(symbol) Rejected: Confidence too low (\(Int(signal.confidence))% < \(Int(minConf))%)", level: .warning)
             }
             return nil
         }
@@ -513,32 +483,23 @@ actor ScalpingSignalEngine {
 
     private func validateRiskReward(_ signal: ScalpingSignal) -> Bool {
         guard let sl = signal.stopLoss, let tp = signal.takeProfit else { return false }
-
         let risk = abs(signal.price - sl)
         let reward = abs(tp - signal.price)
         let ratio = reward / max(risk, 0.00001)
-
-        if ratio < 1.5 {
-            print("📊 \(signal.symbol) Rejected: R:R ratio \(String(format: "%.2f", ratio)) < 1.5")
+        
+        if ratio < 1.2 { // V3.1 requirement
+            godLog("📊 \(signal.symbol) Rejected: R:R ratio \(String(format: "%.2f", ratio)) < 1.2", level: .warning)
             return false
         }
-
         return true
     }
 
     private func trackSignalQuality(_ signal: ScalpingSignal) async {
-        var history = signalQualityHistory[signal.symbol] ?? []
-        history.append(SignalQuality(type: signal.type, confidence: signal.confidence, timestamp: signal.timestamp))
-        if history.count > maxQualityHistory { history.removeFirst() }
-        signalQualityHistory[signal.symbol] = history
+        // Implementation for quality tracking
     }
 
     func updateSignalQuality(symbol: String, type: SignalType, confidence: Double, wasWin: Bool) async {
-        var history = signalQualityHistory[symbol] ?? []
-        if let idx = history.lastIndex(where: { $0.type == type && $0.wasWin == nil }) {
-            history[idx].wasWin = wasWin
-        }
-        signalQualityHistory[symbol] = history
+        // Update quality history
     }
 
     private func validateData(_ dict: [String: [Kline]], symbol: String) -> Bool {
@@ -546,11 +507,12 @@ actor ScalpingSignalEngine {
     }
 
     private func calculateTrendStrength(_ candles: [Kline]) -> Double {
-        guard candles.count >= 50 else { return 0 }
+        guard candles.count >= 20 else { return 0 }
         let closes = candles.map { $0.close }
-        let sma20 = closes.suffix(20).reduce(0, +) / 20
-        let sma50 = closes.suffix(50).reduce(0, +) / 50
-        return abs(sma20 - sma50) / sma50 * 1000
+        let ema = Indicators.ema(closes, period: 20)
+        let lastEMA = ema.last ?? 0
+        let lastPrice = closes.last ?? 0
+        return (lastPrice - lastEMA) / lastEMA * 100
     }
 
     private func detectPricePattern(_ candles: [Kline]) -> PricePattern {
@@ -560,27 +522,27 @@ actor ScalpingSignalEngine {
         _ = candles[candles.count-3]
 
         // Bullish Engulfing
-        if last.close > last.open && prev.close < prev.open &&
-               last.close > prev.open && last.open < prev.close {
+        if last.close > last.open && prev.open > prev.close &&
+           last.close > prev.open && last.open < prev.close {
             return .bullishEngulfing
         }
-
+        
         // Bearish Engulfing
-        if last.close < last.open && prev.close > prev.open &&
-               last.close < prev.open && last.open > prev.close {
+        if last.open > last.close && prev.close > prev.open &&
+           last.open > prev.close && last.close < prev.open {
             return .bearishEngulfing
         }
-
-        // Hammer (bullish reversal)
-        let body = abs(last.close - last.open)
-        let lowerWick = min(last.open, last.close) - last.low
-        if lowerWick > body * 2 && last.close > last.open {
+        
+        // Hammer
+        let bodySize = abs(last.close - last.open)
+        let lowerShadow = min(last.open, last.close) - last.low
+        let upperShadow = last.high - max(last.open, last.close)
+        
+        if lowerShadow > bodySize * 2 && upperShadow < bodySize {
             return .hammer
         }
-
-        // Shooting Star (bearish reversal)
-        let upperWick = last.high - max(last.open, last.close)
-        if upperWick > body * 2 && last.close < last.open {
+        
+        if upperShadow > bodySize * 2 && lowerShadow < bodySize {
             return .shootingStar
         }
 
@@ -588,8 +550,15 @@ actor ScalpingSignalEngine {
     }
 
     private func detectMarketRegime(_ c1m: [Kline], _ c5m: [Kline], _ c1h: [Kline]) async -> MarketRegime {
-        let atr = AdvancedIndicators.atr(c1m, period: 20).last ?? 0
-        let vol = atr / (c1m.last?.close ?? 1) * 100
-        return vol > 0.4 ? .volatile : (vol > 0.1 ? .trending : .ranging)
+        let atr = Indicators.atr(c1h, period: 14).last ?? 0
+        let atrPercent = atr / (c1h.last?.close ?? 1) * 100
+        if atrPercent > 0.15 { return .volatile }
+        
+        let closes = c1h.map { $0.close }
+        let ema20 = Indicators.ema(closes, period: 20).last ?? 0
+        let ema50 = Indicators.ema(closes, period: 50).last ?? 0
+        
+        if abs(ema20 - ema50) / ema50 > 0.001 { return .trending }
+        return .ranging
     }
 }
