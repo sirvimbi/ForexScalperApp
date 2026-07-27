@@ -100,6 +100,24 @@ actor ScalpingSignalEngine {
             return nil
         }
 
+        // 4.1 NEWS FILTER (NEW: God Mode Autonomous News Protection)
+        let newsCheck = await MainActor.run {
+            (enabled: config.enableNewsFilter, highMin: config.pauseBeforeHighImpactMinutes, medMin: config.pauseBeforeMediumImpactMinutes)
+        }
+        
+        if newsCheck.enabled {
+            let (impact, event) = NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: Int(max(newsCheck.highMin, newsCheck.medMin)))
+            
+            if impact == .high {
+                print("🌍 \(symbol) PAUSED: High Impact News Incoming - \(event ?? "Unknown Event")")
+                return nil
+            } else if impact == .medium && newsCheck.medMin > 0 {
+                // For medium, we could also pause or just log
+                print("🌍 \(symbol) CAUTION: Medium Impact News Incoming - \(event ?? "Unknown Event")")
+                // Optional: Decide whether to pause or just proceed with higher caution
+            }
+        }
+
         // 5. COOLDOWN CHECK
         let cooldown = await MainActor.run { config.cooldownSeconds }
         if let lastSignal = lastSignalTime[symbol],
@@ -131,7 +149,18 @@ actor ScalpingSignalEngine {
         let indicators = await calculateAllIndicators(symbol: symbol, candlesByTimeframe: candlesByTimeframe)
 
         // 8. SPREAD GUARD (DYNAMIC)
-        let tolerance = await MainActor.run { config.spreadTolerance }
+        let spreadSettings = await MainActor.run { 
+            (tolerance: config.spreadTolerance, autoRaise: config.autoRaiseSpreadDuringNews, multiplier: config.newsSpreadMultiplier)
+        }
+        
+        var effectiveTolerance = spreadSettings.tolerance
+        
+        // Adjust tolerance if news is active (allowing wider spreads if preferred, or tightening if safer)
+        let (impact, _) = NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: 30)
+        if impact != .none && spreadSettings.autoRaise {
+            effectiveTolerance *= spreadSettings.multiplier
+            print("🌍 \(symbol) News Active: Increasing spread tolerance to \(String(format: "%.1f", effectiveTolerance)) bps")
+        }
         
         let actualSpread: Double
         if let s = indicators.spread {
@@ -141,8 +170,8 @@ actor ScalpingSignalEngine {
             actualSpread = (indicators.atr / indicators.currentPrice) * 10000
         }
         
-        if actualSpread > tolerance {
-            print("📊 \(symbol) Rejected: Spread too high (\(String(format: "%.1f", actualSpread)) bps) - Limit: \(tolerance) bps")
+        if actualSpread > effectiveTolerance {
+            print("📊 \(symbol) Rejected: Spread too high (\(String(format: "%.1f", actualSpread)) bps) - Limit: \(effectiveTolerance) bps")
             return nil
         }
 
@@ -342,7 +371,8 @@ actor ScalpingSignalEngine {
         }
 
         // 6. VOLUME SURGE
-        let hasVolume = indicators.volumeRatio > 1.3
+        let minVolRatio = await MainActor.run { config.minVolumeRatio }
+        let hasVolume = indicators.volumeRatio > minVolRatio
         if hasVolume {
             activePillarsBuy += 1; activePillarsSell += 1
             buyScore += weights.vol; sellScore += weights.vol
@@ -384,7 +414,7 @@ actor ScalpingSignalEngine {
         let side = buyScore > sellScore ? "BUY" : "SELL"
         
         if !hasVolume {
-            print("📊 \(symbol) Rejected: No Institutional Volume (Ratio: \(String(format: "%.1f", indicators.volumeRatio))x < 1.3x)")
+            print("📊 \(symbol) Rejected: No Institutional Volume (Ratio: \(String(format: "%.1f", indicators.volumeRatio))x < \(String(format: "%.1f", minVolRatio))x)")
         } else if finalScore < minReqScore || currentPillars < minPillars {
             print("📊 \(symbol) Pillar Check: \(currentPillars)/\(minPillars) Pillars aligned (\(side)). Score: \(Int(finalScore))/\(Int(minReqScore))")
         }

@@ -86,6 +86,34 @@ enum SignalStatus: String, Codable {
     case completed
 }
 
+// MARK: - News Models
+enum NewsImpact: String, Codable, Sendable, CaseIterable {
+    case high = "High"
+    case medium = "Medium"
+    case low = "Low"
+    case none = "None"
+    
+    var color: Color {
+        switch self {
+        case .high: return .red
+        case .medium: return .orange
+        case .low: return .yellow
+        case .none: return .gray
+        }
+    }
+}
+
+struct NewsEvent: Identifiable, Codable, Sendable {
+    var id: String { "\(title)_\(time.timeIntervalSince1970)" }
+    let title: String
+    let currency: String
+    let impact: NewsImpact
+    let time: Date
+    let actual: String?
+    let forecast: String?
+    let previous: String?
+}
+
 // MARK: - MT5 Execution Types
 enum MT5OrderType: String, Codable, Sendable {
     case buy = "BUY"

@@ -38,6 +38,14 @@ class ScalpingConfig: ObservableObject {
     @Published var minConfluencePillars: Int = 5 { didSet { saveConfig() } }
 
     @Published var minVolatilityATR: Double = 0.05 { didSet { saveConfig() } }
+    @Published var minVolumeRatio: Double = 1.3 { didSet { saveConfig() } }
+
+    // News Filter settings (NEW)
+    @Published var enableNewsFilter: Bool = true { didSet { saveConfig() } }
+    @Published var pauseBeforeHighImpactMinutes: Double = 60.0 { didSet { saveConfig() } }
+    @Published var pauseBeforeMediumImpactMinutes: Double = 30.0 { didSet { saveConfig() } }
+    @Published var autoRaiseSpreadDuringNews: Bool = true { didSet { saveConfig() } }
+    @Published var newsSpreadMultiplier: Double = 3.0 { didSet { saveConfig() } }
 
     // Broker Suffix (e.g. 'm' for Exness Real)
     @Published var brokerSuffix: String = "m" { didSet { saveConfig() } }
@@ -102,6 +110,12 @@ class ScalpingConfig: ObservableObject {
             useManualLot: useManualLot, manualLotSize: manualLotSize,
             symbolConfidenceThresholds: symbolConfidenceThresholds,
             minVolatilityATR: minVolatilityATR,
+            minVolumeRatio: minVolumeRatio,
+            enableNewsFilter: enableNewsFilter,
+            pauseBeforeHighImpactMinutes: pauseBeforeHighImpactMinutes,
+            pauseBeforeMediumImpactMinutes: pauseBeforeMediumImpactMinutes,
+            autoRaiseSpreadDuringNews: autoRaiseSpreadDuringNews,
+            newsSpreadMultiplier: newsSpreadMultiplier,
             brokerSuffix: brokerSuffix
         )
         do {
@@ -142,6 +156,12 @@ class ScalpingConfig: ObservableObject {
             self.useManualLot = config.useManualLot ?? false
             self.manualLotSize = config.manualLotSize ?? 0.01
             self.minVolatilityATR = config.minVolatilityATR ?? 0.05
+            self.minVolumeRatio = config.minVolumeRatio ?? 1.3
+            self.enableNewsFilter = config.enableNewsFilter ?? true
+            self.pauseBeforeHighImpactMinutes = config.pauseBeforeHighImpactMinutes ?? 60.0
+            self.pauseBeforeMediumImpactMinutes = config.pauseBeforeMediumImpactMinutes ?? 30.0
+            self.autoRaiseSpreadDuringNews = config.autoRaiseSpreadDuringNews ?? true
+            self.newsSpreadMultiplier = config.newsSpreadMultiplier ?? 3.0
             self.brokerSuffix = config.brokerSuffix ?? "m"
             self.symbolConfidenceThresholds = config.symbolConfidenceThresholds ?? [
                 "EURUSD": 80.0,
@@ -189,6 +209,12 @@ class ScalpingConfig: ObservableObject {
         let manualLotSize: Double?
         let symbolConfidenceThresholds: [String: Double]?
         let minVolatilityATR: Double?
+        let minVolumeRatio: Double?
+        let enableNewsFilter: Bool?
+        let pauseBeforeHighImpactMinutes: Double?
+        let pauseBeforeMediumImpactMinutes: Double?
+        let autoRaiseSpreadDuringNews: Bool?
+        let newsSpreadMultiplier: Double?
         let brokerSuffix: String?
     }
 }

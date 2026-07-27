@@ -190,6 +190,7 @@ struct DashboardView: View {
     @State private var selectedTrade: TradeRecord?
     
     @StateObject private var notificationManager = NotificationManager.shared
+    @StateObject private var newsService = NewsService.shared
     @State private var isNotificationBannerDismissed = false
     
     private let tabs     = ["Signals", "History", "Performance", "Settings"]
@@ -437,6 +438,55 @@ struct DashboardView: View {
     #endif
     
     // MARK: - Live Signals
+    // MARK: - News Ticker
+    var newsTicker: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "globe.americas.fill")
+                .foregroundColor(.accentGold)
+                .font(.system(size: 12))
+            
+            if newsService.isFetching && newsService.upcomingEvents.isEmpty {
+                Text("LOADING CALENDAR...")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(.textMuted)
+            } else if let nextEvent = newsService.upcomingEvents.first(where: { $0.time > Date() }) {
+                HStack(spacing: 6) {
+                    TagBadge(text: nextEvent.currency, color: .white.opacity(0.8))
+                    Text(nextEvent.title.uppercased())
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.textPrimary)
+                        .lineLimit(1)
+                    
+                    Text(formatNewsTime(nextEvent.time))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.accentGold)
+                    
+                    TagBadge(text: nextEvent.impact.rawValue, color: nextEvent.impact.color)
+                }
+            } else {
+                Text("NO UPCOMING HIGH IMPACT NEWS")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(.textMuted)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.2))
+        .cornerRadius(6)
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.05), lineWidth: 1))
+    }
+    
+    private func formatNewsTime(_ date: Date) -> String {
+        let diff = date.timeIntervalSinceNow
+        if diff < 3600 {
+            return "in \(Int(diff/60))m"
+        } else {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            return "at \(formatter.string(from: date))"
+        }
+    }
+
     var liveSignalsView: some View {
         VStack(spacing: 0) {
             #if os(macOS)
@@ -445,6 +495,10 @@ struct DashboardView: View {
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                     .foregroundColor(.accentCyan)
                     .tracking(2)
+                
+                Spacer()
+                
+                newsTicker
                 
                 Spacer()
                 
@@ -1800,6 +1854,18 @@ struct DashboardView: View {
                                     }
                                     .help("Minimum ATR % required to consider a trade. Set lower for more signals in quiet markets.")
 
+                                    settingsRow("Volume Ratio") {
+                                        HStack(spacing: 8) {
+                                            Slider(value: $viewModel.scalpingConfig.minVolumeRatio, in: 0.0...3.0, step: 0.1)
+                                                .frame(width: 120)
+                                            Text(String(format: "%.1fx", viewModel.scalpingConfig.minVolumeRatio))
+                                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.accentGold)
+                                                .frame(width: 50, alignment: .trailing)
+                                        }
+                                    }
+                                    .help("Minimum relative volume surge (Institutional Presence) required to trade. Default: 1.3x.")
+
                                     settingsRow("Broker Suffix") {
                                         HStack(spacing: 8) {
                                             TextField("e.g. m", text: $viewModel.scalpingConfig.brokerSuffix)
@@ -1989,6 +2055,56 @@ struct DashboardView: View {
                                             .font(.caption).foregroundColor(.accentRed).buttonStyle(.plain)
                                         Spacer()
                                         Text("\(viewModel.activeSymbols.count) active").font(.caption2).foregroundColor(.textMuted)
+                                    }
+                                }
+                                .padding(16)
+                            }
+
+                            // NEWS FILTER CARD (NEW)
+                            GlassCard {
+                                VStack(alignment: .leading, spacing: 14) {
+                                    sectionHeader("NEWS FILTER", icon: "globe.americas.fill", color: .accentGold)
+                                    Divider().background(Color.borderSubtle)
+                                    
+                                    Toggle("Enable News Protection", isOn: $viewModel.scalpingConfig.enableNewsFilter)
+                                        .toggleStyle(SwitchToggleStyle(tint: .accentGold))
+                                    
+                                    settingsRow("Pause Before High (min)") {
+                                        HStack(spacing: 8) {
+                                            Slider(value: $viewModel.scalpingConfig.pauseBeforeHighImpactMinutes, in: 0...120, step: 15)
+                                                .frame(width: 100)
+                                            Text("\(Int(viewModel.scalpingConfig.pauseBeforeHighImpactMinutes))m")
+                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.accentGold)
+                                                .frame(width: 40, alignment: .trailing)
+                                        }
+                                    }
+                                    
+                                    settingsRow("Pause Before Medium (min)") {
+                                        HStack(spacing: 8) {
+                                            Slider(value: $viewModel.scalpingConfig.pauseBeforeMediumImpactMinutes, in: 0...60, step: 5)
+                                                .frame(width: 100)
+                                            Text("\(Int(viewModel.scalpingConfig.pauseBeforeMediumImpactMinutes))m")
+                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.accentGold)
+                                                .frame(width: 40, alignment: .trailing)
+                                        }
+                                    }
+
+                                    Toggle("Auto-Raise Spread Tolerance", isOn: $viewModel.scalpingConfig.autoRaiseSpreadDuringNews)
+                                        .font(.caption)
+                                    
+                                    if viewModel.scalpingConfig.autoRaiseSpreadDuringNews {
+                                        settingsRow("News Spread Mult") {
+                                            HStack(spacing: 8) {
+                                                Slider(value: $viewModel.scalpingConfig.newsSpreadMultiplier, in: 1.0...10.0, step: 0.5)
+                                                    .frame(width: 100)
+                                                Text("\(String(format: "%.1f", viewModel.scalpingConfig.newsSpreadMultiplier))x")
+                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                    .foregroundColor(.accentGold)
+                                                    .frame(width: 40, alignment: .trailing)
+                                            }
+                                        }
                                     }
                                 }
                                 .padding(16)
