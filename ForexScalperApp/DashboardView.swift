@@ -534,16 +534,20 @@ struct DashboardView: View {
         let fileName = "GodMode_Logs_\(Int(Date().timeIntervalSince1970)).txt"
         
         #if os(macOS)
-        let downloadsFolder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let fileURL = downloadsFolder.appendingPathComponent(fileName)
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.plainText]
+        savePanel.nameFieldStringValue = fileName
+        savePanel.message = "Choose where to save your System Logs"
         
-        do {
-            try logsText.write(to: fileURL, atomically: true, encoding: .utf8)
-            godLog("📁 Logs Downloaded: \(fileURL.path)", level: .success)
-            viewModel.showNotification(title: "Export Successful", message: "System logs saved to your Downloads folder.")
-        } catch {
-            godLog("❌ Failed to export logs to Downloads: \(error.localizedDescription)", level: .error)
-            viewModel.showNotification(title: "Export Failed", message: error.localizedDescription)
+        if savePanel.runModal() == .OK, let url = savePanel.url {
+            do {
+                try logsText.write(to: url, atomically: true, encoding: .utf8)
+                godLog("📁 Logs Exported: \(url.path)", level: .success)
+                viewModel.showNotification(title: "Export Successful", message: "Logs saved successfully.")
+            } catch {
+                godLog("❌ Export Failed: \(error.localizedDescription)", level: .error)
+                viewModel.showNotification(title: "Export Failed", message: error.localizedDescription)
+            }
         }
         #else
         logDocument.text = logsText

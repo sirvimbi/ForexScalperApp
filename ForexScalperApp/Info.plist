@@ -29,5 +29,9 @@
 	</dict>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.finance</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>God Mode needs access to save your trade history and system logs.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>God Mode needs access to save reports and configuration data.</string>
 </dict>
 </plist>

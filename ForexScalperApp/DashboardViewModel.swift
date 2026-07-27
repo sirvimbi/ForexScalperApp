@@ -458,22 +458,24 @@ class DashboardViewModel: ObservableObject {
         let fileName = "GodMode_History_\(Int(Date().timeIntervalSince1970)).csv"
         
         #if os(macOS)
-        // DIRECT DOWNLOAD TO DOWNLOADS FOLDER
-        let downloadsFolder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let fileURL = downloadsFolder.appendingPathComponent(fileName)
-        
-        do {
-            try csvString.write(to: fileURL, atomically: true, encoding: .utf8)
-            godLog("📁 CSV Downloaded: \(fileURL.path)", level: .success)
-            showNotification(title: "Export Successful", message: "CSV saved to your Downloads folder.")
+        // USE NSSAVEPANEL TO BYPASS PERMISSION ISSUES
+        await MainActor.run {
+            let savePanel = NSSavePanel()
+            savePanel.allowedContentTypes = [.commaSeparatedText]
+            savePanel.nameFieldStringValue = fileName
+            savePanel.message = "Choose where to save your Trade History"
             
-            // Still set exportURL for the UI button state if needed
-            await MainActor.run {
-                self.exportURL = fileURL
+            if savePanel.runModal() == .OK, let url = savePanel.url {
+                do {
+                    try csvString.write(to: url, atomically: true, encoding: .utf8)
+                    godLog("📁 CSV Exported: \(url.path)", level: .success)
+                    showNotification(title: "Export Successful", message: "CSV saved successfully.")
+                    self.exportURL = url
+                } catch {
+                    godLog("❌ Export Failed: \(error.localizedDescription)", level: .error)
+                    showNotification(title: "Export Failed", message: error.localizedDescription)
+                }
             }
-        } catch {
-            godLog("❌ Failed to export CSV to Downloads: \(error.localizedDescription)", level: .error)
-            showNotification(title: "Export Failed", message: error.localizedDescription)
         }
         #else
         // iOS: Still use temporary directory for ShareSheet
