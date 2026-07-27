@@ -1,22 +1,30 @@
-// MARK: - Enhanced MarketDataActor with Caching
+// MARK: - Enhanced MarketDataActor with Thread-Safe Caching
 import Foundation
 
 actor RefactoredMarketDataActor: MarketDataProvider {
-    private var candles: [String: [String: [Kline]]] = [:]
+    // CRITICAL: Flattened storage to prevent nested dictionary re-entrancy crashes
+    private var candleStore: [String: [Kline]] = [:] // Key: "Symbol_Timeframe"
     private var latestPrices: [String: Double] = [:]
-    private let maxCandles = 3000 // Deep memory for long-term indicators and God Mode patterns
-    private let priceCache = NSCache<NSString, NSNumber>() // For quick price lookups
+    private var isHydrated: Set<String> = [] // Key: "Symbol_Timeframe"
+    
+    private let maxCandles = 3000
+    private let priceCache = NSCache<NSString, NSNumber>()
     
     func addCandles(symbol: String, timeframe: String, newCandles: [Kline]) async {
-        if candles[symbol] == nil {
-            candles[symbol] = [:]
-        }
-        if candles[symbol]?[timeframe] == nil {
-            // LOAD FROM PERSISTENCE ON FIRST ACCESS
-            candles[symbol]?[timeframe] = await CandlePersistenceManager.shared.loadCandles(for: symbol, timeframe: timeframe)
+        let key = "\(symbol)_\(timeframe)"
+        
+        // 1. HYDRATION GUARD: Load from persistence only once
+        if !isHydrated.contains(key) {
+            let cached = await CandlePersistenceManager.shared.loadCandles(for: symbol, timeframe: timeframe)
+            
+            // Re-check after await to prevent race during hydration
+            if candleStore[key] == nil {
+                candleStore[key] = cached
+            }
+            isHydrated.insert(key)
         }
         
-        var array = candles[symbol]![timeframe]!
+        var array = candleStore[key] ?? []
         var addedCount = 0
         
         for candle in newCandles {
@@ -32,7 +40,8 @@ actor RefactoredMarketDataActor: MarketDataProvider {
             array.removeFirst(array.count - maxCandles)
         }
         
-        candles[symbol]![timeframe] = array
+        // Use direct assignment to ensure value type safety
+        candleStore[key] = array
         
         if addedCount > 0 {
             await CandlePersistenceManager.shared.saveCandles(newCandles, for: symbol, timeframe: timeframe)
@@ -49,11 +58,11 @@ actor RefactoredMarketDataActor: MarketDataProvider {
     }
     
     func getCandles(symbol: String, timeframe: String) async -> [Kline] {
-        return candles[symbol]?[timeframe] ?? []
+        let key = "\(symbol)_\(timeframe)"
+        return candleStore[key] ?? []
     }
     
     func getLatestPrice(symbol: String) async -> Double? {
-        // Check cache first for performance
         if let cached = priceCache.object(forKey: symbol as NSString) {
             return cached.doubleValue
         }
@@ -63,21 +72,22 @@ actor RefactoredMarketDataActor: MarketDataProvider {
     func getCandlesBulk(symbols: [String], timeframe: String) async -> [String: [Kline]] {
         var result: [String: [Kline]] = [:]
         for symbol in symbols {
-            result[symbol] = candles[symbol]?[timeframe] ?? []
+            let key = "\(symbol)_\(timeframe)"
+            result[symbol] = candleStore[key] ?? []
         }
         return result
     }
     
-    func isReadyForSignals(symbol: String) -> Bool {
-        guard let symbolCandles = candles[symbol] else { return false }
+    func isReadyForSignals(symbol: String) async -> Bool {
+        let tfs = ["1m", "5m", "15m", "1h", "4h", "D1"]
+        let requirements = [100, 50, 30, 20, 20, 15]
         
-        let has1m = (symbolCandles["1m"]?.count ?? 0) >= 100
-        let has5m = (symbolCandles["5m"]?.count ?? 0) >= 50
-        let has15m = (symbolCandles["15m"]?.count ?? 0) >= 30
-        let has1h = (symbolCandles["1h"]?.count ?? 0) >= 20
-        let has4h = (symbolCandles["4h"]?.count ?? 0) >= 20
-        let hasD1 = (symbolCandles["D1"]?.count ?? 0) >= 15
-        
-        return has1m && has5m && has15m && has1h && has4h && hasD1
+        for (i, tf) in tfs.enumerated() {
+            let key = "\(symbol)_\(tf)"
+            if (candleStore[key]?.count ?? 0) < requirements[i] {
+                return false
+            }
+        }
+        return true
     }
 }
