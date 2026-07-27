@@ -512,6 +512,7 @@ struct DashboardView: View {
             }
             .background(Color.black.opacity(0.3))
         }
+        #if !os(macOS)
         .fileExporter(
             isPresented: $isExportingLogs,
             document: logDocument,
@@ -522,14 +523,32 @@ struct DashboardView: View {
                 print("✅ Logs exported to: \(url.path)")
             }
         }
+        #endif
     }
     
     @State private var isExportingLogs = false
     @State private var logDocument = LogDocument(text: "")
     
     private func exportLogs() {
-        logDocument.text = ConsoleLogger.shared.exportLogs()
+        let logsText = ConsoleLogger.shared.exportLogs()
+        let fileName = "GodMode_Logs_\(Int(Date().timeIntervalSince1970)).txt"
+        
+        #if os(macOS)
+        let downloadsFolder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        let fileURL = downloadsFolder.appendingPathComponent(fileName)
+        
+        do {
+            try logsText.write(to: fileURL, atomically: true, encoding: .utf8)
+            godLog("📁 Logs Downloaded: \(fileURL.path)", level: .success)
+            viewModel.showNotification(title: "Export Successful", message: "System logs saved to your Downloads folder.")
+        } catch {
+            godLog("❌ Failed to export logs to Downloads: \(error.localizedDescription)", level: .error)
+            viewModel.showNotification(title: "Export Failed", message: error.localizedDescription)
+        }
+        #else
+        logDocument.text = logsText
         isExportingLogs = true
+        #endif
     }
     
     private func formatLogTime(_ date: Date) -> String {
