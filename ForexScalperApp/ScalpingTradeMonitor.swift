@@ -266,7 +266,8 @@ actor ScalpingTradeMonitor {
     private func updateTrailingStop(trade: TradeRecord, currentPrice: Double) async {
         guard enableTrailingStop else { return }
 
-        let profitPips = abs(currentPrice - trade.entryPrice) / trade.entryPrice * 10000
+        let diff = currentPrice - trade.entryPrice
+        let profitPips = (trade.type == .buy ? diff : -diff) / trade.entryPrice * 10000
 
         if profitPips >= trailActivationPips {
             let currentTrail = getTrailingStop(for: trade.id)

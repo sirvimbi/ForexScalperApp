@@ -381,7 +381,7 @@ actor ScalpingSignalEngine {
 
         let currentPillars = buyScore > sellScore ? activePillarsBuy : activePillarsSell
 
-        if buyScore > sellScore && currentPillars >= minPillars && buyScore >= minReqScore && hasVolume {
+        if buyScore > sellScore && currentPillars >= minPillars && buyScore >= minReqScore {
             let baseConfidence = min(buyScore / 80.0 * 100, 100)
             let adjustedConfidence = min(baseConfidence * confidenceFactors.values.reduce(1.0, *), 100)
 
@@ -394,7 +394,7 @@ actor ScalpingSignalEngine {
                 indicators: indicators, confidenceFactors: confidenceFactors, timestamp: Date(),
                 stopLoss: sl, takeProfit: tp
             )
-        } else if sellScore > buyScore && currentPillars >= minPillars && sellScore >= minReqScore && hasVolume {
+        } else if sellScore > buyScore && currentPillars >= minPillars && sellScore >= minReqScore {
             let baseConfidence = min(sellScore / 80.0 * 100, 100)
             let adjustedConfidence = min(baseConfidence * confidenceFactors.values.reduce(1.0, *), 100)
 
