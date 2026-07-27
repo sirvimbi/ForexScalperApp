@@ -162,9 +162,12 @@ actor BinanceService: MarketDataProvider {
         }
     }
     
-    private func parseKlineMessage(_ text: String) {
-        guard let data = text.data(using: .utf8),
-              let json = try? JSONDecoder().decode(BinanceStreamResponse.self, from: data) else {
+    private func parseKlineMessage(_ text: String) async {
+        guard let data = text.data(using: .utf8) else { return }
+        
+        // Use non-isolated decoding for performance and race prevention
+        let decoder = JSONDecoder()
+        guard let json = try? decoder.decode(BinanceStreamResponse.self, from: data) else {
             return
         }
         

@@ -622,20 +622,13 @@ func godLog(_ message: String, level: LogLevel = .info, file: String = #file, li
     // Original print for console
     print(fullMessage)
     
-    // Route to in-app console
-    Task { @MainActor in
-        ConsoleLogger.shared.log(fullMessage, level: convertLogLevel(level))
-    }
+    // Route to in-app console via notification to decouple from MainActor timing
+    NotificationCenter.default.post(name: .newLogEntry, object: LogEntry(message: fullMessage, level: level))
 }
 
-private func convertLogLevel(_ level: LogLevel) -> ConsoleLogger.LogEntry.LogLevel {
-    switch level {
-    case .info, .trade: return .info
-    case .success: return .success
-    case .warning: return .warning
-    case .error: return .error
-    case .diagnostic: return .diagnostic
-    }
+struct LogEntry: Sendable {
+    let message: String
+    let level: LogLevel
 }
 
 // MARK: - MT5 & IG Models
@@ -684,4 +677,5 @@ extension Notification.Name {
     static let mt5TradeExecuted = Notification.Name("mt5TradeExecuted")
     static let signalSourceChanged = Notification.Name("signalSourceChanged")
     static let sourceMetricsUpdated = Notification.Name("sourceMetricsUpdated")
+    static let newLogEntry = Notification.Name("newLogEntry")
 }

@@ -6,24 +6,49 @@ import Combine
 class ConsoleLogger: ObservableObject {
     static let shared = ConsoleLogger()
     
-    @Published var logs: [LogEntry] = []
+    @Published var logs: [LogEntryUI] = []
     private let maxLogs = 2000
     
-    struct LogEntry: Identifiable, Equatable {
+    struct LogEntryUI: Identifiable, Equatable {
         let id = UUID()
         let timestamp: Date
         let message: String
-        let level: LogLevel
+        let level: LogLevelUI
         
-        enum LogLevel {
+        enum LogLevelUI: Sendable {
             case info, warning, error, success, diagnostic
         }
     }
     
-    private init() {}
+    private init() {
+        setupObservers()
+    }
     
-    func log(_ message: String, level: LogEntry.LogLevel = .info) {
-        let entry = LogEntry(timestamp: Date(), message: message, level: level)
+    private func setupObservers() {
+        NotificationCenter.default.addObserver(
+            forName: .newLogEntry,
+            object: nil,
+            queue: .main
+        ) { notification in
+            if let entry = notification.object as? LogEntry {
+                let uiLevel: LogEntryUI.LogLevelUI
+                switch entry.level {
+                case .info: uiLevel = .info
+                case .trade: uiLevel = .info
+                case .success: uiLevel = .success
+                case .warning: uiLevel = .warning
+                case .error: uiLevel = .error
+                case .diagnostic: uiLevel = .diagnostic
+                }
+                DispatchQueue.main.async {
+                    self.log(entry.message, level: uiLevel)
+                }
+            }
+        }
+    }
+    
+    func log(_ message: String, level: LogEntryUI.LogLevelUI = .info) {
+        let entry = LogEntryUI(timestamp: Date(), message: message, level: level)
         logs.append(entry)
         
         if logs.count > maxLogs {
@@ -44,12 +69,5 @@ class ConsoleLogger: ObservableObject {
     
     func clearLogs() {
         logs.removeAll()
-    }
-}
-
-// Global log function to replace standard print where needed
-func godLog(_ message: String, level: ConsoleLogger.LogEntry.LogLevel = .info) {
-    Task { @MainActor in
-        ConsoleLogger.shared.log(message, level: level)
     }
 }

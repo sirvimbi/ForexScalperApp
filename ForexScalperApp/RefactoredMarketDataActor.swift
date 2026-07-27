@@ -7,12 +7,13 @@ actor RefactoredMarketDataActor: MarketDataProvider {
     private let maxCandles = 3000 // Deep memory for long-term indicators and God Mode patterns
     private let priceCache = NSCache<NSString, NSNumber>() // For quick price lookups
     
-    func addCandles(symbol: String, timeframe: String, newCandles: [Kline]) {
+    func addCandles(symbol: String, timeframe: String, newCandles: [Kline]) async {
         if candles[symbol] == nil {
             candles[symbol] = [:]
         }
         if candles[symbol]?[timeframe] == nil {
-            candles[symbol]?[timeframe] = CandlePersistenceManager.shared.loadCandles(for: symbol, timeframe: timeframe)
+            // LOAD FROM PERSISTENCE ON FIRST ACCESS
+            candles[symbol]?[timeframe] = await CandlePersistenceManager.shared.loadCandles(for: symbol, timeframe: timeframe)
         }
         
         var array = candles[symbol]![timeframe]!
@@ -34,7 +35,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         candles[symbol]![timeframe] = array
         
         if addedCount > 0 {
-            CandlePersistenceManager.shared.saveCandles(newCandles, for: symbol, timeframe: timeframe)
+            await CandlePersistenceManager.shared.saveCandles(newCandles, for: symbol, timeframe: timeframe)
         }
         
         if timeframe == "1m", let last = array.last {
@@ -43,8 +44,8 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         }
     }
     
-    func addCandle(symbol: String, timeframe: String, candle: Kline) {
-        addCandles(symbol: symbol, timeframe: timeframe, newCandles: [candle])
+    func addCandle(symbol: String, timeframe: String, candle: Kline) async {
+        await addCandles(symbol: symbol, timeframe: timeframe, newCandles: [candle])
     }
     
     func getCandles(symbol: String, timeframe: String) async -> [Kline] {

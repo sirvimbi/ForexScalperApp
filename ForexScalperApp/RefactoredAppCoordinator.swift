@@ -223,7 +223,7 @@ class RefactoredAppCoordinator: ObservableObject {
                 
                 // INTELLIGENT GAP CALCULATION
                 var depth = maxDepth
-                if let lastTime = CandlePersistenceManager.shared.getLatestCandleTime(for: symbol, timeframe: tf) {
+                if let lastTime = await CandlePersistenceManager.shared.getLatestCandleTime(for: symbol, timeframe: tf) {
                     let diffSeconds = Date().timeIntervalSince(Date(timeIntervalSince1970: TimeInterval(lastTime)))
                     let tfMinutes: Double = {
                         switch tf {

@@ -1,6 +1,6 @@
 import Foundation
 
-class CandlePersistenceManager {
+actor CandlePersistenceManager {
     static let shared = CandlePersistenceManager()
     
     private let fileManager = FileManager.default
@@ -13,13 +13,13 @@ class CandlePersistenceManager {
         try? fileManager.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
     }
     
-    func saveCandles(_ candles: [Kline], for symbol: String, timeframe: String) {
+    func saveCandles(_ candles: [Kline], for symbol: String, timeframe: String) async {
         guard !candles.isEmpty else { return }
         
         let fileURL = getFileURL(symbol: symbol, timeframe: timeframe)
         
         // Load existing to merge
-        let existing = loadCandles(for: symbol, timeframe: timeframe)
+        let existing = await loadCandles(for: symbol, timeframe: timeframe)
         
         // Merge and deduplicate by closeTime
         let existingMap = Dictionary(grouping: existing, by: { $0.closeTime }).mapValues { $0.first! }
@@ -37,13 +37,12 @@ class CandlePersistenceManager {
         do {
             let data = try JSONEncoder().encode(final)
             try data.write(to: fileURL, options: .atomic)
-            // godLog("💾 Persistence: Saved \(final.count) candles for \(symbol) \(timeframe)")
         } catch {
-            godLog("❌ Persistence: Failed to save candles for \(symbol) \(timeframe): \(error)", level: .error)
+            godLog("❌ Persistence: Failed to save candles for \(symbol) \(timeframe): \(error.localizedDescription)", level: .error)
         }
     }
     
-    func loadCandles(for symbol: String, timeframe: String) -> [Kline] {
+    func loadCandles(for symbol: String, timeframe: String) async -> [Kline] {
         let fileURL = getFileURL(symbol: symbol, timeframe: timeframe)
         
         guard fileManager.fileExists(atPath: fileURL.path) else { return [] }
@@ -56,8 +55,9 @@ class CandlePersistenceManager {
         }
     }
     
-    func getLatestCandleTime(for symbol: String, timeframe: String) -> Int? {
-        return loadCandles(for: symbol, timeframe: timeframe).last?.closeTime
+    func getLatestCandleTime(for symbol: String, timeframe: String) async -> Int? {
+        let candles = await loadCandles(for: symbol, timeframe: timeframe)
+        return candles.last?.closeTime
     }
     
     private func getFileURL(symbol: String, timeframe: String) -> URL {
