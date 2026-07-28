@@ -28,6 +28,11 @@ actor RefactoredRiskManager: RiskManagerProtocol {
             print("⚠️ Daily loss limit reached")
             return false
         }
+
+        if activeTrades.contains(symbol) {
+            print("⚠️ Already have active trade in \(symbol)")
+            return false
+        }
         
         // Check concurrent trades
         if activeTrades.count >= parameters.maxConcurrentTrades {
@@ -101,5 +106,9 @@ actor RefactoredRiskManager: RiskManagerProtocol {
             let today = Calendar.current.startOfDay(for: Date())
             dailyPnL[today] = (dailyPnL[today] ?? 0) + pnl
         }
+    }
+
+    func syncActiveTrades(_ symbols: Set<String>) {
+        self.activeTrades = symbols
     }
 }

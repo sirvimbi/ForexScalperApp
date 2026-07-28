@@ -100,6 +100,15 @@ enum SignalSource: String, Codable, Sendable, CaseIterable {
     }
 }
 
+// MARK: - Dashboard Time Filter
+enum DashboardTimeFilter: String, CaseIterable, Codable {
+    case today = "Today"
+    case yesterday = "Yesterday"
+    case last7Days = "Last 7 Days"
+    case thisMonth = "This Month"
+    case allTime = "All Time"
+}
+
 // MARK: - Signal Status
 enum SignalStatus: String, Codable {
     case pending
@@ -365,6 +374,11 @@ struct Kline: Sendable, Codable {
     let volume: Double
     let closeTime: Int
     let spread: Double?
+    var isClosed: Bool = true
+    
+    var timestamp: Date {
+        return Date(timeIntervalSince1970: TimeInterval(closeTime))
+    }
 }
 
 // MARK: - Trade Record
@@ -613,16 +627,17 @@ extension Double {
 }
 // MARK: - Notifications
 extension Notification.Name {
-    static let newSignalGenerated = Notification.Name("newSignalGenerated")
-    static let acceptSignal = Notification.Name("acceptSignal")
-    static let denySignal = Notification.Name("denySignal")
-    static let showSignalDashboard = Notification.Name("showSignalDashboard")
-    static let tradeHistoryUpdated = Notification.Name("tradeHistoryUpdated")
-    static let tradeUpdated = Notification.Name("tradeUpdated")
-    static let igAccountUpdated = Notification.Name("igAccountUpdated")
-    static let igTradeExecuted = Notification.Name("igTradeExecuted")
-    static let mt5AccountUpdated = Notification.Name("mt5AccountUpdated")
-    static let mt5TradeExecuted = Notification.Name("mt5TradeExecuted")
-    static let signalSourceChanged = Notification.Name("signalSourceChanged")
-    static let sourceMetricsUpdated = Notification.Name("sourceMetricsUpdated")
+    nonisolated static let newSignalGenerated = Notification.Name("newSignalGenerated")
+    nonisolated static let acceptSignal = Notification.Name("acceptSignal")
+    nonisolated static let denySignal = Notification.Name("denySignal")
+    nonisolated static let showSignalDashboard = Notification.Name("showSignalDashboard")
+    nonisolated static let tradeHistoryUpdated = Notification.Name("tradeHistoryUpdated")
+    nonisolated static let tradeUpdated = Notification.Name("tradeUpdated")
+    nonisolated static let igAccountUpdated = Notification.Name("igAccountUpdated")
+    nonisolated static let igTradeExecuted = Notification.Name("igTradeExecuted")
+    nonisolated static let mt5AccountUpdated = Notification.Name("mt5AccountUpdated")
+    nonisolated static let mt5TradeExecuted = Notification.Name("mt5TradeExecuted")
+    nonisolated static let signalSourceChanged = Notification.Name("signalSourceChanged")
+    nonisolated static let sourceMetricsUpdated = Notification.Name("sourceMetricsUpdated")
+    nonisolated static let newLogEntry = Notification.Name("newLogEntry")
 }

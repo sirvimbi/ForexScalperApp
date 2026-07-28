@@ -1,470 +1,358 @@
+// ScalpingTradeMonitor.swift - GOD MODE V7.0 ELITE
 import Foundation
+import UserNotifications
 
 actor ScalpingTradeMonitor {
     private var activeTrades: [UUID: TradeRecord] = [:]
     private var tradeEntryIndicators: [UUID: IndicatorSet] = [:]
-    private var priceUpdateTask: Task<Void, Never>?
+    private var trailingStops: [UUID: Double] = [:]
+    private var partialTPExecuted: [UUID: Bool] = [:]
+    private var breakEvenSet: [UUID: Bool] = [:]
+    
     private let marketData: MarketDataProvider
     private let tradeHistory: RefactoredTradeHistoryManager
     private let signalEngine: ScalpingSignalEngine
-    private let config: ScalpingConfig
-
-    // Dynamic settings from config
-    private var trailActivationPips: Double = 20.0
-    private var trailDistance: Double = 10.0
-    private var maxHoldTime: TimeInterval = 30 * 60
-    private var enableTrailingStop: Bool = true
-    private var enableIndicatorExit: Bool = true
-    private var breakEvenPips: Double = 20.0
     
-    private var partialTPExecuted: [UUID: Bool] = [:]
-
+    private var onPendingReconciliation: ((TradeRecord) async -> Void)?
     private var onTradeClosed: ((TradeRecord) async -> Void)?
-    private var trailingStops: [UUID: Double] = [:]
-    private var latestSymbolIndicators: [String: IndicatorSet] = [:]
-
-    init(marketData: MarketDataProvider,
-         tradeHistory: RefactoredTradeHistoryManager,
-         signalEngine: ScalpingSignalEngine,
-         config: ScalpingConfig) {
+    
+    init(
+        marketData: MarketDataProvider,
+        tradeHistory: RefactoredTradeHistoryManager,
+        signalEngine: ScalpingSignalEngine,
+        config: ScalpingConfig
+    ) {
         self.marketData = marketData
         self.tradeHistory = tradeHistory
         self.signalEngine = signalEngine
-        self.config = config
-
-        Task {
-            await loadInitialConfig()
-            await startMonitoringLogic()
-            await refreshConfigPeriodically()
-        }
     }
-
-    private func loadInitialConfig() {
-        Task { @MainActor in
-            let trailAct = config.trailActivationPips
-            let trailDist = config.trailDistance
-            let maxHold = config.maxHoldMinutes * 60
-            let trailEnabled = config.enableTrailingStop
-            let exitEnabled = config.enableIndicatorExit
+    
+    // MARK: - PRICE UPDATE (ELITE MONITORING)
+    
+    func updatePrice(symbol: String, price: Double, indicators: IndicatorSet?) async {
+        let trades = activeTrades.values.filter { $0.symbol == symbol }
+        
+        for trade in trades {
+            // PRIORITY 1: TAKE PROFIT (Highest priority)
+            if await checkTakeProfit(trade: trade, currentPrice: price) {
+                await closeTrade(trade, exitPrice: price, reason: "Take Profit")
+                continue
+            }
             
-            await self.updateInternalConfig(
-                trailAct: trailAct,
-                trailDist: trailDist,
-                maxHold: maxHold,
-                trailEnabled: trailEnabled,
-                exitEnabled: exitEnabled
-            )
-        }
-    }
-
-    private func updateInternalConfig(trailAct: Double, trailDist: Double, maxHold: TimeInterval, trailEnabled: Bool, exitEnabled: Bool) {
-        self.trailActivationPips = trailAct
-        self.trailDistance = trailDist
-        self.maxHoldTime = maxHold
-        self.enableTrailingStop = trailEnabled
-        self.enableIndicatorExit = exitEnabled
-    }
-
-    private func refreshConfigPeriodically() {
-        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            Task {
-                await self.loadInitialConfig()
+            // PRIORITY 2: TRAILING STOP
+            if await checkTrailingStop(trade: trade, currentPrice: price) {
+                await closeTrade(trade, exitPrice: price, reason: "Trailing Stop")
+                continue
+            }
+            
+            // PRIORITY 3: PARTIAL TAKE PROFIT
+            await checkPartialTakeProfit(trade: trade, currentPrice: price)
+            
+            // PRIORITY 4: UPDATE TRAILING STOP
+            await updateTrailingStop(trade: trade, currentPrice: price)
+            
+            // PRIORITY 5: TIME EXIT
+            if await checkTimeExit(trade: trade) {
+                await closeTrade(trade, exitPrice: price, reason: "Time Expiry")
+                continue
+            }
+            
+            // PRIORITY 6: INDICATOR REVERSAL
+            if let indicators = indicators {
+                if await shouldExitViaIndicatorReversal(trade: trade, indicators: indicators) {
+                    await closeTrade(trade, exitPrice: price, reason: "Indicator Reversal")
+                    continue
+                }
+            }
+            
+            // PRIORITY 7: STOP LOSS (Last resort)
+            if await checkStopLoss(trade: trade, currentPrice: price) {
+                await closeTrade(trade, exitPrice: price, reason: "Stop Loss")
+                continue
             }
         }
     }
-
-    func setOnTradeClosedCallback(_ callback: @escaping (TradeRecord) async -> Void) {
-        self.onTradeClosed = callback
-    }
-
-    func updatePrice(symbol: String, price: Double, indicators: IndicatorSet?) async {
-        if let indicators = indicators {
-            latestSymbolIndicators[symbol] = indicators
+    
+    // MARK: - TAKE PROFIT (ELITE: Early capture)
+    
+    private func checkTakeProfit(trade: TradeRecord, currentPrice: Double) async -> Bool {
+        guard let tp = trade.takeProfit else { return false }
+        
+        // ELITE: Use a tighter TP with partial profit taking
+        let pipSize = trade.symbol.contains("JPY") ? 0.01 : 0.0001
+        let currentPips = abs(currentPrice - trade.entryPrice) / pipSize
+        let tpPips = abs(tp - trade.entryPrice) / pipSize
+        
+        // If we're at 70% of TP, start checking for exit
+        if currentPips >= tpPips * 0.7 {
+            // Check if momentum is slowing (RSI divergence, etc.)
+            if let indicators = tradeEntryIndicators[trade.id] {
+                // Exit early if overbought/oversold
+                if trade.type == .buy && indicators.rsi > 70 {
+                    return true
+                }
+                if trade.type == .sell && indicators.rsi < 30 {
+                    return true
+                }
+            }
         }
-        await checkActiveTrades(for: symbol, currentPrice: price)
+        
+        // Full TP hit
+        if trade.type == .buy && currentPrice >= tp {
+            godLog("🎯 TP HIT: \(trade.symbol) @ \(String(format: "%.5f", currentPrice))", level: .success)
+            return true
+        } else if trade.type == .sell && currentPrice <= tp {
+            godLog("🎯 TP HIT: \(trade.symbol) @ \(String(format: "%.5f", currentPrice))", level: .success)
+            return true
+        }
+        
+        return false
     }
-
+    
+    // MARK: - STOP LOSS (ELITE: Wider, but with trailing)
+    
+    private func checkStopLoss(trade: TradeRecord, currentPrice: Double) async -> Bool {
+        guard let sl = trade.stopLoss else { return false }
+        
+        // ELITE: Only hit SL if no trailing stop is active
+        let hasTrailing = trailingStops[trade.id] != nil
+        
+        if hasTrailing {
+            // If trailing is active, use it instead of SL
+            return false
+        }
+        
+        if trade.type == .buy && currentPrice <= sl {
+            godLog("🛑 SL HIT: \(trade.symbol) @ \(String(format: "%.5f", currentPrice))", level: .warning)
+            return true
+        } else if trade.type == .sell && currentPrice >= sl {
+            godLog("🛑 SL HIT: \(trade.symbol) @ \(String(format: "%.5f", currentPrice))", level: .warning)
+            return true
+        }
+        return false
+    }
+    
+    // MARK: - TRAILING STOP (ELITE: Tight, early activation)
+    
+    private func checkTrailingStop(trade: TradeRecord, currentPrice: Double) async -> Bool {
+        guard let trailStop = trailingStops[trade.id] else { return false }
+        
+        if trade.type == .buy && currentPrice <= trailStop {
+            return true
+        } else if trade.type == .sell && currentPrice >= trailStop {
+            return true
+        }
+        return false
+    }
+    
+    private func updateTrailingStop(trade: TradeRecord, currentPrice: Double) async {
+        // ELITE: Activate trailing stop after 3 pips profit
+        let pipSize = trade.symbol.contains("JPY") ? 0.01 : 0.0001
+        let profitPips = (trade.type == .buy ? currentPrice - trade.entryPrice : trade.entryPrice - currentPrice) / pipSize
+        
+        let activationPips = await MainActor.run { ScalpingConfig.shared.trailActivationPips }
+        guard profitPips >= activationPips else { return }
+        
+        // ELITE: Tight trailing distance (2-4 pips)
+        let trailDistancePips = await MainActor.run { ScalpingConfig.shared.trailDistance }
+        let distance = trailDistancePips * pipSize
+        
+        let newTrail = trade.type == .buy ? currentPrice - distance : currentPrice + distance
+        let currentTrail = trailingStops[trade.id]
+        
+        // Only update if new trail is better (moves in our favor)
+        if trade.type == .buy {
+            if currentTrail == nil || newTrail > currentTrail! {
+                trailingStops[trade.id] = newTrail
+                godLog("🏃‍♂️ TRAIL: \(trade.symbol) @ \(String(format: "%.5f", newTrail)) (Profit: \(Int(profitPips)) pips)", level: .diagnostic)
+                await syncTrailingStopToMT5(trade: trade, newSL: newTrail)
+            }
+        } else {
+            if currentTrail == nil || newTrail < currentTrail! {
+                trailingStops[trade.id] = newTrail
+                godLog("🏃‍♂️ TRAIL: \(trade.symbol) @ \(String(format: "%.5f", newTrail)) (Profit: \(Int(profitPips)) pips)", level: .diagnostic)
+                await syncTrailingStopToMT5(trade: trade, newSL: newTrail)
+            }
+        }
+    }
+    
+    private func syncTrailingStopToMT5(trade: TradeRecord, newSL: Double) async {
+        if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
+            _ = try? await MT5Service.shared.modifyPosition(
+                ticket: ticket,
+                sl: newSL,
+                tp: trade.takeProfit ?? 0
+            )
+        }
+    }
+    
+    // MARK: - PARTIAL TAKE PROFIT (ELITE: 50% at midpoint)
+    
+    private func checkPartialTakeProfit(trade: TradeRecord, currentPrice: Double) async {
+        guard !(partialTPExecuted[trade.id] ?? false) else { return }
+        guard let fullTP = trade.takeProfit else { return }
+        
+        let pipSize = trade.symbol.contains("JPY") ? 0.01 : 0.0001
+        let tpPips = abs(fullTP - trade.entryPrice) / pipSize
+        let currentPips = abs(currentPrice - trade.entryPrice) / pipSize
+        
+        // ELITE: Close 50% at 50% of TP
+        let targetPercent = await MainActor.run { ScalpingConfig.shared.partialTPPercent }
+        if currentPips >= tpPips * targetPercent {
+            godLog("🎯 PARTIAL TP: \(trade.symbol) - Closing \(Int(targetPercent * 100))% at \(Int(currentPips)) pips", level: .success)
+            partialTPExecuted[trade.id] = true
+            
+            // Close partial position
+            if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
+                let volume = trade.positionSize ?? 0.01
+                let closeVolume = volume * targetPercent
+                _ = try? await MT5Service.shared.closePosition(ticket: ticket, volume: closeVolume)
+            }
+            
+            // Move SL to breakeven for remaining position
+            let buffer = 2.0 * pipSize
+            let breakEven = trade.type == .buy ?
+                trade.entryPrice + buffer :
+                trade.entryPrice - buffer
+            
+            var updatedTrade = trade
+            updatedTrade.stopLoss = breakEven
+            activeTrades[trade.id] = updatedTrade
+            
+            if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
+                _ = try? await MT5Service.shared.modifyPosition(
+                    ticket: ticket,
+                    sl: breakEven,
+                    tp: trade.takeProfit ?? 0
+                )
+            }
+        }
+    }
+    
+    // MARK: - INDICATOR REVERSAL
+    
+    private func shouldExitViaIndicatorReversal(trade: TradeRecord, indicators: IndicatorSet) async -> Bool {
+        guard let entryIndicators = tradeEntryIndicators[trade.id] else { return false }
+        
+        if trade.type == .buy {
+            // Exit if RSI overbought and turning down
+            if indicators.rsi > 70 && indicators.rsi < entryIndicators.rsi - 3 {
+                return true
+            }
+            // Exit if BB upper band touched
+            if indicators.bbPosition > 1.0 && indicators.stochasticK > 80 {
+                return true
+            }
+        } else {
+            // Exit if RSI oversold and turning up
+            if indicators.rsi < 30 && indicators.rsi > entryIndicators.rsi + 3 {
+                return true
+            }
+            // Exit if BB lower band touched
+            if indicators.bbPosition < 0.0 && indicators.stochasticK < 20 {
+                return true
+            }
+        }
+        return false
+    }
+    
+    // MARK: - TIME EXIT
+    
+    private func checkTimeExit(trade: TradeRecord) async -> Bool {
+        let timeOpen = Date().timeIntervalSince(trade.entryTime)
+        let maxHoldMinutes = await MainActor.run { ScalpingConfig.shared.maxHoldMinutes }
+        let maxHoldSeconds = maxHoldMinutes * 60
+        
+        if timeOpen > maxHoldSeconds {
+            godLog("⏰ Time exit: \(trade.symbol) - \(Int(timeOpen/60)) minutes", level: .diagnostic)
+            return true
+        }
+        return false
+    }
+    
+    // MARK: - CLOSE TRADE
+    
+    private func closeTrade(_ trade: TradeRecord, exitPrice: Double, reason: String) async {
+        godLog("🎯 EXIT: \(trade.symbol) (\(reason)) @ \(String(format: "%.5f", exitPrice))", level: .info)
+        
+        // Close on MT5
+        if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
+            _ = try? await MT5Service.shared.closePosition(ticket: ticket)
+            await onPendingReconciliation?(trade)
+        }
+        
+        // Update trade record
+        var updatedTrade = trade
+        updatedTrade.exitPrice = exitPrice
+        updatedTrade.exitTime = Date()
+        updatedTrade.status = .completed
+        updatedTrade.pnl = calculatePnL(trade: trade, exitPrice: exitPrice)
+        
+        // Remove from tracking
+        activeTrades.removeValue(forKey: trade.id)
+        tradeEntryIndicators.removeValue(forKey: trade.id)
+        trailingStops.removeValue(forKey: trade.id)
+        partialTPExecuted.removeValue(forKey: trade.id)
+        breakEvenSet.removeValue(forKey: trade.id)
+        
+        // Update performance
+        await ScalpingRiskManager.shared.closeTrade(updatedTrade)
+        await CorrelationFilter.shared.removeTrade(symbol: trade.symbol)
+        await PerformanceAnalyzer.shared.recordTrade(updatedTrade)
+        
+        // Notify
+        if let onTradeClosed = self.onTradeClosed {
+            await onTradeClosed(updatedTrade)
+        }
+        await NotificationManager.shared.sendTradeClosedNotification(updatedTrade)
+        
+        let isWin = (updatedTrade.pnl ?? 0) > 0
+        godLog("📊 Trade closed: \(trade.symbol) - P&L: KES \(String(format: "%.2f", updatedTrade.pnl ?? 0))", level: isWin ? .success : .warning)
+    }
+    
+    private func calculatePnL(trade: TradeRecord, exitPrice: Double) -> Double {
+        let positionSize = trade.positionSize ?? 1000
+        if trade.type == .buy {
+            return (exitPrice - trade.entryPrice) * positionSize * 100000
+        } else {
+            return (trade.entryPrice - exitPrice) * positionSize * 100000
+        }
+    }
+    
+    // MARK: - PUBLIC METHODS
+    
     func addTrade(_ trade: TradeRecord, indicators: IndicatorSet?) {
         activeTrades[trade.id] = trade
         if let indicators = indicators {
             tradeEntryIndicators[trade.id] = indicators
         }
-        godLog("📊 Scalping trade opened: \(trade.symbol) \(trade.type) @ \(trade.entryPrice)", level: .trade)
-    }
-
-    private func startMonitoringLogic() {
-        // Core monitoring is driven by updatePrice calls from the coordinator
-    }
-
-    private func checkActiveTrades(for symbol: String, currentPrice: Double) async {
-        let relevantTrades = activeTrades.values.filter { $0.symbol == symbol }
-        let indicators = latestSymbolIndicators[symbol]
-
-        for trade in relevantTrades {
-            // 1. Check Stop Loss
-            if await shouldExitViaStopLoss(trade: trade, currentPrice: currentPrice) {
-                await closeTrade(trade, exitPrice: currentPrice, reason: "Stop Loss", indicators: indicators)
-                continue
-            }
-
-            // 2. Check Take Profit
-            if await shouldExitViaTakeProfit(trade: trade, currentPrice: currentPrice) {
-                await closeTrade(trade, exitPrice: currentPrice, reason: "Take Profit", indicators: indicators)
-                continue
-            }
-
-            // 3. Check Trailing Stop
-            if await shouldExitViaTrailingStop(trade: trade, currentPrice: currentPrice) {
-                await closeTrade(trade, exitPrice: currentPrice, reason: "Trailing Stop", indicators: indicators)
-                continue
-            }
-
-            // 4. Check Partial Take Profit
-            await checkPartialTakeProfit(trade: trade, currentPrice: currentPrice)
-
-            // 5. Update Trailing Stop position
-            await updateTrailingStop(trade: trade, currentPrice: currentPrice)
-
-            // 6. Check indicator reversal (God Mode Exit)
-            if enableIndicatorExit {
-                if await shouldExitViaIndicatorReversal(trade: trade, currentPrice: currentPrice, indicators: indicators) {
-                    await closeTrade(trade, exitPrice: currentPrice, reason: "Indicator Reversal", indicators: indicators)
-                    continue
-                }
-            }
-
-            // 7. Check Time Expiry
-            if await shouldExitViaTimeExpiry(trade: trade) {
-                await closeTrade(trade, exitPrice: currentPrice, reason: "Time Expiry", indicators: indicators)
-                continue
-            }
-            
-            // 9. ULTIMATE RISK EXITS (God Mode Ultimate)
-            await checkUltimateRiskExits(trade: trade, currentPrice: currentPrice)
-        }
-    }
-
-    // MARK: - ULTIMATE RISK EXITS
-    private func checkUltimateRiskExits(trade: TradeRecord, currentPrice: Double) async {
-        // 🎯 POSITION SIZE RISK - If losing > 50% of daily limit, close all
-        let metrics = await ScalpingRiskManager.shared.getCurrentRiskMetrics()
-        
-        if metrics.dailyPnL < metrics.dailyLossLimit * 0.5 {
-            godLog("⚠️ ULTIMATE RISK: Daily loss approaching limit - Closing all trades", level: .error)
-            await closeAllTrades(reason: "Daily Loss Limit Warning")
-            return
-        }
-        
-        // 🎯 TIME RISK - Close before major news
-        let (impact, event) = await NewsService.shared.getImpactForSymbol(trade.symbol, timeframeMinutes: 15)
-        if impact == .high {
-            godLog("⚠️ ULTIMATE RISK: High Impact News in 15 mins (\(event ?? "Unknown")) - Closing \(trade.symbol)", level: .warning)
-            await closeTrade(trade, exitPrice: currentPrice, reason: "News Protection", indicators: nil)
-            return
-        }
-        
-        // 🎯 VOLATILITY SPIKE - Unreasonable price movement
-        let atr = await getATRForSymbol(trade.symbol)
-        let dailyRange = atr * 2
-        let movement = abs(currentPrice - trade.entryPrice)
-        
-        if movement > dailyRange * 2 {
-            godLog("⚠️ ULTIMATE RISK: Extreme movement detected - Closing \(trade.symbol)", level: .warning)
-            await closeTrade(trade, exitPrice: currentPrice, reason: "Volatility Spike", indicators: nil)
-            return
-        }
-    }
-
-    private func closeAllTrades(reason: String) async {
-        for trade in activeTrades.values {
-            if let currentPrice = await marketData.getLatestPrice(symbol: trade.symbol) {
-                await closeTrade(trade, exitPrice: currentPrice, reason: reason, indicators: nil)
-            }
-        }
-    }
-
-    private func shouldExitViaStopLoss(trade: TradeRecord, currentPrice: Double) async -> Bool {
-        guard let stopLoss = trade.stopLoss else { return false }
-
-        if trade.type == .buy && currentPrice <= stopLoss {
-            return true
-        } else if trade.type == .sell && currentPrice >= stopLoss {
-            return true
-        }
-        return false
-    }
-
-    private func shouldExitViaTakeProfit(trade: TradeRecord, currentPrice: Double) async -> Bool {
-        guard let takeProfit = trade.takeProfit else { return false }
-
-        if trade.type == .buy && currentPrice >= takeProfit {
-            return true
-        } else if trade.type == .sell && currentPrice <= takeProfit {
-            return true
-        }
-        return false
-    }
-
-    private func shouldExitViaTrailingStop(trade: TradeRecord, currentPrice: Double) async -> Bool {
-        guard enableTrailingStop else { return false }
-        
-        let diff = currentPrice - trade.entryPrice
-        let profitPips = (trade.type == .buy ? diff : -diff) / trade.entryPrice * 10000
-        
-        // 📈 USE ATR-BASED TRAILING
-        let atr = await getATRForSymbol(trade.symbol)
-        let atrPips = atr / trade.entryPrice * 10000
-        
-        // 🎯 Dynamic activation: 1.5x ATR for activation
-        let activationThreshold = max(atrPips * 1.5, 15)  // Minimum 15 pips
-        
-        guard profitPips >= activationThreshold else { return false }
-        guard let trailingStop = getTrailingStop(for: trade.id) else { return false }
-        
-        if trade.type == .buy && currentPrice <= trailingStop {
-            godLog("🏃‍♂️ TRAIL HIT: \(trade.symbol) @ \(String(format: "%.5f", currentPrice)) (Profit: \(Int(profitPips)) pips)", level: .info)
-            return true
-        } else if trade.type == .sell && currentPrice >= trailingStop {
-            godLog("🏃‍♂️ TRAIL HIT: \(trade.symbol) @ \(String(format: "%.5f", currentPrice)) (Profit: \(Int(profitPips)) pips)", level: .info)
-            return true
-        }
-        return false
-    }
-
-    private func shouldExitViaIndicatorReversal(trade: TradeRecord, currentPrice: Double, indicators: IndicatorSet?) async -> Bool {
-        guard let indicators = indicators else { return false }
-        guard let entryIndicators = tradeEntryIndicators[trade.id] else { return false }
-
-        if trade.type == .buy {
-            // Overbought reversal
-            if indicators.rsi > 70 && indicators.rsi < entryIndicators.rsi - 5 {
-                godLog("📊 Indicator exit: RSI overbought and turning down (\(String(format: "%.1f", indicators.rsi)) vs entry \(String(format: "%.1f", entryIndicators.rsi))", level: .diagnostic)
-                return true
-            }
-            if indicators.bbPosition > 1.0 && indicators.stochasticK > 80 {
-                godLog("📊 Indicator exit: Upper BB touch (\(String(format: "%.2f", indicators.bbPosition))) with stochastic overbought (\(String(format: "%.1f", indicators.stochasticK)))", level: .diagnostic)
-                return true
-            }
-        } else {
-            // Oversold reversal
-            if indicators.rsi < 30 && indicators.rsi > entryIndicators.rsi + 5 {
-                godLog("📊 Indicator exit: RSI oversold and turning up (\(String(format: "%.1f", indicators.rsi)) vs entry \(String(format: "%.1f", entryIndicators.rsi))", level: .diagnostic)
-                return true
-            }
-            if indicators.bbPosition < 0.0 && indicators.stochasticK < 20 {
-                godLog("📊 Indicator exit: Lower BB touch (\(String(format: "%.2f", indicators.bbPosition))) with stochastic oversold (\(String(format: "%.1f", indicators.stochasticK)))", level: .diagnostic)
-                return true
-            }
-        }
-
-        return false
-    }
-
-    private func shouldExitViaTimeExpiry(trade: TradeRecord) async -> Bool {
-        let timeOpen = Date().timeIntervalSince(trade.entryTime)
-        if timeOpen > maxHoldTime {
-            godLog("📊 Time exit: Trade open for \(Int(timeOpen/60)) minutes (max: \(Int(maxHoldTime/60)) mins)", level: .diagnostic)
-            return true
-        }
-        return false
-    }
-
-    // MARK: - Elite Risk Management Methods
-
-    private func shouldApplyBreakEven(trade: TradeRecord, currentPrice: Double) async -> Bool {
-        let diff = currentPrice - trade.entryPrice
-        let profitPips = (trade.type == .buy ? diff : -diff) / trade.entryPrice * 10000
-
-        if profitPips >= breakEvenPips {
-            if let sl = trade.stopLoss {
-                if trade.type == .buy && sl >= trade.entryPrice { return false }
-                if trade.type == .sell && sl <= trade.entryPrice { return false }
-            }
-            return true
-        }
-        return false
-    }
-
-    private func applyBreakEven(trade: TradeRecord) async {
-        godLog("🛡 PROTECTION: Moving \(trade.symbol) to Break-Even (+2 pips buffer)", level: .success)
-        var updatedTrade = trade
-        let buffer = 2.0 * (trade.entryPrice * 0.0001)
-        updatedTrade.stopLoss = trade.type == .buy ? trade.entryPrice + buffer : trade.entryPrice - buffer
-
-        activeTrades[trade.id] = updatedTrade
-        await tradeHistory.updateTrade(updatedTrade)
-
-        if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
-            godLog("📤 MT5: Syncing Break-Even SL to terminal...")
-            let success = try? await MT5Service.shared.modifyPosition(ticket: ticket, sl: updatedTrade.stopLoss!, tp: trade.takeProfit ?? 0)
-            if success == true {
-                godLog("✅ MT5: Break-Even SL confirmed on terminal", level: .success)
-            } else {
-                godLog("⚠️ MT5: Break-Even SL modification REJECTED (Check Terminal Logs)", level: .error)
-            }
-        }
+        godLog("📊 Trade opened: \(trade.symbol) \(trade.type) @ \(trade.entryPrice)", level: .trade)
     }
     
-    private func checkPartialTakeProfit(trade: TradeRecord, currentPrice: Double) async {
-        guard !(partialTPExecuted[trade.id] ?? false) else { return }
-        
-        // 🎯 First target: 50% of TP
-        guard let fullTP = trade.takeProfit else { return }
-        let tpDistance = abs(fullTP - trade.entryPrice)
-        let firstTargetDistance = tpDistance * 0.5
-        let firstTarget = trade.type == .buy ? 
-            trade.entryPrice + firstTargetDistance :
-            trade.entryPrice - firstTargetDistance
-        
-        if (trade.type == .buy && currentPrice >= firstTarget) ||
-           (trade.type == .sell && currentPrice <= firstTarget) {
-            
-            godLog("🎯 PARTIAL TP HIT: \(trade.symbol) - Closing 50% position", level: .success)
-            partialTPExecuted[trade.id] = true
-            
-            // Close 50% of position via MT5 (using volume_step rounding)
-            if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
-                let limits = await MT5Service.shared.getVolumeLimits(for: trade.symbol)
-                let volume = trade.positionSize ?? 0.01
-                let halfVolumeRaw = volume / 2
-                let steps = round(halfVolumeRaw / limits.step)
-                let halfVolume = max(limits.min, min(steps * limits.step, limits.max))
-                
-                _ = try? await MT5Service.shared.closePosition(ticket: ticket, volume: halfVolume)
-            }
-            
-            // Move SL to breakeven for remaining position
-            await applyBreakEven(trade: trade)
-        }
-    }
-
-    private func updateTrailingStop(trade: TradeRecord, currentPrice: Double) async {
-        guard enableTrailingStop else { return }
-        
-        let diff = currentPrice - trade.entryPrice
-        let profitPips = (trade.type == .buy ? diff : -diff) / trade.entryPrice * 10000
-        
-        let atr = await getATRForSymbol(trade.symbol)
-        let atrPips = atr / trade.entryPrice * 10000
-        let activationThreshold = max(atrPips * 1.5, 15)
-        let trailDistancePips = max(atrPips * 0.5, 8)
-        
-        guard profitPips >= activationThreshold else { return }
-        
-        let distance = (trade.entryPrice * trailDistancePips / 10000)
-        let newTrail = trade.type == .buy ? currentPrice - distance : currentPrice + distance
-        let currentTrail = getTrailingStop(for: trade.id)
-        
-        // Minimum step: 1 pip
-        let minStep = trade.entryPrice * 1.0 / 10000
-        
-        if trade.type == .buy {
-            if let currentTrail = currentTrail {
-                if newTrail > currentTrail + minStep {
-                    setTrailingStop(newTrail, for: trade.id)
-                    await syncTrailingStopToMT5(trade: trade, newSL: newTrail)
-                }
-            } else {
-                setTrailingStop(newTrail, for: trade.id)
-                await syncTrailingStopToMT5(trade: trade, newSL: newTrail)
-            }
-        } else {
-            if let currentTrail = currentTrail {
-                if newTrail < currentTrail - minStep {
-                    setTrailingStop(newTrail, for: trade.id)
-                    await syncTrailingStopToMT5(trade: trade, newSL: newTrail)
-                }
-            } else {
-                setTrailingStop(newTrail, for: trade.id)
-                await syncTrailingStopToMT5(trade: trade, newSL: newTrail)
-            }
-        }
-    }
-
-    private func syncTrailingStopToMT5(trade: TradeRecord, newSL: Double) async {
-        godLog("🏃‍♂️ TRAIL: Chasing \(trade.symbol) @ \(String(format: "%.5f", newSL))", level: .info)
-        if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
-            let success = try? await MT5Service.shared.modifyPosition(ticket: ticket, sl: newSL, tp: trade.takeProfit ?? 0)
-            if success == true {
-                godLog("✅ MT5: Trailing SL confirmed on terminal", level: .success)
-            } else {
-                godLog("⚠️ MT5: Trailing SL modification REJECTED", level: .error)
-            }
-        }
-    }
-
-    private func getATRForSymbol(_ symbol: String) async -> Double {
-        if let atr = try? await MT5Service.shared.getATR(symbol: symbol, period: 14) {
-            return atr
-        }
-        return symbol.contains("JPY") ? 0.20 : 0.0020
-    }
-
-    private func getLatestIndicators(symbol: String) async -> IndicatorSet? {
-        return latestSymbolIndicators[symbol]
-    }
-
-    private func setTrailingStop(_ stop: Double, for tradeId: UUID) {
-        trailingStops[tradeId] = stop
-    }
-
-    private func getTrailingStop(for tradeId: UUID) -> Double? {
-        return trailingStops[tradeId]
-    }
-
-    private func closeTrade(_ trade: TradeRecord, exitPrice: Double, reason: String, indicators: IndicatorSet?) async {
-        godLog("🎯 EXIT TRIGGER: \(trade.symbol) (\(reason)) @ \(exitPrice). Requesting MT5 closure...", level: .info)
-
-        if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
-            _ = try? await MT5Service.shared.closePosition(ticket: ticket)
-            await onPendingReconciliation?(trade)
-        }
-
-        activeTrades.removeValue(forKey: trade.id)
-        tradeEntryIndicators.removeValue(forKey: trade.id)
-        trailingStops.removeValue(forKey: trade.id)
-        partialTPExecuted.removeValue(forKey: trade.id)
-
-        godLog("🧹 Monitor: Stopped tracking \(trade.symbol). Waiting for broker verification.", level: .diagnostic)
-    }
-
-    private func calculatePnL(trade: TradeRecord, exitPrice: Double) -> Double {
-        let positionSize = trade.positionSize ?? 1000
-        if trade.type == .buy {
-            return (exitPrice - trade.entryPrice) * positionSize
-        } else {
-            return (trade.entryPrice - exitPrice) * positionSize
-        }
-    }
-
-    func getActiveTradeCount() -> Int {
-        return activeTrades.count
-    }
-
-    func getActiveTrades() -> [TradeRecord] {
-        return Array(activeTrades.values)
-    }
-
     func removeTrade(id: UUID) {
         activeTrades.removeValue(forKey: id)
         tradeEntryIndicators.removeValue(forKey: id)
         trailingStops.removeValue(forKey: id)
         partialTPExecuted.removeValue(forKey: id)
+        breakEvenSet.removeValue(forKey: id)
     }
-
+    
+    func getActiveTrades() -> [TradeRecord] {
+        return Array(activeTrades.values)
+    }
+    
+    func getLastTradeTime(symbol: String) -> Date? {
+        return activeTrades.values
+            .filter { $0.symbol == symbol }
+            .map { $0.entryTime }
+            .max()
+    }
+    
     func setPendingReconciliationCallback(_ callback: @escaping (TradeRecord) async -> Void) {
         self.onPendingReconciliation = callback
     }
     
-    private var onPendingReconciliation: ((TradeRecord) async -> Void)?
-
-    func getTradeStatus(_ tradeId: UUID) -> (currentPrice: Double?, trailingStop: Double?)? {
-        guard activeTrades[tradeId] != nil else { return nil }
-        return (currentPrice: nil, trailingStop: trailingStops[tradeId])
-    }
-
-    deinit {
-        priceUpdateTask?.cancel()
+    func setOnTradeClosedCallback(_ callback: @escaping (TradeRecord) async -> Void) {
+        self.onTradeClosed = callback
     }
 }

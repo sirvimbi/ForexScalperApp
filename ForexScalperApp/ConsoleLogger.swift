@@ -26,7 +26,7 @@ class ConsoleLogger: ObservableObject {
     
     private func setupObservers() {
         NotificationCenter.default.addObserver(
-            forName: NSNotification.Name.newLogEntryInternal,
+            forName: .newLogEntry,
             object: nil,
             queue: .main
         ) { notification in

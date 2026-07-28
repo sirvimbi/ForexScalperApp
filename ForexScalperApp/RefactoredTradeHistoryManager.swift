@@ -73,9 +73,11 @@ actor RefactoredTradeHistoryManager {
             switch filter {
             case .today:
                 cutoffDate = Calendar.current.startOfDay(for: Date())
-            case .week:
+            case .yesterday:
+                cutoffDate = Calendar.current.date(byAdding: .day, value: -1, to: Calendar.current.startOfDay(for: Date()))
+            case .last7Days:
                 cutoffDate = Calendar.current.date(byAdding: .day, value: -7, to: Date())
-            case .month:
+            case .thisMonth:
                 cutoffDate = Calendar.current.date(byAdding: .month, value: -1, to: Date())
             case .allTime:
                 cutoffDate = nil

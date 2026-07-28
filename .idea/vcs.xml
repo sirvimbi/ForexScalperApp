@@ -2,6 +2,7 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build_check/SourcePackages/checkouts/Starscream" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/mt5-bridge" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/mt5-bridge/MQL5/Experts/MQL5" vcs="Git" />
   </component>

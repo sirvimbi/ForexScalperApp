@@ -181,6 +181,7 @@ struct StatBox: View {
 // MARK: - Main Dashboard
 struct DashboardView: View {
     @StateObject private var viewModel: DashboardViewModel
+    @StateObject private var consoleLogger = ConsoleLogger.shared
     @EnvironmentObject private var coordinator: RefactoredAppCoordinator
     @State private var selectedTab = 0
     @State private var showTradeSheet = false
@@ -488,7 +489,7 @@ struct DashboardView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(ConsoleLogger.shared.logs) { entry in
+                        ForEach(consoleLogger.logs) { entry in
                             HStack(alignment: .top, spacing: 10) {
                                 Text(formatLogTime(entry.timestamp))
                                     .font(.system(size: 10, design: .monospaced))
@@ -508,7 +509,7 @@ struct DashboardView: View {
                     }
                     .padding(.vertical, 14)
                 }
-                .onChange(of: ConsoleLogger.shared.logs.count) { old, newValue in
+                .onChange(of: consoleLogger.logs.count) { old, newValue in
                     if let last = ConsoleLogger.shared.logs.last {
                         withAnimation {
                             proxy.scrollTo(last.id, anchor: .bottom)
@@ -778,51 +779,7 @@ struct DashboardView: View {
             
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    if !notificationManager.isAuthorized && !isNotificationBannerDismissed {
-                        HStack(spacing: 12) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.accentGold)
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Notifications are disabled")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(.white)
-                                Text("Enable them to receive real-time signals.")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.textSecondary)
-                            }
-                            
-                            Spacer()
-                            
-                            Button("Settings") {
-                                #if os(macOS)
-                                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.notifications")!)
-                                #else
-                                if let url = URL(string: UIApplication.openSettingsURLString) {
-                                    UIApplication.shared.open(url)
-                                }
-                                #endif
-                            }
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.accentCyan)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.accentCyan.opacity(0.1))
-                            .cornerRadius(4)
-                            
-                            Button(action: { isNotificationBannerDismissed = true }) {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.textMuted)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(10)
-                        .background(Color.bgCard)
-                        .cornerRadius(8)
-                        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentGold.opacity(0.3), lineWidth: 1))
-                        .padding(.bottom, 8)
-                    }
+                    NotificationBanner(isAuthorized: notificationManager.isAuthorized, isDismissed: $isNotificationBannerDismissed)
 
                     #if os(iOS)
                     HStack {
@@ -846,52 +803,7 @@ struct DashboardView: View {
                     let pendingSignals = allSignals.filter { $0.status == .pending }
                     
                     if pendingSignals.isEmpty {
-                        VStack(spacing: 20) {
-                            Image(systemName: "antenna.radiowaves.left.and.right.slash")
-                                .font(.system(size: 50))
-                                .foregroundColor(.textMuted)
-                            Text("No Active Signals")
-                                .font(.headline)
-                                .foregroundColor(.textSecondary)
-                            Text("Waiting for market signals...")
-                                .font(.subheadline)
-                                .foregroundColor(.textMuted)
-                            
-                            #if DEBUG
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("DEBUG INFO").font(.caption).bold()
-                                Text("Connection: \(coordinator.connectionStatus)")
-                                Text("Total signals in memory: \(coordinator.signals.count)")
-                                
-                                if !coordinator.signals.isEmpty {
-                                    Text("Latest signals:")
-                                        .font(.caption).bold()
-                                        .padding(.top, 4)
-                                    ForEach(coordinator.signals.prefix(3)) { signal in
-                                        HStack {
-                                            Circle()
-                                                .fill(signal.type == .buy ? Color.green : Color.red)
-                                                .frame(width: 8, height: 8)
-                                            Text("\(signal.symbol) \(signal.type == .buy ? "BUY" : "SELL")")
-                                                .font(.caption)
-                                            Text("Status: \(String(describing: signal.status))")
-                                                .font(.caption2)
-                                                .foregroundColor(.gray)
-                                        }
-                                    }
-                                } else {
-                                    Text("No signals in coordinator yet")
-                                        .font(.caption)
-                                }
-                            }
-                            .font(.caption)
-                            .padding()
-                            .background(Color.bgCardHover)
-                            .cornerRadius(8)
-                            #endif
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 300)
-                        .padding(.top, 40)
+                        NoSignalsView(connectionStatus: coordinator.connectionStatus, signalsCount: allSignals.count, signals: allSignals)
                     } else {
                         ForEach(pendingSignals.sorted(by: { $0.timestamp > $1.timestamp })) { signal in
                             signalCard(signal)
@@ -2561,5 +2473,124 @@ struct DashboardView: View {
         #else
         EmptyView()
         #endif
+    }
+}
+
+// MARK: - Subviews for Better Compilation
+struct NotificationBanner: View {
+    let isAuthorized: Bool
+    @Binding var isDismissed: Bool
+    
+    var body: some View {
+        if !isAuthorized && !isDismissed {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.accentGold)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Notifications are disabled")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white)
+                    Text("Enable them to receive real-time signals.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.textSecondary)
+                }
+                
+                Spacer()
+                
+                Button("Settings") {
+                    #if os(macOS)
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.notifications")!)
+                    #else
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                    #endif
+                }
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.accentCyan)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.accentCyan.opacity(0.1))
+                .cornerRadius(4)
+                
+                Button(action: { isDismissed = true }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.textMuted)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(10)
+            .background(Color.bgCard)
+            .cornerRadius(8)
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentGold.opacity(0.3), lineWidth: 1))
+            .padding(.bottom, 8)
+        }
+    }
+}
+
+struct NoSignalsView: View {
+    let connectionStatus: String
+    let signalsCount: Int
+    let signals: [Signal]
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                .font(.system(size: 50))
+                .foregroundColor(.textMuted)
+            Text("No Active Signals")
+                .font(.headline)
+                .foregroundColor(.textSecondary)
+            Text("Waiting for market signals...")
+                .font(.subheadline)
+                .foregroundColor(.textMuted)
+            
+            #if DEBUG
+            DebugInfoView(connectionStatus: connectionStatus, signalsCount: signalsCount, signals: signals)
+            #endif
+        }
+        .frame(maxWidth: .infinity, minHeight: 300)
+        .padding(.top, 40)
+    }
+}
+
+struct DebugInfoView: View {
+    let connectionStatus: String
+    let signalsCount: Int
+    let signals: [Signal]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("DEBUG INFO").font(.caption).bold()
+            Text("Connection: \(connectionStatus)")
+            Text("Total signals in memory: \(signalsCount)")
+            
+            if !signals.isEmpty {
+                Text("Latest signals:")
+                    .font(.caption).bold()
+                    .padding(.top, 4)
+                ForEach(signals.prefix(3)) { signal in
+                    HStack {
+                        Circle()
+                            .fill(signal.type == .buy ? Color.green : Color.red)
+                            .frame(width: 8, height: 8)
+                        Text("\(signal.symbol) \(signal.type == .buy ? "BUY" : "SELL")")
+                            .font(.caption)
+                        Text("Status: \(String(describing: signal.status))")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                }
+            } else {
+                Text("No signals in coordinator yet")
+                    .font(.caption)
+            }
+        }
+        .font(.caption)
+        .padding()
+        .background(Color.bgCardHover)
+        .cornerRadius(8)
     }
 }

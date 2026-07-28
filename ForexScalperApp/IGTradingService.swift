@@ -29,38 +29,28 @@ actor IGTradingService {
         
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            // Check HTTP status code
-            if let httpResponse = response as? HTTPURLResponse {
-                guard httpResponse.statusCode == 200 else {
-                    throw TradingError.apiError("Server returned status \(httpResponse.statusCode)")
-                }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        if let httpResponse = response as? HTTPURLResponse {
+            guard httpResponse.statusCode == 200 else {
+                throw TradingError.apiError("Server returned status \(httpResponse.statusCode)")
             }
-            
-            let authResponse = try decode(IGAuthResponse.self, from: data)
-            
-            // Store session information
-            if let sessionId = authResponse.data?.sessionId {
-                self.sessionId = sessionId
-            }
-            if let cst = authResponse.data?.cst {
-                self.cst = cst
-            }
-            if let token = authResponse.data?.xSecurityToken {
-                self.xSecurityToken = token
-            }
-            
-            return authResponse
-            
-        } catch let decodingError as DecodingError {
-            print("❌ Decoding error: \(decodingError)")
-            throw TradingError.decodingError
-        } catch {
-            print("❌ Network error: \(error)")
-            throw error
         }
+        
+        let authResponse = try decode(IGAuthResponse.self, from: data)
+        
+        // Store session information
+        if let sessionId = authResponse.data?.sessionId {
+            self.sessionId = sessionId
+        }
+        if let cst = authResponse.data?.cst {
+            self.cst = cst
+        }
+        if let token = authResponse.data?.xSecurityToken {
+            self.xSecurityToken = token
+        }
+        
+        return authResponse
     }
     
     // MARK: - Account Info
@@ -73,18 +63,11 @@ actor IGTradingService {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         
-        // Add session ID if available
         if let sessionId = sessionId {
             request.setValue(sessionId, forHTTPHeaderField: "x-session-id")
         }
         
         let (data, _) = try await URLSession.shared.data(from: url)
-        
-        // Check if response is HTML (starts with <)
-        if let firstChar = String(data: data.prefix(1), encoding: .utf8), firstChar == "<" {
-            throw TradingError.apiError("Backend returned HTML instead of JSON. Make sure your Node.js server is running at \(baseURL)")
-        }
-        
         let apiResponse = try decode(IGAPIResponse<IGAccountInfo>.self, from: data)
         
         guard apiResponse.success, let accountData = apiResponse.data else {
@@ -105,7 +88,6 @@ actor IGTradingService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        // Add session ID if available (required for authenticated requests)
         if let sessionId = sessionId {
             request.setValue(sessionId, forHTTPHeaderField: "x-session-id")
         } else {
@@ -113,7 +95,6 @@ actor IGTradingService {
         }
         
         let positionSize = signal.positionSize ?? 1000
-        
         let body: [String: Any] = [
             "signalId": signal.id.uuidString,
             "symbol": signal.symbol,
@@ -126,29 +107,23 @@ actor IGTradingService {
         
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            // Check HTTP status
-            if let httpResponse = response as? HTTPURLResponse {
-                if httpResponse.statusCode == 401 {
-                    throw TradingError.notAuthenticated
-                } else if httpResponse.statusCode != 200 {
-                    throw TradingError.apiError("Server returned status \(httpResponse.statusCode)")
-                }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        if let httpResponse = response as? HTTPURLResponse {
+            if httpResponse.statusCode == 401 {
+                throw TradingError.notAuthenticated
+            } else if httpResponse.statusCode != 200 {
+                throw TradingError.apiError("Server returned status \(httpResponse.statusCode)")
             }
-            
-            let apiResponse = try decode(IGAPIResponse<IGTradeResult>.self, from: data)
-            
-            guard apiResponse.success, let tradeResult = apiResponse.data else {
-                throw TradingError.apiError(apiResponse.error ?? "Unknown error")
-            }
-            
-            return tradeResult
-        } catch {
-            print("❌ IG execute trade error: \(error)")
-            throw error
         }
+        
+        let apiResponse = try decode(IGAPIResponse<IGTradeResult>.self, from: data)
+        
+        guard apiResponse.success, let tradeResult = apiResponse.data else {
+            throw TradingError.apiError(apiResponse.error ?? "Unknown error")
+        }
+        
+        return tradeResult
     }
     
     func getOpenPositions() async throws -> [IGPosition] {
@@ -159,7 +134,6 @@ actor IGTradingService {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         
-        // Add session ID if available
         if let sessionId = sessionId {
             request.setValue(sessionId, forHTTPHeaderField: "x-session-id")
         } else {
@@ -184,7 +158,6 @@ actor IGTradingService {
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         
-        // Add session ID if available
         if let sessionId = sessionId {
             request.setValue(sessionId, forHTTPHeaderField: "x-session-id")
         } else {
@@ -215,14 +188,12 @@ actor IGTradingService {
     
     // MARK: - Helper Methods
     
-    private func decode<T: Decodable & Sendable>(_ type: T.Type, from data: Data) throws -> T {
+    private nonisolated func decode<T: Decodable & Sendable>(_ type: T.Type, from data: Data) throws -> T {
         return try JSONDecoder().decode(type, from: data)
     }
 }
 
-// MARK: - Models (Moved to NetworkModels.swift)
-
-// MARK: - Extension for Config (if not already defined)
+// MARK: - Extension for Config
 extension UserDefaults {
     var igAPIKey: String {
         get { string(forKey: "igAPIKey") ?? "23ca12562ccdbef0e9ab24d55c4f423b604bddd9" }

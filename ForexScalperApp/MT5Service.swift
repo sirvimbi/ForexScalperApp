@@ -43,6 +43,26 @@ actor MT5Service {
     private var symbolTradeMode: [String: Int] = [:]
     private var symbolVolumeLimits: [String: (min: Double, max: Double, step: Double)] = [:]
     
+    // Rate limiting
+    private var lastRequestTime: Date?
+    private let minimumInterval: TimeInterval = 0.1 // 100ms between requests
+    
+    private func waitForRateLimit() async {
+        let now = Date()
+        if let last = lastRequestTime {
+            let waitTime = minimumInterval - now.timeIntervalSince(last)
+            if waitTime > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(waitTime * 1_000_000_000))
+            }
+        }
+        lastRequestTime = Date()
+    }
+    
+    private func rateLimitedRequest<T>(_ operation: @escaping () async throws -> T) async throws -> T {
+        await waitForRateLimit()
+        return try await operation()
+    }
+    
     func setBaseURL(_ url: String) {
         self.customBaseURL = url.hasSuffix("/") ? String(url.dropLast()) : url
         print("🌐 MT5: Base URL set to \(self.customBaseURL!)")
@@ -122,6 +142,7 @@ actor MT5Service {
                 request.setValue(authBuffer, forHTTPHeaderField: "Authorization")
                 
                 print("🔍 MT5: Checking connection at \(path)...")
+                godLog("🌐 MT5: Checking connection at \(path)...")
                 let (data, response) = try await session.data(for: request)
                 
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
@@ -130,18 +151,20 @@ actor MT5Service {
                         if status.connected {
                             godLog("✅ MT5: Connected via \(url.absoluteString)", level: .success)
                             return true
+                        } else {
+                            godLog("⚠️ MT5: Bridge online but EA not connected to account", level: .warning)
                         }
                     } else {
                         // For /v1/account, 200 means we're connected
-                        print("✅ MT5: Connected via \(url.absoluteString)")
+                        godLog("✅ MT5: Connected via \(url.absoluteString)", level: .success)
                         return true
                     }
                 } else if let httpResponse = response as? HTTPURLResponse {
                     let errorMsg = String(data: data, encoding: .utf8) ?? ""
-                    print("⚠️ MT5: \(path) returned \(httpResponse.statusCode): \(errorMsg)")
+                    godLog("❌ MT5: \(path) failed (\(httpResponse.statusCode)): \(errorMsg)", level: .error)
                 }
             } catch {
-                print("⚠️ MT5: Connection check failed for \(path): \(error.localizedDescription)")
+                godLog("❌ MT5: Connection check failed for \(path): \(error.localizedDescription)", level: .error)
                 continue
             }
         }
@@ -151,69 +174,72 @@ actor MT5Service {
     // MARK: - Market Data (God Mode Charts)
     
     func getCandles(symbol: String, timeframe: String, count: Int = 1000) async throws -> [Kline] {
-        // Clean symbol (remove slashes, e.g., EUR/USD -> EURUSD)
-        let cleanSymbol = symbol.replacingOccurrences(of: "/", with: "")
-        
-        // Map timeframe to MT5 format (e.g., 1m -> M1)
-        let mt5Timeframe: String
-        switch timeframe.lowercased() {
-        case "1m": mt5Timeframe = "M1"
-        case "5m": mt5Timeframe = "M5"
-        case "15m": mt5Timeframe = "M15"
-        case "30m": mt5Timeframe = "M30"
-        case "1h": mt5Timeframe = "H1"
-        case "4h": mt5Timeframe = "H4"
-        case "1d": mt5Timeframe = "D1"
-        default: mt5Timeframe = timeframe.uppercased()
-        }
-        
-        // Try the last working path first to reduce network chatter and 404s
-        var paths = ["/v1/history/prices", "/api/mt5/candles", "/candles"]
-        if let working = lastWorkingPath, let idx = paths.firstIndex(of: working) {
-            paths.remove(at: idx)
-            paths.insert(working, at: 0)
-        }
-        
-        for path in paths {
-            let urlString = "\(baseURL)\(path)?symbol=\(cleanSymbol)&time_frame=\(mt5Timeframe)&count=\(count)"
-            guard let url = URL(string: urlString) else { continue }
+        return try await rateLimitedRequest {
+            // Clean symbol (remove slashes, e.g., EUR/USD -> EURUSD)
+            let cleanSymbol = symbol.replacingOccurrences(of: "/", with: "")
             
-            var request = URLRequest(url: url)
-            request.setValue(authBuffer, forHTTPHeaderField: "Authorization")
-            request.timeoutInterval = 30.0 // INCREASED: Allow time for broker history download
-            
-            do {
-                let (data, response) = try await session.data(for: request)
-                
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                    let priceResponse = try decode(MT5PriceHistoryResponse.self, from: data)
-                    let mt5Candles = priceResponse.data
-                    
-                    self.lastWorkingPath = path // Cache success
-                    
-                    // PRODUCTION FIX: If we requested data but got back 0 bars, don't return an empty array
-                    if mt5Candles.isEmpty {
-                         continue 
-                    }
-
-                    return mt5Candles.map { candle in
-                        Kline(
-                            open: candle.open,
-                            high: candle.high,
-                            low: candle.low,
-                            close: candle.close,
-                            volume: candle.totalVolume,
-                            closeTime: Int(candle.time),
-                            spread: candle.spread != nil ? Double(candle.spread!) : nil
-                        )
-                    }
-                }
-            } catch {
-                continue
+            // Map timeframe to MT5 format (e.g., 1m -> M1)
+            let mt5Timeframe: String
+            switch timeframe.lowercased() {
+            case "1m": mt5Timeframe = "M1"
+            case "5m": mt5Timeframe = "M5"
+            case "15m": mt5Timeframe = "M15"
+            case "30m": mt5Timeframe = "M30"
+            case "1h": mt5Timeframe = "H1"
+            case "4h": mt5Timeframe = "H4"
+            case "1d": mt5Timeframe = "D1"
+            default: mt5Timeframe = timeframe.uppercased()
             }
+            
+            // Try the last working path first to reduce network chatter and 404s
+            var paths = ["/v1/history/prices", "/api/mt5/candles", "/candles"]
+            if let working = self.lastWorkingPath, let idx = paths.firstIndex(of: working) {
+                paths.remove(at: idx)
+                paths.insert(working, at: 0)
+            }
+            
+            for path in paths {
+                let urlString = "\(self.baseURL)\(path)?symbol=\(cleanSymbol)&time_frame=\(mt5Timeframe)&count=\(count)"
+                guard let url = URL(string: urlString) else { continue }
+                
+                var request = URLRequest(url: url)
+                request.setValue(self.authBuffer, forHTTPHeaderField: "Authorization")
+                request.timeoutInterval = 30.0 // INCREASED: Allow time for broker history download
+                
+                do {
+                    let (data, response) = try await self.session.data(for: request)
+                    
+                    if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                        let priceResponse = try self.decode(MT5PriceHistoryResponse.self, from: data)
+                        let mt5Candles = priceResponse.data
+                        
+                        self.lastWorkingPath = path // Cache success
+                        
+                        // PRODUCTION FIX: If we requested data but got back 0 bars, don't return an empty array
+                        if mt5Candles.isEmpty {
+                            continue 
+                        }
+
+                        return mt5Candles.map { candle in
+                            Kline(
+                                open: candle.open,
+                                high: candle.high,
+                                low: candle.low,
+                                close: candle.close,
+                                volume: candle.totalVolume,
+                                closeTime: Int(candle.time),
+                                spread: candle.spread != nil ? Double(candle.spread!) : nil,
+                                isClosed: true
+                            )
+                        }
+                    }
+                } catch {
+                    continue
+                }
+            }
+            
+            throw TradingError.apiError("Failed to fetch candles from MT5")
         }
-        
-        throw TradingError.apiError("Failed to fetch candles from MT5")
     }
     
     // MARK: - Trading (God Mode Execution)
@@ -560,7 +586,7 @@ actor MT5Service {
         return "US"
     }
     
-    private func decode<T: Decodable & Sendable>(_ type: T.Type, from data: Data) throws -> T {
+    private nonisolated func decode<T: Decodable & Sendable>(_ type: T.Type, from data: Data) throws -> T {
         return try JSONDecoder().decode(type, from: data)
     }
 }

@@ -79,6 +79,10 @@ actor TradeMonitor {
     private func closeTrade(_ trade: TradeRecord, exitPrice: Double, reason: String) async {
         godLog("🎯 EXIT TRIGGER: \(trade.symbol) (\(reason)) @ \(exitPrice). Requesting MT5 closure...", level: .info)
 
+        // ELITE CLEANUP: Unregister from risk filters immediately to allow new signals
+        await CorrelationFilter.shared.removeTrade(symbol: trade.symbol)
+        await RefactoredRiskManager.shared.closeTrade(trade)
+
         // 1. Send closure command to MT5
         if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
             _ = try? await MT5Service.shared.closePosition(ticket: ticket)

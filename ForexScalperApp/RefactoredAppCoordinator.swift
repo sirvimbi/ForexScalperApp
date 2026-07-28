@@ -6,7 +6,7 @@ import Combine
 class RefactoredAppCoordinator: ObservableObject {
     private let marketData: MarketDataProvider
     private let tradeMonitor: TradeMonitor
-    private let scalpingTradeMonitor: ScalpingTradeMonitor
+    let scalpingTradeMonitor: ScalpingTradeMonitor
     private let signalEngine: RefactoredSignalEngine
     private let scalpingEngine: ScalpingSignalEngine
     private let riskManager = RefactoredRiskManager.shared
@@ -296,9 +296,15 @@ class RefactoredAppCoordinator: ObservableObject {
     }
 
     private func handleScalpingUpdate(symbol: String, timeframe: String, kline: Kline) async {
-        // For scalping, we evaluate on every 1m candle
-        if timeframe == "1m" {
-            // ELITE EXECUTION FLOW: No extra guard here, let the Engine handle internal risk logic
+        // For scalping, we evaluate on every 1m candle, but ONLY on close
+        if timeframe == "1m" && kline.isClosed {
+            // Guard against duplicate evaluations for the same candle
+            let key = "\(symbol)_1m"
+            if lastScalpingSignalTime[key] == kline.timestamp {
+                return
+            }
+            lastScalpingSignalTime[key] = kline.timestamp
+
             // Evaluate scalping signal
             if let scalpingSignal = await scalpingEngine.evaluateScalpingSignal(symbol: symbol) {
                 // Convert to regular signal for acceptance flow
@@ -577,6 +583,12 @@ class RefactoredAppCoordinator: ObservableObject {
         do {
             let mt5Data = try await MT5Service.shared.getPositionsAndOrders()
             let internalActiveTrades = allInternalTrades.filter { $0.status == .active }
+            
+            // 🔥 ELITE SYNC: Ensure CorrelationFilter and RiskManagers are perfectly aligned with MT5
+            let activeSymbolsFromMT5 = Set(mt5Data.active.map { normalizeSymbol($0.symbol) })
+            await CorrelationFilter.shared.syncActiveSymbols(activeSymbolsFromMT5)
+            await scalpingRiskManager.syncActiveTrades(activeSymbolsFromMT5)
+            await riskManager.syncActiveTrades(activeSymbolsFromMT5)
 
             // ELITE RECONCILIATION: Safety check for trades no longer in MT5 positions
             for internalTrade in internalActiveTrades {
@@ -843,7 +855,7 @@ class RefactoredAppCoordinator: ObservableObject {
         }
 
         // Post global notification for any non-SwiftUI listeners
-        NotificationCenter.default.post(name: .newSignalGenerated, object: normalizedSignal)
+        // NotificationCenter.default.post(name: .newSignalGenerated, object: normalizedSignal)
 
         NotificationManager.shared.sendSignalNotification(normalizedSignal)
     }
@@ -901,13 +913,13 @@ class RefactoredAppCoordinator: ObservableObject {
     // In RefactoredAppCoordinator.swift, update the acceptSignal method:
 
     // MARK: - SMART ORDER ROUTING
-    private func executeSmartOrder(signal: Signal, positionSize: PositionSize) async -> Bool {
+    private func executeSmartOrder(signal: Signal, positionSize: PositionSize) async -> String? {
         let symbol = signal.symbol
         
         // 🎯 1. CORRELATION CHECK
-        guard await CorrelationFilter.shared.canOpenTrade(symbol: symbol) else {
+        guard await CorrelationFilter.shared.canOpenTrade(symbol: symbol, confidence: signal.confidence) else {
             godLog("🔄 Correlation Filter blocked \(symbol)", level: .warning)
-            return false
+            return nil
         }
         
         // 🎯 2. GET BEST EXECUTION PRICE FROM MT5
@@ -970,7 +982,7 @@ class RefactoredAppCoordinator: ObservableObject {
             await MainActor.run {
                 NotificationCenter.default.post(name: .mt5TradeExecuted, object: result)
             }
-            return true
+            return externalDealId
         } catch {
             // Fallback: Try market order
             godLog("⚠️ Smart order failed: \(error.localizedDescription). Falling back to market order", level: .warning)
@@ -984,17 +996,18 @@ class RefactoredAppCoordinator: ObservableObject {
             
             do {
                 let result = try await MT5Service.shared.executeTrade(signal: fallbackSignal)
-                godLog("✅ Fallback market order executed", level: .success)
+                let externalDealId = result.deal != nil ? String(result.deal!) : String(result.order ?? 0)
+                godLog("✅ Fallback market order executed (#\(externalDealId))", level: .success)
                 
                 await CorrelationFilter.shared.registerTrade(symbol: symbol)
                 
                 await MainActor.run {
                     NotificationCenter.default.post(name: .mt5TradeExecuted, object: result)
                 }
-                return true
+                return externalDealId
             } catch {
                 godLog("❌ All execution attempts failed: \(error.localizedDescription)", level: .error)
-                return false
+                return nil
             }
         }
     }
@@ -1028,10 +1041,12 @@ class RefactoredAppCoordinator: ObservableObject {
             var externalDealId: String?
 
             // MT5 Execution (God Mode Ultimate)
-            if normalizedSignal.source == .mt5 || selectedSignalSource == .mt5 || selectedSignalSource == .both {
-                let success = await executeSmartOrder(signal: normalizedSignal, positionSize: positionSize)
+            // FIXED: Execute on MT5 regardless of signal source if MT5 is available
+            let mt5Available = (try? await MT5Service.shared.checkConnection()) ?? false
+            if mt5Available {
+                externalDealId = await executeSmartOrder(signal: normalizedSignal, positionSize: positionSize)
                 
-                if !success {
+                if externalDealId == nil {
                     if normalizedSignal.source == .mt5 {
                         godLog("⚠️ MT5 execution failed - aborting", level: .warning)
                         await MainActor.run {
@@ -1041,7 +1056,7 @@ class RefactoredAppCoordinator: ObservableObject {
                     }
                 }
             }
-            // IG Execution
+            // IG Execution (Fallback or specific)
             else if normalizedSignal.source == .ig || selectedSignalSource == .ig {
                 do {
                     print("📤 Executing trade on IG for \(normalizedSymbol)...")
@@ -1465,4 +1480,29 @@ class RefactoredAppCoordinator: ObservableObject {
     }
 
     // MARK: - Status Update Methods
+    
+    func logPerformanceSummary() {
+        Task {
+            let report = await PerformanceAnalyzer.shared.getPerformanceReport()
+            godLog(report, level: .info)
+        }
+    }
+    
+    func check85PercentTarget() async -> Bool {
+        let trades = await tradeHistory.getAllTrades()
+        let completed = trades.filter { $0.status == .completed }
+        let wins = completed.filter { ($0.pnl ?? 0) > 0 }.count
+        let total = completed.count
+        
+        guard total > 0 else { return false }
+        let winRate = Double(wins) / Double(total)
+        
+        if winRate >= 0.85 {
+            godLog("🎯 85%+ WIN RATE ACHIEVED: \(String(format: "%.1f", winRate * 100))% 🏆", level: .success)
+            return true
+        } else {
+            godLog("📊 Current Win Rate: \(String(format: "%.1f", winRate * 100))% (Target: 85%+)", level: .info)
+            return false
+        }
+    }
 }
