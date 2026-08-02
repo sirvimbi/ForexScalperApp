@@ -58,12 +58,18 @@ actor ScalpingRiskManager: RiskManagerProtocol {
             return false
         }
         
-        // 4. Hourly limit (max 3 per hour for quality)
-        let currentHour = calendar.date(bySettingHour: calendar.component(.hour, from: now), minute: 0, second: 0, of: now) ?? now
-        let hourlyTrades = hourlyTradeCount[currentHour] ?? 0
-        if hourlyTrades >= 3 {
-            godLog("⚠️ Hourly limit reached: 3 trades", level: .warning)
-            return false
+        // 4. Hourly limit
+        let (hourlyEnabled, maxHourly) = await MainActor.run { 
+            (ScalpingConfig.shared.enableHourlyLimit, ScalpingConfig.shared.maxHourlyTrades)
+        }
+        
+        if hourlyEnabled {
+            let currentHour = calendar.date(bySettingHour: calendar.component(.hour, from: now), minute: 0, second: 0, of: now) ?? now
+            let hourlyTrades = hourlyTradeCount[currentHour] ?? 0
+            if hourlyTrades >= maxHourly {
+                godLog("⚠️ Hourly limit reached: \(maxHourly) trades", level: .warning)
+                return false
+            }
         }
         
         // 5. Concurrent trades
@@ -244,11 +250,13 @@ actor ScalpingRiskManager: RiskManagerProtocol {
         let calendar = Calendar.current
         let currentHour = calendar.date(bySettingHour: calendar.component(.hour, from: now), minute: 0, second: 0, of: now) ?? now
         
+        let maxHourly = await MainActor.run { ScalpingConfig.shared.maxHourlyTrades }
+        
         return RiskMetrics(
             dailyPnL: dailyPnL[today] ?? 0,
             dailyLossLimit: -parameters.accountBalance * parameters.maxDailyRisk,
             hourlyTrades: hourlyTradeCount[currentHour] ?? 0,
-            maxHourlyTrades: 3,
+            maxHourlyTrades: maxHourly,
             activeTrades: activeTrades.count,
             maxConcurrentTrades: parameters.maxConcurrentTrades,
             consecutiveLosses: consecutiveLosses

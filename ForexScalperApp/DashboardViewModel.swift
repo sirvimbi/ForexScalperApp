@@ -16,6 +16,8 @@ class DashboardViewModel: ObservableObject {
     // MARK: - Scalping Config (Syncs with Settings UI)
     @Published var scalpingConfig = ScalpingConfig.shared
     @Published var mandatoryConfluenceLevel: Double = 2.0
+    @Published var maxHourlyTrades: Double = 3.0
+    @Published var enableHourlyLimit: Bool = true
     @Published var activeSymbols: Set<String> = [] {
         didSet {
             UserDefaults.standard.set(Array(activeSymbols), forKey: "activeSymbols")
@@ -93,6 +95,8 @@ class DashboardViewModel: ObservableObject {
         
         // Load from ScalpingConfig
         self.mandatoryConfluenceLevel = Double(scalpingConfig.mandatoryConfluenceLevel)
+        self.maxHourlyTrades = Double(scalpingConfig.maxHourlyTrades)
+        self.enableHourlyLimit = scalpingConfig.enableHourlyLimit
     }
     
     func updateCoordinator(_ coordinator: RefactoredAppCoordinator) {
@@ -173,6 +177,9 @@ class DashboardViewModel: ObservableObject {
         UserDefaults.standard.set(scalpingConfig.minVolatilityATR, forKey: "eliteMinVolatilityATR")
         UserDefaults.standard.set(scalpingConfig.minVolumeRatio, forKey: "eliteMinVolumeRatio")
         UserDefaults.standard.set(scalpingConfig.minConfluencePillars, forKey: "eliteMinConfluencePillars")
+        
+        UserDefaults.standard.set(enableHourlyLimit, forKey: "enableHourlyLimit")
+        UserDefaults.standard.set(Int(maxHourlyTrades), forKey: "maxHourlyTrades")
         
         UserDefaults.standard.set(notifyOnSignal, forKey: "notifyOnSignal")
         UserDefaults.standard.set(notifyOnTrade, forKey: "notifyOnTrade")

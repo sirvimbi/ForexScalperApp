@@ -791,7 +791,7 @@ class RefactoredAppCoordinator: ObservableObject {
         if metrics.consecutiveLosses.values.contains(where: { $0 >= 2 }) {
             statusDetails += " - Reducing risk due to losses"
         }
-        if metrics.hourlyTrades >= 4 {
+        if metrics.hourlyTrades >= metrics.maxHourlyTrades - 1 {
             statusDetails += " - Near hourly limit"
         }
 
@@ -1390,7 +1390,7 @@ class RefactoredAppCoordinator: ObservableObject {
                      📊 SCALPING METRICS
                      Daily P&L: KES \(String(format: "%.2f", metrics.dailyPnL))
                      Daily Limit: KES \(String(format: "%.2f", metrics.dailyLossLimit))
-                     Hourly Trades: \(metrics.hourlyTrades)/5
+                     Hourly Trades: \(metrics.hourlyTrades)/\(metrics.maxHourlyTrades)
                      Active Trades: \(metrics.activeTrades)/\(metrics.maxConcurrentTrades)
 
                      Consecutive Losses:

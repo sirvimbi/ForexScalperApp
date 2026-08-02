@@ -29,6 +29,8 @@ class ScalpingConfig: ObservableObject {
     @Published var maxDailyTrades: Int = 8
     @Published var maxConcurrentScalps: Int = 2
     @Published var maxCorrelatedTrades: Int = 1
+    @Published var enableHourlyLimit: Bool = true
+    @Published var maxHourlyTrades: Int = 3
     
     // MARK: - STOP LOSS (ELITE)
     @Published var baseSLPips: Double = 8.0
@@ -147,6 +149,8 @@ class ScalpingConfig: ObservableObject {
             self.enableIndicatorExit = config.enableIndicatorExit
             self.maxDailyTrades = config.maxDailyTrades
             self.maxConcurrentScalps = config.maxConcurrentScalps
+            self.enableHourlyLimit = config.enableHourlyLimit ?? true
+            self.maxHourlyTrades = config.maxHourlyTrades ?? 3
             self.baseSLPips = config.baseSLPips
             self.maxSLPips = config.maxSLPips
             self.minSLPips = config.minSLPips
@@ -180,6 +184,8 @@ class ScalpingConfig: ObservableObject {
             enableIndicatorExit: enableIndicatorExit,
             maxDailyTrades: maxDailyTrades,
             maxConcurrentScalps: maxConcurrentScalps,
+            enableHourlyLimit: enableHourlyLimit,
+            maxHourlyTrades: maxHourlyTrades,
             baseSLPips: baseSLPips,
             maxSLPips: maxSLPips,
             minSLPips: minSLPips,
@@ -218,6 +224,8 @@ class ScalpingConfig: ObservableObject {
         let enableIndicatorExit: Bool
         let maxDailyTrades: Int
         let maxConcurrentScalps: Int
+        let enableHourlyLimit: Bool?
+        let maxHourlyTrades: Int?
         let baseSLPips: Double
         let maxSLPips: Double
         let minSLPips: Double

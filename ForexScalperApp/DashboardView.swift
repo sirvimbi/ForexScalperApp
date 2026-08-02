@@ -1738,6 +1738,8 @@ struct DashboardView: View {
                             ScalpingConfig.shared.cooldownSeconds = viewModel.scalpingConfig.cooldownSeconds
                             ScalpingConfig.shared.minConfluencePillars = viewModel.scalpingConfig.minConfluencePillars
                             ScalpingConfig.shared.brokerSuffix = viewModel.scalpingConfig.brokerSuffix
+                            ScalpingConfig.shared.enableHourlyLimit = viewModel.enableHourlyLimit
+                            ScalpingConfig.shared.maxHourlyTrades = Int(viewModel.maxHourlyTrades)
                             
                             viewModel.saveSettings() 
                         }) {
@@ -1826,6 +1828,28 @@ struct DashboardView: View {
                                                     .frame(width: 28, alignment: .center)
                                                     .offset(x: -46)
                                             )
+                                    }
+
+                                    Divider().background(Color.borderSubtle)
+
+                                    settingsRow("Enable Hourly Limit") {
+                                        Toggle("", isOn: $viewModel.enableHourlyLimit)
+                                            .toggleStyle(SwitchToggleStyle(tint: .accentRed))
+                                            .scaleEffect(0.8)
+                                            .labelsHidden()
+                                    }
+
+                                    if viewModel.enableHourlyLimit {
+                                        settingsRow("Max Trades per Hour") {
+                                            HStack(spacing: 8) {
+                                                Slider(value: $viewModel.maxHourlyTrades, in: 1...15, step: 1)
+                                                    .frame(width: 100)
+                                                Text("\(Int(viewModel.maxHourlyTrades))")
+                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                    .foregroundColor(.accentRed)
+                                                    .frame(width: 20, alignment: .trailing)
+                                            }
+                                        }
                                     }
                                 }
                                 .padding(16)
