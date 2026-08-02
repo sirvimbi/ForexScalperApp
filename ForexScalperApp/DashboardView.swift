@@ -1839,18 +1839,18 @@ struct DashboardView: View {
                                             .labelsHidden()
                                     }
 
-                                    if viewModel.enableHourlyLimit {
-                                        settingsRow("Max Trades per Hour") {
-                                            HStack(spacing: 8) {
-                                                Slider(value: $viewModel.maxHourlyTrades, in: 1...15, step: 1)
-                                                    .frame(width: 100)
-                                                Text("\(Int(viewModel.maxHourlyTrades))")
-                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(.accentRed)
-                                                    .frame(width: 20, alignment: .trailing)
-                                            }
+                                    settingsRow("Max Trades per Hour") {
+                                        HStack(spacing: 8) {
+                                            Slider(value: $viewModel.maxHourlyTrades, in: 1...15, step: 1)
+                                                .frame(width: 100)
+                                                .disabled(!viewModel.enableHourlyLimit)
+                                            Text("\(Int(viewModel.maxHourlyTrades))")
+                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                .foregroundColor(viewModel.enableHourlyLimit ? .accentRed : .textMuted)
+                                                .frame(width: 20, alignment: .trailing)
                                         }
                                     }
+                                    .opacity(viewModel.enableHourlyLimit ? 1.0 : 0.5)
                                 }
                                 .padding(16)
                             }
@@ -2313,6 +2313,15 @@ struct DashboardView: View {
             }
             Stepper("Max Concurrent Trades: \(viewModel.maxConcurrentTrades)",
                     value: $viewModel.maxConcurrentTrades, in: 1...10)
+            
+            Toggle("Enable Hourly Limit", isOn: $viewModel.enableHourlyLimit)
+            if viewModel.enableHourlyLimit {
+                HStack {
+                    Text("Max Trades per Hour"); Spacer()
+                    Slider(value: $viewModel.maxHourlyTrades, in: 1...15, step: 1)
+                    Text("\(Int(viewModel.maxHourlyTrades))")
+                }
+            }
         }
         #else
         EmptyView()
