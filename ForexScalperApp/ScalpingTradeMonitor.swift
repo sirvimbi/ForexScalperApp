@@ -284,12 +284,23 @@ actor ScalpingTradeMonitor {
         godLog("🎯 EXIT: \(trade.symbol) (\(reason)) @ \(String(format: "%.5f", exitPrice))", level: .info)
         
         // Close on MT5
+        var successfullyClosed = false
         if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
-            _ = try? await MT5Service.shared.closePosition(ticket: ticket)
-            await onPendingReconciliation?(trade)
+            do {
+                successfullyClosed = try await MT5Service.shared.closePosition(ticket: ticket)
+                if successfullyClosed {
+                    await onPendingReconciliation?(trade)
+                } else {
+                    godLog("⚠️ MT5: Failed to close #\(ticket). Will retry on next price update.", level: .warning)
+                    return // ABORT: Don't mark as completed if broker hasn't closed it
+                }
+            } catch {
+                godLog("❌ MT5: Error closing #\(ticket): \(error.localizedDescription). Retrying...", level: .error)
+                return // ABORT: Keep active to retry
+            }
         }
         
-        // Update trade record
+        // Update trade record only after confirmed success
         var updatedTrade = trade
         updatedTrade.exitPrice = exitPrice
         updatedTrade.exitTime = Date()
@@ -303,19 +314,21 @@ actor ScalpingTradeMonitor {
         partialTPExecuted.removeValue(forKey: trade.id)
         breakEvenSet.removeValue(forKey: trade.id)
         
-        // Update performance
+        // Update performance and risk managers
         await ScalpingRiskManager.shared.closeTrade(updatedTrade)
         await CorrelationFilter.shared.removeTrade(symbol: trade.symbol)
         await PerformanceAnalyzer.shared.recordTrade(updatedTrade)
         
-        // Notify
+        // Post global notification for UI and history
         if let onTradeClosed = self.onTradeClosed {
             await onTradeClosed(updatedTrade)
         }
+        
+        // Send user notification only after successful closure
         await NotificationManager.shared.sendTradeClosedNotification(updatedTrade)
         
         let isWin = (updatedTrade.pnl ?? 0) > 0
-        godLog("📊 Trade closed: \(trade.symbol) - P&L: KES \(String(format: "%.2f", updatedTrade.pnl ?? 0))", level: isWin ? .success : .warning)
+        godLog("📊 Verified Close: \(trade.symbol) - P&L: KES \(String(format: "%.2f", updatedTrade.pnl ?? 0))", level: isWin ? .success : .warning)
     }
     
     private func calculatePnL(trade: TradeRecord, exitPrice: Double) -> Double {

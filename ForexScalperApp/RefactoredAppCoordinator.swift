@@ -62,6 +62,9 @@ class RefactoredAppCoordinator: ObservableObject {
         return marketData
     }
 
+    // Evaluation tracking
+    private var isEvaluating: Set<String> = []
+
     // MARK: - Symbol Whitelist for Scalping
     private let allowedScalpingSymbols = Set([
                                                  "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD",  // Majors
@@ -296,20 +299,25 @@ class RefactoredAppCoordinator: ObservableObject {
     }
 
     private func handleScalpingUpdate(symbol: String, timeframe: String, kline: Kline) async {
-        // For scalping, we evaluate on every 1m candle, but ONLY on close
-        if timeframe == "1m" && kline.isClosed {
-            // Guard against duplicate evaluations for the same candle
-            let key = "\(symbol)_1m"
-            if lastScalpingSignalTime[key] == kline.timestamp {
-                return
-            }
-            lastScalpingSignalTime[key] = kline.timestamp
+        // ELITE FIX: Enable round-the-clock evaluation on every price update (tick)
+        // This ensures signals are generated the second conditions are met, one by one.
+        if timeframe == "1m" {
+            // Evaluate scalping signal in a detached task to ensure individual processing
+            Task { [weak self] in
+                guard let self = self else { return }
+                
+                // Concurrent guard: Don't evaluate the same symbol twice simultaneously
+                if await MainActor.run(body: { self.isEvaluating.contains(symbol) }) { return }
+                await MainActor.run { self.isEvaluating.insert(symbol) }
+                
+                defer {
+                    Task { @MainActor in self.isEvaluating.remove(symbol) }
+                }
 
-            // Evaluate scalping signal
-            if let scalpingSignal = await scalpingEngine.evaluateScalpingSignal(symbol: symbol) {
-                // Convert to regular signal for acceptance flow
-                let signal = createSignal(from: scalpingSignal)
-                await handleNewSignal(signal)
+                if let scalpingSignal = await scalpingEngine.evaluateScalpingSignal(symbol: symbol) {
+                    let signal = createSignal(from: scalpingSignal)
+                    await handleNewSignal(signal)
+                }
             }
         }
 
