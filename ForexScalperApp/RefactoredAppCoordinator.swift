@@ -598,6 +598,10 @@ class RefactoredAppCoordinator: ObservableObject {
                 let stillPending = mt5Data.pending.contains { String($0.ticket) == dealId }
 
                 if !stillActive && !stillPending {
+                    // ELITE FIX: Do NOT mark as completed if it was just added or if MT5 bridge might be lagging
+                    let timeOpen = Date().timeIntervalSince(internalTrade.entryTime)
+                    if timeOpen < 10 { continue } // Ignore if trade is less than 10s old (sync race condition)
+
                     // GOD MODE FIX: Do NOT mark as completed yet. 
                     // Let the History Sync (below) handle the final closure with real P&L.
                     godLog("🔍 Reconciliation: Trade #\(dealId) is missing from active list. Waiting for History Sync to confirm final result...", level: .info)
@@ -675,6 +679,14 @@ class RefactoredAppCoordinator: ObservableObject {
                 if let existingTrade = await tradeHistory.getTradeByExternalId(dealId) {
                     // If it was previously active, update it with final P&L and MARK AS COMPLETED
                     if existingTrade.status == .active || existingTrade.status == .pending || (existingTrade.pnl == nil) {
+                        // CRITICAL ELITE FIX: Double-check that this isn't a "phantom" history entry 
+                        // by ensuring the close time is actually recent or after entry.
+                        let closeTime = parseMT5Time(pos.close_time) ?? Date()
+                        if closeTime <= existingTrade.entryTime.addingTimeInterval(1) {
+                            godLog("⚠️ Sync: Detected MT5 history anomaly for \(normalizedSymbol). Ignoring stale record.", level: .diagnostic)
+                            continue
+                        }
+
                         godLog("📊 Verifying closure for \(normalizedSymbol): P&L KES \(String(format: "%.2f", pos.profit)) (MT5 Verified)", level: .success)
                         var updatedTrade = existingTrade
                         updatedTrade.exitPrice = pos.close_price

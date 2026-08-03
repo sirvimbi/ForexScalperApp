@@ -80,18 +80,26 @@ actor ScalpingTradeMonitor {
         
         // ELITE: Use a tighter TP with partial profit taking
         let pipSize = trade.symbol.contains("JPY") ? 0.01 : 0.0001
-        let currentPips = abs(currentPrice - trade.entryPrice) / pipSize
+        let currentPips = (trade.type == .buy ? currentPrice - trade.entryPrice : trade.entryPrice - currentPrice) / pipSize
         let tpPips = abs(tp - trade.entryPrice) / pipSize
         
-        // If we're at 70% of TP, start checking for exit
+        // If we're at 70% of TP, start checking for exit optimization (ELITE PROFIT LOGIC)
         if currentPips >= tpPips * 0.7 {
-            // Check if momentum is slowing (RSI divergence, etc.)
             if let indicators = tradeEntryIndicators[trade.id] {
-                // Exit early if overbought/oversold
-                if trade.type == .buy && indicators.rsi > 70 {
-                    return true
-                }
-                if trade.type == .sell && indicators.rsi < 30 {
+                // ELITE: Confluence Exit - Don't wait for TP if signs show reversal
+                // 1. RSI Exhaustion
+                let rsiOverextended = trade.type == .buy ? indicators.rsi > 72 : indicators.rsi < 28
+                
+                // 2. Momentum Slowdown (Current RSI vs Entry)
+                let momentumFading = trade.type == .buy ? 
+                    (indicators.rsi < 65 && indicators.stochasticK < 70) : 
+                    (indicators.rsi > 35 && indicators.stochasticK > 30)
+                
+                // 3. Price Pattern Rejection (BB Touch + Rejection)
+                let bbRejection = trade.type == .buy ? indicators.bbPosition > 1.02 : indicators.bbPosition < -0.02
+                
+                if rsiOverextended || (momentumFading && currentPips > tpPips * 0.85) || bbRejection {
+                    godLog("💎 ELITE PROFIT CAPTURE: \(trade.symbol) (\(Int(currentPips)) pips) - Confluence Exit triggered.", level: .success)
                     return true
                 }
             }
