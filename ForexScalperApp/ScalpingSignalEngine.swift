@@ -10,6 +10,10 @@ actor ScalpingSignalEngine {
     private let timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "D1", "W1"]
     private var lastSignalTime: [String: Date] = [:]
     
+    // --- SELF-LEARNING QUALITY TRACKING ---
+    private var signalQualityHistory: [String: [SignalQuality]] = [:]
+    private let maxQualityHistory = 100
+    
     // Symbol Performance Tracking
     private var symbolPerformance: [String: (wins: Int, losses: Int, pnl: Double)] = [:]
     private let minTradesForAdaptation = 5
@@ -100,11 +104,57 @@ actor ScalpingSignalEngine {
 
         let threshold = await MainActor.run { ScalpingConfig.shared.getConfidenceThreshold(for: symbol) }
         guard signal.confidence >= threshold else { return nil }
-        guard validateRiskReward(signal) else { return nil }
+        
+        // --- SELF-LEARNING: Apply historical performance adjustment ---
+        let adjustedSignal = await applyHistoricalAdjustment(signal)
+        guard adjustedSignal.confidence >= threshold else { return nil }
+        
+        guard validateRiskReward(adjustedSignal) else { return nil }
+
+        // Track quality for self-learning
+        await trackSignalQuality(adjustedSignal)
 
         lastSignalTime[symbol] = Date()
-        godLog("🚀 GOD MODE V7.0: Elite Signal for \(symbol) | Confidence: \(Int(signal.confidence))%", level: .success)
+        godLog("🚀 HYBRID SIGNAL: \(symbol) | Confidence: \(Int(adjustedSignal.confidence))%", level: .success)
+        return adjustedSignal
+    }
+
+    private func applyHistoricalAdjustment(_ signal: ScalpingSignal) async -> ScalpingSignal {
+        let qualityHistory = signalQualityHistory[signal.symbol] ?? []
+        guard qualityHistory.count >= 10 else { return signal }
+        
+        let similarSignals = qualityHistory.filter {
+            abs($0.confidence - signal.confidence) < 10 && $0.type == signal.type
+        }
+        
+        let wins = similarSignals.compactMap { $0.wasWin }.filter { $0 }.count
+        let total = similarSignals.compactMap { $0.wasWin }.count
+        
+        if total > 0 {
+            let winRate = Double(wins) / Double(total)
+            // ELITE: If historical win rate for this confidence bucket is poor, penalize confidence
+            if winRate < 0.5 && signal.confidence > 80 {
+                let adjustedConfidence = signal.confidence * 0.8
+                return await signal.withConfidence(adjustedConfidence)
+            }
+        }
         return signal
+    }
+
+    func updateSignalQuality(symbol: String, type: SignalType, confidence: Double, wasWin: Bool) async {
+        var history = signalQualityHistory[symbol] ?? []
+        if let index = history.lastIndex(where: { $0.type == type && abs($0.confidence - confidence) < 5 && $0.wasWin == nil }) {
+            history[index].wasWin = wasWin
+        }
+        signalQualityHistory[symbol] = history
+    }
+
+    private func trackSignalQuality(_ signal: ScalpingSignal) async {
+        var history = signalQualityHistory[signal.symbol] ?? []
+        let quality = SignalQuality(type: signal.type, confidence: signal.confidence, timestamp: signal.timestamp, wasWin: nil)
+        history.append(quality)
+        if history.count > maxQualityHistory { history.removeFirst() }
+        signalQualityHistory[signal.symbol] = history
     }
 
     private func validateVolatility(_ symbol: String, indicators: IndicatorSet) async -> Bool {

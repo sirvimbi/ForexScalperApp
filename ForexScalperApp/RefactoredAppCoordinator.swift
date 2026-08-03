@@ -307,11 +307,13 @@ class RefactoredAppCoordinator: ObservableObject {
                 guard let self = self else { return }
                 
                 // Concurrent guard: Don't evaluate the same symbol twice simultaneously
-                if await MainActor.run(body: { self.isEvaluating.contains(symbol) }) { return }
-                await MainActor.run { self.isEvaluating.insert(symbol) }
+                let alreadyEvaluating = await MainActor.run { self.isEvaluating.contains(symbol) }
+                if alreadyEvaluating { return }
+                
+                _ = await MainActor.run { self.isEvaluating.insert(symbol) }
                 
                 defer {
-                    Task { @MainActor in self.isEvaluating.remove(symbol) }
+                    Task { @MainActor in _ = self.isEvaluating.remove(symbol) }
                 }
 
                 if let scalpingSignal = await scalpingEngine.evaluateScalpingSignal(symbol: symbol) {
@@ -1194,6 +1196,18 @@ class RefactoredAppCoordinator: ObservableObject {
 
         // Update risk metrics
         await updateRiskMetrics()
+
+        // --- SELF-LEARNING FEEDBACK ---
+        if tradingMode == .scalping {
+            let wasWin = (trade.pnl ?? 0) > 0
+            await scalpingEngine.updateSignalQuality(
+                symbol: trade.symbol, 
+                type: trade.type, 
+                confidence: trade.confidence, 
+                wasWin: wasWin
+            )
+            await scalpingEngine.updateSymbolPerformance(symbol: trade.symbol, pnl: trade.pnl ?? 0)
+        }
 
         // RECORD PERFORMANCE (God Mode Learning)
         await PerformanceAnalyzer.shared.recordTrade(trade)
