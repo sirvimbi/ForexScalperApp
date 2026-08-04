@@ -88,21 +88,35 @@ actor ScalpingSignalEngine {
         guard validateData(candlesByTimeframe, symbol: symbol) else { return nil }
         let indicators = await calculateAllIndicators(symbol: symbol, candlesByTimeframe: candlesByTimeframe)
 
+        let pointSize = symbol.contains("JPY") ? 0.01 : 0.0001
         let actualSpread: Double
         if let s = indicators.spread {
-            let pointSize = symbol.contains("JPY") ? 0.01 : 0.0001
             actualSpread = (s * pointSize / indicators.currentPrice) * 10000
         } else {
             actualSpread = (indicators.atr / indicators.currentPrice) * 10000
         }
         
-        if actualSpread > spreadTol { return nil }
-        guard await validateVolatility(symbol, indicators: indicators) else { return nil }
+        let atrPercentage = indicators.atr / indicators.currentPrice * 100
+        godLog("🔍 EVAL: \(symbol) | Price: \(String(format: "%.5f", indicators.currentPrice)) | Spread: \(String(format: "%.1f", actualSpread)) pips | Vol: \(String(format: "%.3f", atrPercentage))%", level: .diagnostic)
+
+        if actualSpread > spreadTol { 
+            // godLog("⚠️ \(symbol) blocked: Spread too high (\(String(format: "%.1f", actualSpread)) > \(spreadTol))", level: .diagnostic)
+            return nil 
+        }
+        guard await validateVolatility(symbol, indicators: indicators) else { 
+            // godLog("⚠️ \(symbol) blocked: Volatility outside bounds (\(String(format: "%.3f", atrPercentage))%)", level: .diagnostic)
+            return nil 
+        }
 
         let signal = await generateSignal(symbol: symbol, indicators: indicators)
         if signal.type == .none { return nil }
 
         let threshold = await MainActor.run { ScalpingConfig.shared.getConfidenceThreshold(for: symbol) }
+        
+        // Log Pillar Details
+        let pillarDetails = signal.confidenceFactors.map { "\($0.key): \(Int($0.value))" }.joined(separator: ", ")
+        godLog("📊 SCORE: \(symbol) \(signal.type) | Total Score: \(signal.score) | Confidence: \(Int(signal.confidence))% | Pillars: [\(pillarDetails)]", level: .diagnostic)
+
         guard signal.confidence >= threshold else { return nil }
         
         // --- SELF-LEARNING: Apply historical performance adjustment ---

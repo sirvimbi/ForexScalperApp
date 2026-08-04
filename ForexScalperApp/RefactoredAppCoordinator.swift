@@ -563,6 +563,7 @@ class RefactoredAppCoordinator: ObservableObject {
                 do {
                     let candles = try await MT5Service.shared.getCandles(symbol: symbol, timeframe: "1m", count: 2)
                     if let lastCandle = candles.last {
+                        // godLog("📊 MT5 Polled: \(symbol) - Last Close: \(String(format: "%.5f", lastCandle.close))", level: .diagnostic)
                         await handleKlineUpdate(symbol: symbol, timeframe: "1m", kline: lastCandle)
                     }
                 } catch {
@@ -848,6 +849,8 @@ class RefactoredAppCoordinator: ObservableObject {
         let normalizedSymbol = normalizeSymbol(signal.symbol)
         var normalizedSignal = signal
         normalizedSignal.symbol = normalizedSymbol
+
+        godLog("🛎 NEW SIGNAL: \(normalizedSymbol) \(signal.type) @ \(String(format: "%.5f", signal.price)) (Confidence: \(Int(signal.confidence))%)", level: .info)
 
         // ELITE SIGNAL REFRESH: Replace any existing pending signal for this symbol with the fresh one
         await MainActor.run {

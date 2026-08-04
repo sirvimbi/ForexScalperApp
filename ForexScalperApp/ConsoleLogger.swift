@@ -7,7 +7,7 @@ class ConsoleLogger: ObservableObject {
     static let shared = ConsoleLogger()
     
     @Published var logs: [LogEntryUI] = []
-    private let maxLogs = 2000
+    private let maxLogs = 1000
     
     struct LogEntryUI: Identifiable, Equatable {
         let id = UUID()
@@ -22,6 +22,30 @@ class ConsoleLogger: ObservableObject {
     
     private init() {
         setupObservers()
+        startCleanupTimer()
+    }
+    
+    private func startCleanupTimer() {
+        // Run cleanup every 5 minutes
+        Timer.publish(every: 300, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.cleanupOldLogs()
+            }
+            .store(in: &cancellables)
+    }
+
+    private var cancellables = Set<AnyCancellable>()
+
+    private func cleanupOldLogs() {
+        let thirtyMinutesAgo = Date().addingTimeInterval(-1800)
+        let originalCount = logs.count
+        logs.removeAll { $0.timestamp < thirtyMinutesAgo }
+        
+        let removed = originalCount - logs.count
+        if removed > 0 {
+            log("🧹 Log Cleanup: Removed \(removed) entries older than 30 minutes", level: .diagnostic)
+        }
     }
     
     private func setupObservers() {
