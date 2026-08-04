@@ -378,7 +378,7 @@ actor MT5Service {
         throw TradingError.apiError("Failed to fetch account info")
     }
     
-    func closePosition(ticket: Int, volume: Double? = nil) async throws -> Bool {
+    func closePosition(ticket: Int64, volume: Double? = nil) async throws -> Bool {
         let paths = ["/v1/order/close", "/api/mt5/close", "/close"]
         
         for path in paths {
@@ -457,7 +457,7 @@ actor MT5Service {
         throw TradingError.apiError("Symbol info unavailable")
     }
 
-    func modifyPosition(ticket: Int, sl: Double, tp: Double) async throws -> Bool {
+    func modifyPosition(ticket: Int64, sl: Double, tp: Double) async throws -> Bool {
         let paths = ["/v1/order/modify", "/api/mt5/modify", "/modify"]
         
         for path in paths {

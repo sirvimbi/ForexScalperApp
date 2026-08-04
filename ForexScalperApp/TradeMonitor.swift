@@ -84,7 +84,7 @@ actor TradeMonitor {
         await RefactoredRiskManager.shared.closeTrade(trade)
 
         // 1. Send closure command to MT5
-        if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
+        if let ticketStr = trade.externalDealId, let ticket = Int64(ticketStr) {
             _ = try? await MT5Service.shared.closePosition(ticket: ticket)
         }
 

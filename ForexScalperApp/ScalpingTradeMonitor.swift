@@ -135,7 +135,7 @@ actor ScalpingTradeMonitor {
     }
 
     private func syncTrailingStopToMT5(trade: TradeRecord, newSL: Double) async {
-        if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
+        if let ticketStr = trade.externalDealId, let ticket = Int64(ticketStr) {
             _ = try? await MT5Service.shared.modifyPosition(ticket: ticket, sl: newSL, tp: trade.takeProfit ?? 0)
         }
     }
@@ -158,7 +158,7 @@ actor ScalpingTradeMonitor {
                 let volume = trade.positionSize ?? 0.01
                 let closeVolume = volume * lvlPercent
                 
-                if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
+                if let ticketStr = trade.externalDealId, let ticket = Int64(ticketStr) {
                     _ = try? await MT5Service.shared.closePosition(ticket: ticket, volume: closeVolume)
                 }
                 
@@ -172,7 +172,7 @@ actor ScalpingTradeMonitor {
                     updatedTrade.stopLoss = breakEven
                     activeTrades[trade.id] = updatedTrade
                     
-                    if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
+                    if let ticketStr = trade.externalDealId, let ticket = Int64(ticketStr) {
                         _ = try? await MT5Service.shared.modifyPosition(ticket: ticket, sl: breakEven, tp: trade.takeProfit ?? 0)
                     }
                 }
@@ -209,14 +209,24 @@ actor ScalpingTradeMonitor {
         godLog("🎯 EXIT: \(trade.symbol) (\(reason)) @ \(String(format: "%.5f", exitPrice))", level: .info)
         
         var successfullyClosed = false
-        if let ticketStr = trade.externalDealId, let ticket = Int(ticketStr) {
+        if let ticketStr = trade.externalDealId, let ticket = Int64(ticketStr) {
             do {
                 successfullyClosed = try await MT5Service.shared.closePosition(ticket: ticket)
                 if successfullyClosed {
                     await onPendingReconciliation?(trade)
                 } else {
-                    godLog("⚠️ MT5: Failed to close #\(ticket). Will retry on next price update.", level: .warning)
-                    return // ABORT: Don't mark as completed if broker hasn't closed it
+                    // ELITE FIX: Check if position still exists on MT5. 
+                    // If it doesn't, it was probably already closed by server-side SL/TP.
+                    let (activePositions, _) = try await MT5Service.shared.getPositionsAndOrders()
+                    let stillExists = activePositions.contains { $0.ticket == ticket }
+                    
+                    if !stillExists {
+                        godLog("ℹ️ MT5: Position #\(ticket) no longer exists. Marking as completed.", level: .success)
+                        successfullyClosed = true // Treat as success if it's already gone
+                    } else {
+                        godLog("⚠️ MT5: Failed to close #\(ticket). Will retry on next price update.", level: .warning)
+                        return // ABORT: Don't mark as completed if broker hasn't closed it
+                    }
                 }
             } catch {
                 godLog("❌ MT5: Error closing #\(ticket): \(error.localizedDescription). Retrying...", level: .error)
