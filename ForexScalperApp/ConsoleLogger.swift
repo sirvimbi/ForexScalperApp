@@ -17,6 +17,26 @@ class ConsoleLogger: ObservableObject {
         
         enum LogLevelUI: Sendable {
             case info, warning, error, success, diagnostic
+            
+            var icon: String {
+                switch self {
+                case .info: return "ℹ️"
+                case .warning: return "⚠️"
+                case .error: return "❌"
+                case .success: return "✅"
+                case .diagnostic: return "🔍"
+                }
+            }
+            
+            var color: Color {
+                switch self {
+                case .info: return .textPrimary
+                case .warning: return .accentGold
+                case .error: return .accentRed
+                case .success: return .accentGreen
+                case .diagnostic: return .accentCyan
+                }
+            }
         }
     }
     

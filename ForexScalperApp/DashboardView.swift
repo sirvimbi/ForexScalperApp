@@ -496,9 +496,12 @@ struct DashboardView: View {
                                     .foregroundColor(.textMuted)
                                     .frame(width: 80, alignment: .leading)
                                 
+                                Text(entry.level.icon)
+                                    .font(.system(size: 11))
+                                
                                 Text(entry.message)
                                     .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(entry.level == .error ? .accentRed : (entry.level == .warning ? .accentGold : (entry.level == .success ? .accentGreen : .textPrimary)))
+                                    .foregroundColor(entry.level.color)
                                     .textSelection(.enabled)
                                 
                                 Spacer()
