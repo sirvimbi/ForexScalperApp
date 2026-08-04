@@ -1,4 +1,4 @@
-// ScalpingSignalEngine.swift - GOD MODE V7.0 ELITE
+// ScalpingSignalEngine.swift - GOD MODE V7.0 ELITE (Hybrid + Self-Learning)
 import Foundation
 
 actor ScalpingSignalEngine {
@@ -46,15 +46,36 @@ actor ScalpingSignalEngine {
     private func shouldTradeSymbol(_ symbol: String) -> Bool {
         guard let perf = symbolPerformance[symbol] else { return true }
         let totalTrades = perf.wins + perf.losses
-        guard totalTrades >= minTradesForAdaptation else { return true }
-        return Double(perf.wins) / Double(totalTrades) >= minWinRateForTrading
+        if totalTrades < minTradesForAdaptation { return true }
+        let winRate = Double(perf.wins) / Double(totalTrades)
+        return winRate >= minWinRateForTrading
     }
 
     func evaluateScalpingSignal(symbol: String) async -> ScalpingSignal? {
-        guard allowedSymbols.contains(symbol) else { return nil }
-        guard shouldTradeSymbol(symbol) else { return nil }
-        guard await MT5Service.shared.isSymbolTradable(symbol) else { return nil }
-        guard await riskManager.canOpenTrade(for: symbol) else { return nil }
+        // WHITELIST CHECK
+        guard allowedSymbols.contains(symbol) else {
+            return nil
+        }
+        
+        // PERFORMANCE CHECK
+        guard shouldTradeSymbol(symbol) else {
+            let perf = symbolPerformance[symbol]!
+            let wr = Double(perf.wins) / Double(perf.wins + perf.losses)
+            godLog("⚠️ \(symbol) skipped: Poor historical win rate (\(Int(wr*100))%)", level: .diagnostic)
+            return nil
+        }
+        
+        // MT5 TRADABLE CHECK
+        guard await MT5Service.shared.isSymbolTradable(symbol) else {
+            // godLog("⚠️ \(symbol) skipped: Not tradable on MT5", level: .diagnostic)
+            return nil
+        }
+        
+        // RISK MANAGER CHECK
+        guard await riskManager.canOpenTrade(for: symbol) else {
+            // godLog("⚠️ \(symbol) skipped: Risk Manager blocked", level: .diagnostic)
+            return nil
+        }
 
         let (enabledNews, highMin, medMin, cooldown, spreadTol) = await MainActor.run {
             (ScalpingConfig.shared.enableNewsFilter, 
@@ -64,11 +85,16 @@ actor ScalpingSignalEngine {
              ScalpingConfig.shared.spreadTolerance)
         }
 
+        // NEWS CHECK
         if enabledNews {
             let (impact, _) = await NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: Int(max(highMin, medMin)))
-            if impact == .high { return nil }
+            if impact == .high {
+                godLog("⚠️ \(symbol) skipped: High-impact news detected", level: .diagnostic)
+                return nil
+            }
         }
 
+        // COOLDOWN CHECK
         if let lastSignal = lastSignalTime[symbol], Date().timeIntervalSince(lastSignal) < cooldown {
             return nil
         }
@@ -85,9 +111,15 @@ actor ScalpingSignalEngine {
             "4h": c4h, "D1": cD1, "W1": cW1
         ]
 
-        guard validateData(candlesByTimeframe, symbol: symbol) else { return nil }
+        // DATA VALIDATION CHECK
+        guard validateData(candlesByTimeframe, symbol: symbol) else {
+            godLog("⚠️ \(symbol) skipped: Insufficient history (need 100 1m candles)", level: .diagnostic)
+            return nil
+        }
+        
         let indicators = await calculateAllIndicators(symbol: symbol, candlesByTimeframe: candlesByTimeframe)
 
+        // SPREAD CHECK
         let pointSize = symbol.contains("JPY") ? 0.01 : 0.0001
         let actualSpread: Double
         if let s = indicators.spread {
@@ -96,34 +128,49 @@ actor ScalpingSignalEngine {
             actualSpread = (indicators.atr / indicators.currentPrice) * 10000
         }
         
-        let atrPercentage = indicators.atr / indicators.currentPrice * 100
-        godLog("🔍 EVAL: \(symbol) | Price: \(String(format: "%.5f", indicators.currentPrice)) | Spread: \(String(format: "%.1f", actualSpread)) pips | Vol: \(String(format: "%.3f", atrPercentage))%", level: .diagnostic)
-
-        if actualSpread > spreadTol { 
-            // godLog("⚠️ \(symbol) blocked: Spread too high (\(String(format: "%.1f", actualSpread)) > \(spreadTol))", level: .diagnostic)
-            return nil 
+        if actualSpread > spreadTol {
+            godLog("⚠️ \(symbol) skipped: Spread too high (\(String(format: "%.1f", actualSpread)) > \(spreadTol))", level: .diagnostic)
+            return nil
         }
-        guard await validateVolatility(symbol, indicators: indicators) else { 
-            // godLog("⚠️ \(symbol) blocked: Volatility outside bounds (\(String(format: "%.3f", atrPercentage))%)", level: .diagnostic)
-            return nil 
+        
+        // VOLATILITY CHECK
+        let atrPercentage = indicators.atr / indicators.currentPrice * 100
+        guard await validateVolatility(symbol, indicators: indicators) else {
+            godLog("⚠️ \(symbol) skipped: Volatility outside bounds (\(String(format: "%.3f", atrPercentage))%)", level: .diagnostic)
+            return nil
         }
 
         let signal = await generateSignal(symbol: symbol, indicators: indicators)
-        if signal.type == .none { return nil }
+        if signal.type == .none {
+            // Signal generation logic didn't find enough points
+            return nil
+        }
 
+        // CONFIDENCE THRESHOLD CHECK
         let threshold = await MainActor.run { ScalpingConfig.shared.getConfidenceThreshold(for: symbol) }
         
-        // Log Pillar Details
+        // Log details even if below threshold
         let pillarDetails = signal.confidenceFactors.map { "\($0.key): \(Int($0.value))" }.joined(separator: ", ")
-        godLog("📊 SCORE: \(symbol) \(signal.type) | Total Score: \(signal.score) | Confidence: \(Int(signal.confidence))% | Pillars: [\(pillarDetails)]", level: .diagnostic)
-
-        guard signal.confidence >= threshold else { return nil }
+        let logMsg = "📊 EVAL: \(symbol) \(signal.type) | Score: \(signal.score) | Conf: \(Int(signal.confidence))% (Need \(Int(threshold))%) | Pillars: [\(pillarDetails)]"
         
+        if signal.confidence < threshold {
+            godLog(logMsg, level: .diagnostic)
+            return nil
+        }
+
         // --- SELF-LEARNING: Apply historical performance adjustment ---
         let adjustedSignal = await applyHistoricalAdjustment(signal)
-        guard adjustedSignal.confidence >= threshold else { return nil }
         
-        guard validateRiskReward(adjustedSignal) else { return nil }
+        if adjustedSignal.confidence < threshold {
+            godLog("⚠️ \(symbol) blocked by Self-Learning (Adjusted Conf: \(Int(adjustedSignal.confidence))%)", level: .diagnostic)
+            return nil
+        }
+        
+        // RISK/REWARD CHECK
+        guard validateRiskReward(adjustedSignal) else {
+            godLog("⚠️ \(symbol) skipped: Risk/Reward ratio < 1.2", level: .diagnostic)
+            return nil
+        }
 
         // Track quality for self-learning
         await trackSignalQuality(adjustedSignal)
@@ -185,7 +232,6 @@ actor ScalpingSignalEngine {
     private func calculateAllIndicators(symbol: String, candlesByTimeframe: [String: [Kline]]) async -> IndicatorSet {
         let c1m = candlesByTimeframe["1m"]!
         let c5m = candlesByTimeframe["5m"]!
-        let _ = candlesByTimeframe["1h"]!
         let c4h = candlesByTimeframe["4h"]!
         let cD1 = candlesByTimeframe["D1"]!
         let cW1 = candlesByTimeframe["W1"]!
@@ -193,24 +239,47 @@ actor ScalpingSignalEngine {
         let closes = c1m.map { $0.close }
         let currentPrice = closes.last ?? 0
         
-        let asiaRange: (high: Double, low: Double) = (0, 0)
-        let londonRange: (high: Double, low: Double) = (0, 0)
-        let usRange: (high: Double, low: Double) = (0, 0)
+        // Basic RSI & ATR
+        let rsi = Indicators.rsi(closes, period: 14).last ?? 50
+        let atr = AdvancedIndicators.atr(c1m, period: 14).last ?? 0
+        
+        // Stochastic
+        let stoch = AdvancedIndicators.stochastic(c1m, periodK: 14, periodD: 3)
+        let stochK = stoch.k.last ?? 50
+        let stochD = stoch.d.last ?? 50
+        
+        // Bollinger Bands
+        let bb = Indicators.bollingerBands(closes, period: 20, stdDev: 2.0)
+        let bbPosition = (currentPrice - (bb.lower.last ?? 0)) / max((bb.upper.last ?? 1) - (bb.lower.last ?? 0), 0.0001)
+        
+        // CCI & SAR
+        let cci = AdvancedIndicators.cci(c1m, period: 20).last ?? 0
+        let sar = AdvancedIndicators.parabolicSAR(c1m, acceleration: 0.02, maxAcceleration: 0.2).last ?? currentPrice
+        
+        // EMA Stack
+        let ema9 = Indicators.ema(closes, period: 9).last ?? 0
+        let ema21 = Indicators.ema(closes, period: 21).last ?? 0
+        let ema50 = Indicators.ema(closes, period: 50).last ?? 0
+        
+        let ema9_5m = Indicators.ema(c5m.map { $0.close }, period: 9).last ?? 0
+        let ema21_5m = Indicators.ema(c5m.map { $0.close }, period: 21).last ?? 0
+        let ema50_5m = Indicators.ema(c5m.map { $0.close }, period: 50).last ?? 0
+        
+        // Sessions
+        let sessions = AdvancedIndicators.sessionAnalysis(c1m)
         
         return IndicatorSet(
-            rsi: Indicators.rsi(closes, period: 14).last ?? 50,
-            stochasticK: 50, stochasticD: 50, cci: 0, sar: 0,
-            atr: Indicators.atr(c1m, period: 14).last ?? 0,
+            rsi: rsi,
+            stochasticK: stochK, stochasticD: stochD, 
+            cci: cci, sar: sar,
+            atr: atr,
             spread: c1m.last?.spread, 
-            ema9: Indicators.ema(closes, period: 9).last ?? 0,
-            ema21: Indicators.ema(closes, period: 21).last ?? 0,
-            ema50: Indicators.ema(closes, period: 50).last ?? 0,
-            ema9_5m: Indicators.ema(c5m.map { $0.close }, period: 9).last ?? 0,
-            ema21_5m: Indicators.ema(c5m.map { $0.close }, period: 21).last ?? 0,
-            ema50_5m: Indicators.ema(c5m.map { $0.close }, period: 50).last ?? 0,
-            bbPosition: 0.5, volumeRatio: 1.0, volumeProfilePOC: 0, 
+            ema9: ema9, ema21: ema21, ema50: ema50,
+            ema9_5m: ema9_5m, ema21_5m: ema21_5m, ema50_5m: ema50_5m,
+            bbPosition: bbPosition, 
+            volumeRatio: 1.0, volumeProfilePOC: 0, 
             support: 0, resistance: 0,
-            sessions: (asiaRange: asiaRange, londonRange: londonRange, usRange: usRange),
+            sessions: sessions,
             trendStrength: 0, pricePattern: .none, regime: .ranging,
             currentPrice: currentPrice, 
             h4Trend: calculateHTFTrend(candles: c4h), 

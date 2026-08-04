@@ -94,8 +94,18 @@ actor ScalpingTradeMonitor {
     // MARK: - Trailing Stop (activates at 3 pips profit)
     private func checkTrailingStop(trade: TradeRecord, currentPrice: Double) async -> Bool {
         guard let trailStop = trailingStops[trade.id] else { return false }
-        if trade.type == .buy && currentPrice <= trailStop { return true }
-        if trade.type == .sell && currentPrice >= trailStop { return true }
+        
+        let pointSize = trade.symbol.contains("JPY") ? 0.01 : 0.0001
+        let slippage = (trade.type == .buy ? trailStop - currentPrice : currentPrice - trailStop) / pointSize
+
+        if trade.type == .buy && currentPrice <= trailStop {
+            godLog("🏃‍♂️ TRAIL HIT: \(trade.symbol) @ \(String(format: "%.5f", currentPrice)) (Slippage: \(String(format: "%.1f", slippage)) pips)", level: .warning)
+            return true
+        }
+        if trade.type == .sell && currentPrice >= trailStop {
+            godLog("🏃‍♂️ TRAIL HIT: \(trade.symbol) @ \(String(format: "%.5f", currentPrice)) (Slippage: \(String(format: "%.1f", slippage)) pips)", level: .warning)
+            return true
+        }
         return false
     }
 
