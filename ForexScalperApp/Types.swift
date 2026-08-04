@@ -551,6 +551,8 @@ struct ScalpingSignal: Sendable {
     var fillingType: MT5FillingType?
     var executionMode: MT5ExecutionMode?
     
+    var failedFactors: [String] = []
+    
     func withConfidence(_ newConfidence: Double) -> ScalpingSignal {
         ScalpingSignal(
             type: type,
@@ -567,8 +569,15 @@ struct ScalpingSignal: Sendable {
             volume: volume,
             orderType: orderType,
             fillingType: fillingType,
-            executionMode: executionMode
+            executionMode: executionMode,
+            failedFactors: failedFactors
         )
+    }
+    
+    func withFailedFactors(_ factors: [String]) -> ScalpingSignal {
+        var copy = self
+        copy.failedFactors = factors
+        return copy
     }
 }
 

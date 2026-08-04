@@ -61,7 +61,7 @@ actor ScalpingSignalEngine {
         guard shouldTradeSymbol(symbol) else {
             let perf = symbolPerformance[symbol]!
             let wr = Double(perf.wins) / Double(perf.wins + perf.losses)
-            godLog("⚠️ \(symbol) skipped: Poor historical win rate (\(Int(wr*100))%)", level: .diagnostic)
+            godLog("⚠️ \(symbol) skipped: Blocked by Self-Learning (Win Rate: \(Int(wr*100))%)", level: .diagnostic)
             return nil
         }
         
@@ -73,7 +73,7 @@ actor ScalpingSignalEngine {
         
         // RISK MANAGER CHECK
         guard await riskManager.canOpenTrade(for: symbol) else {
-            // godLog("⚠️ \(symbol) skipped: Risk Manager blocked", level: .diagnostic)
+            // godLog("⚠️ \(symbol) skipped: Risk Manager blocked (Daily/Hourly limit or Active count)", level: .diagnostic)
             return nil
         }
 
@@ -141,19 +141,20 @@ actor ScalpingSignalEngine {
         }
 
         let signal = await generateSignal(symbol: symbol, indicators: indicators)
-        if signal.type == .none {
-            // Signal generation logic didn't find enough points
-            return nil
-        }
-
+        
         // CONFIDENCE THRESHOLD CHECK
         let threshold = await MainActor.run { ScalpingConfig.shared.getConfidenceThreshold(for: symbol) }
         
-        // Log details even if below threshold
-        let pillarDetails = signal.confidenceFactors.map { "\($0.key): \(Int($0.value))" }.joined(separator: ", ")
-        let logMsg = "📊 EVAL: \(symbol) \(signal.type) | Score: \(signal.score) | Conf: \(Int(signal.confidence))% (Need \(Int(threshold))%) | Pillars: [\(pillarDetails)]"
+        // Detailed Logging
+        let metPillars = signal.confidenceFactors.keys.sorted()
+        let allPillars = ["HTF Power Alignment", "Elite Dip Buy", "Elite Rally Sell", "Smart Money Volume", "Structural Support", "Structural Resistance", "BB Lower Sweep", "BB Upper Sweep", "Cyclical Strength", "SAR Support", "SAR Resistance"]
+        let failedPillars = allPillars.filter { pillar in
+            !metPillars.contains { $0 == pillar }
+        }
         
-        if signal.confidence < threshold {
+        let logMsg = "📊 EVAL: \(symbol) \(signal.type) | Score: \(signal.score) | Conf: \(Int(signal.confidence))% (Need \(Int(threshold))%) | Met: [\(metPillars.joined(separator: ", "))] | FAILED: [\(failedPillars.joined(separator: ", "))]"
+        
+        if signal.type == .none || signal.confidence < threshold {
             godLog(logMsg, level: .diagnostic)
             return nil
         }

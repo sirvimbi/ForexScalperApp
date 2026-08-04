@@ -168,9 +168,9 @@ class RefactoredAppCoordinator: ObservableObject {
             timeframes: tradingMode == .scalping ?
                 ["1m", "5m", "15m", "30m", "1h", "4h", "D1", "W1"] :
                 ["1m", "5m", "1h", "4h", "D1"],
-            onKline: { [weak self] symbol, timeframe, kline in
+            onKline: { [weak self] symbol, timeframe, kline, isLive in
                 Task { [weak self] in
-                    await self?.handleKlineUpdate(symbol: symbol, timeframe: timeframe, kline: kline)
+                    await self?.handleKlineUpdate(symbol: symbol, timeframe: timeframe, kline: kline, isLive: isLive)
                 }
             }
         )
@@ -564,7 +564,7 @@ class RefactoredAppCoordinator: ObservableObject {
                     let candles = try await MT5Service.shared.getCandles(symbol: symbol, timeframe: "1m", count: 2)
                     if let lastCandle = candles.last {
                         // godLog("📊 MT5 Polled: \(symbol) - Last Close: \(String(format: "%.5f", lastCandle.close))", level: .diagnostic)
-                        await handleKlineUpdate(symbol: symbol, timeframe: "1m", kline: lastCandle)
+                        await handleKlineUpdate(symbol: symbol, timeframe: "1m", kline: lastCandle, isLive: true)
                     }
                 } catch {
                     // Silent fail for polling
@@ -1386,17 +1386,20 @@ class RefactoredAppCoordinator: ObservableObject {
         }
     }
 
-    func handleKlineUpdate(symbol: String, timeframe: String, kline: Kline) async {
+    func handleKlineUpdate(symbol: String, timeframe: String, kline: Kline, isLive: Bool = true) async {
         // Normalize symbol
         let normalizedSymbol = normalizeSymbol(symbol)
 
         // ELITE PAIR FILTER: Completely ignore pairs not selected in Settings
-        guard activeSymbols.contains(normalizedSymbol) else { return }
+        guard activeSymbols.contains(normalizedSymbol) else { 
+            // godLog("⚠️ \(normalizedSymbol) ignored: Not in active symbols", level: .diagnostic)
+            return 
+        }
 
         // FIXED: Additional whitelist check for scalping mode
         if tradingMode == .scalping {
             guard allowedScalpingSymbols.contains(normalizedSymbol) else {
-                // print("📊 \(normalizedSymbol) ignored: Not in scalping whitelist")
+                // godLog("⚠️ \(normalizedSymbol) ignored: Not in scalping whitelist", level: .diagnostic)
                 return
             }
         }
@@ -1405,12 +1408,20 @@ class RefactoredAppCoordinator: ObservableObject {
             await marketDataActor.addCandle(symbol: normalizedSymbol, timeframe: timeframe, candle: kline)
         }
 
-        // PRODUCTION FIX: Only evaluate signals for current data (within last 2 minutes)
-        // This prevents "ghost signals" from historical data loading
+        // PRODUCTION FIX: For WebSocket updates, only evaluate signals for current data (within last 2 minutes)
+        // For MT5 Polling, we trust it's recent enough because we only poll 2 candles.
+        if !isLive { return }
+        
         let klineTime = Date(timeIntervalSince1970: TimeInterval(kline.closeTime))
-        let isRecent = abs(Date().timeIntervalSince(klineTime)) < 120
-
-        guard isRecent else { return }
+        let age = abs(Date().timeIntervalSince(klineTime))
+        
+        // ELITE: If it's a Forex pair, allow more drift (broker server time vs local time)
+        let maxAge: TimeInterval = allowedScalpingSymbols.contains(normalizedSymbol) && !normalizedSymbol.contains("USDT") ? 3600 * 4 : 120
+        
+        guard age < maxAge else { 
+            // godLog("⚠️ \(normalizedSymbol) ignored: Data not recent (Age: \(Int(age))s)", level: .diagnostic)
+            return 
+        }
 
         switch tradingMode {
         case .scalping:

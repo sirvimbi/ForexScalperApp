@@ -5,13 +5,13 @@ actor BinanceService: MarketDataProvider {
     private var symbols: [String] = []
     private var timeframes: [String] = []
     private var webSocketTask: URLSessionWebSocketTask?
-    private var onKlineReceived: (@Sendable (String, String, Kline) -> Void)?
+    private var onKlineReceived: (@Sendable (String, String, Kline, Bool) -> Void)?
     private var pingTimer: Task<Void, Never>?
     
     private let baseURL = "https://api.binance.com/api/v3"
     private let wsURL = "wss://stream.binance.com:9443/stream?streams="
     
-    func connect(symbols: [String], timeframes: [String], onKline: @escaping @Sendable (String, String, Kline) -> Void) {
+    func connect(symbols: [String], timeframes: [String], onKline: @escaping @Sendable (String, String, Kline, Bool) -> Void) {
         self.symbols = symbols
         self.timeframes = timeframes
         self.onKlineReceived = onKline
@@ -102,7 +102,7 @@ actor BinanceService: MarketDataProvider {
                     
                     // Call the handler for each kline
                     for kline in klines {
-                        onKlineReceived?(symbol, interval, kline)
+                        onKlineReceived?(symbol, interval, kline, false) // Mark as NOT live
                     }
                 }
             } else {
@@ -195,7 +195,7 @@ actor BinanceService: MarketDataProvider {
             isClosed: detail.x
         )
         
-        onKlineReceived?(symbol, timeframe, kline)
+        onKlineReceived?(symbol, timeframe, kline, true) // Mark as live
     }
     
     private func startPingTimer() {
