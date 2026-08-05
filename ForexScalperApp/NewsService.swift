@@ -8,6 +8,7 @@ class NewsService: ObservableObject {
     @Published private(set) var upcomingEvents: [NewsEvent] = []
     @Published private(set) var isFetching = false
     private var lastFetch: Date?
+    private var broadcastedEventIds = Set<String>()
     
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
@@ -45,6 +46,9 @@ class NewsService: ObservableObject {
                 self.upcomingEvents = events.sorted { $0.time < $1.time }
                 self.lastFetch = Date()
                 godLog("✅ NewsService: Loaded \(events.count) economic events", level: .success)
+                
+                // Generate insights for upcoming high impact news
+                generateNewsBroadcasts()
                 return
             }
         } catch {
@@ -54,6 +58,63 @@ class NewsService: ObservableObject {
         // FALLBACK: Use a hardcoded calendar based on standard market times
         godLog("⚠️ NewsService: Using fallback institutional calendar", level: .warning)
         self.upcomingEvents = generateFallbackEvents()
+        generateNewsBroadcasts()
+    }
+    
+    private func generateNewsBroadcasts() {
+        let now = Date()
+        let highImpactEvents = upcomingEvents.filter { $0.impact == .high && $0.time > now && $0.time < now.addingTimeInterval(3600 * 24) }
+        
+        for event in highImpactEvents {
+            let eventKey = "\(event.title)_\(event.time.timeIntervalSince1970)"
+            guard !broadcastedEventIds.contains(eventKey) else { continue }
+            
+            let analysis = analyzeEvent(event)
+            let insight = GodModeInsight(
+                id: UUID(),
+                type: .newsBroadcast,
+                symbol: event.currency,
+                title: event.title,
+                message: analysis.summary,
+                sentiment: analysis.sentiment,
+                affectedPairs: analysis.pairs,
+                timestamp: event.time
+            )
+            
+            NotificationCenter.default.post(name: .newGodModeInsight, object: insight)
+            broadcastedEventIds.insert(eventKey)
+            
+            godLog("📡 NEWS BROADCAST: \(event.title) (\(event.currency)) - Sentiment: \(analysis.sentiment.displayName)", level: .info)
+        }
+    }
+    
+    private func analyzeEvent(_ event: NewsEvent) -> (summary: String, sentiment: SignalType, pairs: [String]) {
+        let title = event.title.lowercased()
+        let curr = event.currency.uppercased()
+        
+        var summary = "Institutional volatility expected for \(curr). "
+        var sentiment: SignalType = .none
+        var pairs: [String] = []
+        
+        // Logic for common events
+        if title.contains("interest rate") || title.contains("cpi") || title.contains("inflation") {
+            summary += "Central bank focus. Tightening expected to be Bullish for \(curr)."
+            sentiment = .buy
+        } else if title.contains("employment") || title.contains("nfp") || title.contains("jobless") {
+            summary += "Labor market strength is Bullish for \(curr) yields."
+            sentiment = .buy
+        } else if title.contains("gdp") {
+            summary += "Growth data usually drives direct currency demand."
+            sentiment = .buy
+        } else {
+            summary += "High volatility anticipated. Monitor price action for breakouts."
+        }
+        
+        // Affected pairs
+        let allPairs = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "NZDUSD", "EURJPY", "GBPJPY"]
+        pairs = allPairs.filter { $0.contains(curr) }
+        
+        return (summary, sentiment, pairs)
     }
     
     private func generateFallbackEvents() -> [NewsEvent] {

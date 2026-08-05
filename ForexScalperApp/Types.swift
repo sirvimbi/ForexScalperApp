@@ -644,8 +644,25 @@ extension Double {
         return (self * multiplier).rounded() / multiplier
     }
 }
+enum InsightType: String, Codable, Sendable {
+    case performance = "PERFORMANCE"
+    case newsBroadcast = "NEWS BROADCAST"
+}
+
+struct GodModeInsight: Identifiable, Sendable, Codable {
+    let id: UUID
+    let type: InsightType
+    let symbol: String // Can be "GLOBAL" or currency like "USD"
+    let title: String
+    let message: String
+    let sentiment: SignalType // .buy (bullish), .sell (bearish), .none (neutral)
+    let affectedPairs: [String]
+    let timestamp: Date
+}
+
 // MARK: - Notifications
 extension Notification.Name {
+    nonisolated static let newGodModeInsight = Notification.Name("newGodModeInsight")
     nonisolated static let newSignalGenerated = Notification.Name("newSignalGenerated")
     nonisolated static let showLearningInsight = Notification.Name("showLearningInsight")
     nonisolated static let acceptSignal = Notification.Name("acceptSignal")

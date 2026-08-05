@@ -456,7 +456,7 @@ struct DashboardView: View {
             HStack {
                 sectionHeader("GOD MODE INSIGHTS", icon: "brain.head.profile", color: .accentCyan)
                 Spacer()
-                Button(action: { viewModel.learningInsights.removeAll() }) {
+                Button(action: { viewModel.allInsights.removeAll() }) {
                     Text("CLEAR ALL").font(.system(size: 10, weight: .bold)).foregroundColor(.accentRed)
                 }.buttonStyle(.plain)
             }
@@ -466,35 +466,64 @@ struct DashboardView: View {
             
             ScrollView {
                 VStack(spacing: 12) {
-                    if viewModel.learningInsights.isEmpty {
+                    if viewModel.allInsights.isEmpty {
                         VStack(spacing: 20) {
                             Image(systemName: "brain.head.profile")
                                 .font(.system(size: 40))
                                 .foregroundColor(.textMuted)
-                            Text("No performance warnings yet.")
+                            Text("No performance or news warnings yet.")
                                 .foregroundColor(.textMuted)
                                 .font(.subheadline)
                         }
                         .padding(.top, 100)
                     } else {
-                        ForEach(viewModel.learningInsights) { signal in
-                            GlassCard(borderColor: Color.accentCyan.opacity(0.3)) {
-                                HStack(spacing: 16) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        HStack {
-                                            TagBadge(text: "INSIGHT", color: .accentCyan)
-                                            Text(signal.symbol)
-                                                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.textPrimary)
-                                        }
-                                        Text(signal.selfLearningInsight ?? "Unknown performance pattern")
-                                            .font(.system(size: 12))
-                                            .foregroundColor(.textSecondary)
+                        ForEach(viewModel.allInsights) { insight in
+                            GlassCard(borderColor: insight.type == .newsBroadcast ? Color.accentGold.opacity(0.3) : Color.accentCyan.opacity(0.3)) {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack {
+                                        TagBadge(text: insight.type.rawValue, color: insight.type == .newsBroadcast ? .accentGold : .accentCyan)
+                                        Text(insight.title)
+                                            .font(.system(size: 14, weight: .black, design: .monospaced))
+                                            .foregroundColor(.textPrimary)
+                                        Spacer()
+                                        Text(formatLogTime(insight.timestamp))
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundColor(.textMuted)
                                     }
-                                    Spacer()
-                                    Text(formatLogTime(signal.timestamp))
-                                        .font(.system(size: 10, design: .monospaced))
-                                        .foregroundColor(.textMuted)
+                                    
+                                    Text(insight.message)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.textSecondary)
+                                        .lineLimit(3)
+                                    
+                                    if !insight.affectedPairs.isEmpty {
+                                        HStack(spacing: 6) {
+                                            Text("AFFECTED:")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundColor(.textMuted)
+                                            
+                                            ForEach(insight.affectedPairs, id: \.self) { pair in
+                                                Text(pair)
+                                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(Color.white.opacity(0.05))
+                                                    .cornerRadius(3)
+                                            }
+                                            
+                                            Spacer()
+                                            
+                                            if insight.sentiment != .none {
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: insight.sentiment == .buy ? "chart.line.uptrend.xyaxis" : "chart.line.downtrend.xyaxis")
+                                                    Text(insight.sentiment == .buy ? "BULLISH" : "BEARISH")
+                                                }
+                                                .font(.system(size: 9, weight: .black))
+                                                .foregroundColor(insight.sentiment == .buy ? .accentGreen : .accentRed)
+                                            }
+                                        }
+                                        .padding(.top, 4)
+                                    }
                                 }
                                 .padding(14)
                             }

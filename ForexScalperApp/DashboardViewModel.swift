@@ -55,7 +55,7 @@ class DashboardViewModel: ObservableObject {
     @Published var signals: [Signal] = []
     @Published var tradeHistory: [TradeRecord] = []
     @Published var activeTrades: [TradeRecord] = []
-    @Published var learningInsights: [Signal] = []
+    @Published var allInsights: [GodModeInsight] = []
     @Published var isRefreshing: Bool = false
     @Published var selectedTimeFilter: DashboardTimeFilter = .allTime
     
@@ -375,16 +375,36 @@ class DashboardViewModel: ObservableObject {
     var currencySymbol: String { "KES " }
     
     private func setupNotificationObservers() {
+        NotificationCenter.default.publisher(for: .newGodModeInsight)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                if let insight = note.object as? GodModeInsight {
+                    self?.allInsights.insert(insight, at: 0)
+                    if (self?.allInsights.count ?? 0) > 100 { self?.allInsights.removeLast() }
+                    
+                    self?.showNotification(title: "🧠 \(insight.type.rawValue)", message: "\(insight.title): \(insight.message)")
+                }
+            }
+            .store(in: &cancellables)
+
         NotificationCenter.default.publisher(for: .showLearningInsight)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] note in
                 if let signal = note.object as? Signal {
-                    self?.learningInsights.insert(signal, at: 0)
-                    if (self?.learningInsights.count ?? 0) > 50 { self?.learningInsights.removeLast() }
+                    let insight = GodModeInsight(
+                        id: UUID(),
+                        type: .performance,
+                        symbol: signal.symbol,
+                        title: "Performance Warning",
+                        message: signal.selfLearningInsight ?? "Low win rate pattern detected",
+                        sentiment: .none,
+                        affectedPairs: [signal.symbol],
+                        timestamp: Date()
+                    )
+                    self?.allInsights.insert(insight, at: 0)
+                    if (self?.allInsights.count ?? 0) > 100 { self?.allInsights.removeLast() }
                     
-                    if let insight = signal.selfLearningInsight {
-                        self?.showNotification(title: "🧠 God Mode Insight", message: "\(signal.symbol): \(insight)")
-                    }
+                    self?.showNotification(title: "🧠 God Mode Insight", message: "\(signal.symbol): \(insight.message)")
                 }
             }
             .store(in: &cancellables)
