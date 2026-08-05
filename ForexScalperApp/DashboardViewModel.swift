@@ -55,6 +55,7 @@ class DashboardViewModel: ObservableObject {
     @Published var signals: [Signal] = []
     @Published var tradeHistory: [TradeRecord] = []
     @Published var activeTrades: [TradeRecord] = []
+    @Published var learningInsights: [Signal] = []
     @Published var isRefreshing: Bool = false
     @Published var selectedTimeFilter: DashboardTimeFilter = .allTime
     
@@ -374,6 +375,20 @@ class DashboardViewModel: ObservableObject {
     var currencySymbol: String { "KES " }
     
     private func setupNotificationObservers() {
+        NotificationCenter.default.publisher(for: .showLearningInsight)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] note in
+                if let signal = note.object as? Signal {
+                    self?.learningInsights.insert(signal, at: 0)
+                    if (self?.learningInsights.count ?? 0) > 50 { self?.learningInsights.removeLast() }
+                    
+                    if let insight = signal.selfLearningInsight {
+                        self?.showNotification(title: "🧠 God Mode Insight", message: "\(signal.symbol): \(insight)")
+                    }
+                }
+            }
+            .store(in: &cancellables)
+
         NotificationCenter.default.publisher(for: .newSignalGenerated)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshData() }

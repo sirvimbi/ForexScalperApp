@@ -57,23 +57,21 @@ actor ScalpingSignalEngine {
             return nil
         }
         
-        // PERFORMANCE CHECK
-        guard shouldTradeSymbol(symbol) else {
+        // PERFORMANCE CHECK (Informational only)
+        var learningWarning: String? = nil
+        if !shouldTradeSymbol(symbol) {
             let perf = symbolPerformance[symbol]!
             let wr = Double(perf.wins) / Double(perf.wins + perf.losses)
-            godLog("⚠️ \(symbol) skipped: Blocked by Self-Learning (Win Rate: \(Int(wr*100))%)", level: .diagnostic)
-            return nil
+            learningWarning = "Historical Win Rate is only \(Int(wr*100))%"
         }
         
         // MT5 TRADABLE CHECK
         guard await MT5Service.shared.isSymbolTradable(symbol) else {
-            // godLog("⚠️ \(symbol) skipped: Not tradable on MT5", level: .diagnostic)
             return nil
         }
         
         // RISK MANAGER CHECK
         guard await riskManager.canOpenTrade(for: symbol) else {
-            // godLog("⚠️ \(symbol) skipped: Risk Manager blocked (Daily/Hourly limit or Active count)", level: .diagnostic)
             return nil
         }
 
@@ -140,31 +138,36 @@ actor ScalpingSignalEngine {
             return nil
         }
 
-        let signal = await generateSignal(symbol: symbol, indicators: indicators)
+        var finalSignal = await generateSignal(symbol: symbol, indicators: indicators)
+        if let warning = learningWarning {
+            finalSignal = finalSignal.withSelfLearningInsight(warning)
+        }
         
         // CONFIDENCE THRESHOLD CHECK
         let threshold = await MainActor.run { ScalpingConfig.shared.getConfidenceThreshold(for: symbol) }
         
         // Detailed Logging
-        let metPillars = signal.confidenceFactors.keys.sorted()
+        let metPillars = finalSignal.confidenceFactors.keys.sorted()
         let allPillars = ["HTF Power Alignment", "Elite Dip Buy", "Elite Rally Sell", "Smart Money Volume", "Structural Support", "Structural Resistance", "BB Lower Sweep", "BB Upper Sweep", "Cyclical Strength", "SAR Support", "SAR Resistance"]
         let failedPillars = allPillars.filter { pillar in
             !metPillars.contains { $0 == pillar }
         }
         
-        let logMsg = "📊 EVAL: \(symbol) \(signal.type) | Score: \(signal.score) | Conf: \(Int(signal.confidence))% (Need \(Int(threshold))%) | Met: [\(metPillars.joined(separator: ", "))] | FAILED: [\(failedPillars.joined(separator: ", "))]"
+        let logMsg = "📊 EVAL: \(symbol) \(finalSignal.type) | Score: \(finalSignal.score) | Conf: \(Int(finalSignal.confidence))% (Need \(Int(threshold))%) | Met: [\(metPillars.joined(separator: ", "))] | FAILED: [\(failedPillars.joined(separator: ", "))]"
         
-        if signal.type == .none || signal.confidence < threshold {
+        if finalSignal.type == .none || finalSignal.confidence < threshold {
             godLog(logMsg, level: .diagnostic)
             return nil
         }
 
         // --- SELF-LEARNING: Apply historical performance adjustment ---
-        let adjustedSignal = await applyHistoricalAdjustment(signal)
+        let adjustedSignal = await applyHistoricalAdjustment(finalSignal)
         
         if adjustedSignal.confidence < threshold {
-            godLog("⚠️ \(symbol) blocked by Self-Learning (Adjusted Conf: \(Int(adjustedSignal.confidence))%)", level: .diagnostic)
-            return nil
+            let warning = "Self-Learning adjusted confidence from \(Int(finalSignal.confidence))% to \(Int(adjustedSignal.confidence))% (Win Rate < 50%)"
+            // godLog("⚠️ \(symbol): \(warning)", level: .diagnostic)
+            // We don't block anymore, but we keep the insight
+            return adjustedSignal.withSelfLearningInsight(warning)
         }
         
         // RISK/REWARD CHECK

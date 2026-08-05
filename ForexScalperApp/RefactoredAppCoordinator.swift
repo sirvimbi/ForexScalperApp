@@ -1,6 +1,7 @@
 // MARK: - Updated AppCoordinator with Scalping Engine Integration
 import Foundation
 import Combine
+import UserNotifications
 
 @MainActor
 class RefactoredAppCoordinator: ObservableObject {
@@ -868,6 +869,20 @@ class RefactoredAppCoordinator: ObservableObject {
             self.objectWillChange.send()
 
             godLog("✅ New \(tradingMode == .scalping ? "SCALPING" : "STANDARD") signal generated: \(normalizedSymbol) \(normalizedSignal.type) @ \(normalizedSignal.price) (Confidence: \(String(format: "%.1f", normalizedSignal.confidence))%)", level: .info)
+
+            // --- SELF-LEARNING ALERT ---
+            if let insight = normalizedSignal.selfLearningInsight {
+                godLog("🧠 SELF-LEARNING INSIGHT: \(normalizedSymbol) - \(insight)", level: .warning)
+                NotificationCenter.default.post(name: .showLearningInsight, object: normalizedSignal)
+                
+                // Also send a special notification
+                let content = UNMutableNotificationContent()
+                content.title = "🧠 God Mode Insight: \(normalizedSymbol)"
+                content.body = insight
+                content.sound = .default
+                let request = UNNotificationRequest(identifier: "insight_\(normalizedSignal.id)", content: content, trigger: nil)
+                UNUserNotificationCenter.current().add(request)
+            }
 
             // ELITE AUTO-TRADE EXECUTION
             let isAutoTradeEnabled = UserDefaults.standard.bool(forKey: "isAutoTradeEnabled")

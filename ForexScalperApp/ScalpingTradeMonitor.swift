@@ -123,13 +123,13 @@ actor ScalpingTradeMonitor {
             if currentTrail == nil || newTrail > currentTrail! {
                 trailingStops[trade.id] = newTrail
                 godLog("🏃‍♂️ TRAIL: \(trade.symbol) @ \(String(format: "%.5f", newTrail)) (Profit: \(Int(profitPips)) pips)", level: .diagnostic)
-                await syncTrailingStopToMT5(trade: trade, newSL: newTrail)
+                //  await syncTrailingStopToMT5(trade: trade, newSL: newTrail)
             }
         } else {
             if currentTrail == nil || newTrail < currentTrail! {
                 trailingStops[trade.id] = newTrail
                 godLog("🏃‍♂️ TRAIL: \(trade.symbol) @ \(String(format: "%.5f", newTrail)) (Profit: \(Int(profitPips)) pips)", level: .diagnostic)
-                await syncTrailingStopToMT5(trade: trade, newSL: newTrail)
+                // await syncTrailingStopToMT5(trade: trade, newSL: newTrail)
             }
         }
     }

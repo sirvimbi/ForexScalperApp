@@ -194,8 +194,8 @@ struct DashboardView: View {
     @StateObject private var newsService = NewsService.shared
     @State private var isNotificationBannerDismissed = false
     
-    private let tabs     = ["Signals", "History", "Performance", "Logs", "Settings"]
-    private let tabIcons = ["bolt.fill", "clock.fill", "chart.bar.fill", "terminal.fill", "gearshape.fill"]
+    private let tabs     = ["Signals", "Insights", "History", "Performance", "Logs", "Settings"]
+    private let tabIcons = ["bolt.fill", "brain.head.profile", "clock.fill", "chart.bar.fill", "terminal.fill", "gearshape.fill"]
     
     init() {
         _viewModel = StateObject(wrappedValue: DashboardViewModel(coordinator: nil))
@@ -214,12 +214,15 @@ struct DashboardView: View {
                 liveSignalsView
                     .tabItem { Label("Signals", systemImage: "bolt.fill") }
                     .tag(0)
+                insightsView
+                    .tabItem { Label("Insights", systemImage: "brain.head.profile") }
+                    .tag(1)
                 historyView
                     .tabItem { Label("History", systemImage: "clock.fill") }
-                    .tag(1)
+                    .tag(2)
                 settingsView
                     .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-                    .tag(3)
+                    .tag(5)
             }
             .accentColor(.accentCyan)
             #else
@@ -434,10 +437,11 @@ struct DashboardView: View {
             Group {
                 switch selectedTab {
                 case 0: liveSignalsView
-                case 1: historyView
-                case 2: performanceView
-                case 3: systemLogsView
-                case 4: settingsView
+                case 1: insightsView
+                case 2: historyView
+                case 3: performanceView
+                case 4: systemLogsView
+                case 5: settingsView
                 default: EmptyView()
                 }
             }
@@ -445,6 +449,64 @@ struct DashboardView: View {
     }
     #endif
     
+    // MARK: - Insights View
+    var insightsView: some View {
+        VStack(spacing: 0) {
+            #if os(macOS)
+            HStack {
+                sectionHeader("GOD MODE INSIGHTS", icon: "brain.head.profile", color: .accentCyan)
+                Spacer()
+                Button(action: { viewModel.learningInsights.removeAll() }) {
+                    Text("CLEAR ALL").font(.system(size: 10, weight: .bold)).foregroundColor(.accentRed)
+                }.buttonStyle(.plain)
+            }
+            .padding(20)
+            .background(Color.bgSecondary)
+            #endif
+            
+            ScrollView {
+                VStack(spacing: 12) {
+                    if viewModel.learningInsights.isEmpty {
+                        VStack(spacing: 20) {
+                            Image(systemName: "brain.head.profile")
+                                .font(.system(size: 40))
+                                .foregroundColor(.textMuted)
+                            Text("No performance warnings yet.")
+                                .foregroundColor(.textMuted)
+                                .font(.subheadline)
+                        }
+                        .padding(.top, 100)
+                    } else {
+                        ForEach(viewModel.learningInsights) { signal in
+                            GlassCard(borderColor: Color.accentCyan.opacity(0.3)) {
+                                HStack(spacing: 16) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            TagBadge(text: "INSIGHT", color: .accentCyan)
+                                            Text(signal.symbol)
+                                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.textPrimary)
+                                        }
+                                        Text(signal.selfLearningInsight ?? "Unknown performance pattern")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.textSecondary)
+                                    }
+                                    Spacer()
+                                    Text(formatLogTime(signal.timestamp))
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(.textMuted)
+                                }
+                                .padding(14)
+                            }
+                        }
+                    }
+                }
+                .padding(20)
+            }
+        }
+        .background(Color.bgPrimary)
+    }
+
     // MARK: - System Logs View
     var systemLogsView: some View {
         VStack(spacing: 0) {
@@ -912,8 +974,27 @@ struct DashboardView: View {
                 }
                 
                 HStack {
-                    Text(signal.symbol)
-                        .font(.system(size: 24, weight: .bold))
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Text(signal.symbol)
+                                .font(.system(size: 24, weight: .bold))
+                            
+                            if let insight = signal.selfLearningInsight {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "brain.head.profile")
+                                        .font(.system(size: 10))
+                                    Text("INSIGHT")
+                                        .font(.system(size: 9, weight: .bold))
+                                }
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.accentCyan.opacity(0.2))
+                                .foregroundColor(.accentCyan)
+                                .cornerRadius(4)
+                                .help(insight)
+                            }
+                        }
+                    }
                     Spacer()
                     VStack(alignment: .trailing) {
                         Text(String(format: "KES %.5f", signal.price))

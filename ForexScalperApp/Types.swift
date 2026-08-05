@@ -195,6 +195,7 @@ struct Signal: Identifiable, Sendable, Codable {
     var volume: Double
     var tradeId: UUID?
     var externalDealId: String?
+    var selfLearningInsight: String?
     
     var magicNumber: Int?
     var comment: String?
@@ -204,7 +205,7 @@ struct Signal: Identifiable, Sendable, Codable {
     var executionMode: MT5ExecutionMode?
 
     private enum CodingKeys: String, CodingKey {
-        case id, type, symbol, price, confidence, timestamp, timeframe, expiryTime, status, acceptedAt, acceptedPrice, closedAt, closedPrice, pnl, pnlPercent, positionSize, stopLoss, takeProfit, source, volume, tradeId, externalDealId
+        case id, type, symbol, price, confidence, timestamp, timeframe, expiryTime, status, acceptedAt, acceptedPrice, closedAt, closedPrice, pnl, pnlPercent, positionSize, stopLoss, takeProfit, source, volume, tradeId, externalDealId, selfLearningInsight
         case magicNumber, comment, deviation, filler, orderType, executionMode
     }
 
@@ -233,6 +234,7 @@ struct Signal: Identifiable, Sendable, Codable {
         self.volume = try container.decodeIfPresent(Double.self, forKey: .volume) ?? 0
         self.tradeId = try container.decodeIfPresent(UUID.self, forKey: .tradeId)
         self.externalDealId = try container.decodeIfPresent(String.self, forKey: .externalDealId)
+        self.selfLearningInsight = try container.decodeIfPresent(String.self, forKey: .selfLearningInsight)
         
         self.magicNumber = try container.decodeIfPresent(Int.self, forKey: .magicNumber)
         self.comment = try container.decodeIfPresent(String.self, forKey: .comment)
@@ -552,8 +554,9 @@ struct ScalpingSignal: Sendable {
     var executionMode: MT5ExecutionMode?
     
     var failedFactors: [String] = []
+    var selfLearningInsight: String? = nil
     
-    func withConfidence(_ newConfidence: Double) -> ScalpingSignal {
+    nonisolated func withConfidence(_ newConfidence: Double) -> ScalpingSignal {
         ScalpingSignal(
             type: type,
             symbol: symbol,
@@ -570,13 +573,20 @@ struct ScalpingSignal: Sendable {
             orderType: orderType,
             fillingType: fillingType,
             executionMode: executionMode,
-            failedFactors: failedFactors
+            failedFactors: failedFactors,
+            selfLearningInsight: selfLearningInsight
         )
     }
     
-    func withFailedFactors(_ factors: [String]) -> ScalpingSignal {
+    nonisolated func withFailedFactors(_ factors: [String]) -> ScalpingSignal {
         var copy = self
         copy.failedFactors = factors
+        return copy
+    }
+
+    nonisolated func withSelfLearningInsight(_ insight: String) -> ScalpingSignal {
+        var copy = self
+        copy.selfLearningInsight = insight
         return copy
     }
 }
@@ -637,6 +647,7 @@ extension Double {
 // MARK: - Notifications
 extension Notification.Name {
     nonisolated static let newSignalGenerated = Notification.Name("newSignalGenerated")
+    nonisolated static let showLearningInsight = Notification.Name("showLearningInsight")
     nonisolated static let acceptSignal = Notification.Name("acceptSignal")
     nonisolated static let denySignal = Notification.Name("denySignal")
     nonisolated static let showSignalDashboard = Notification.Name("showSignalDashboard")
