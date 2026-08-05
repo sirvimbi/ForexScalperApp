@@ -27,38 +27,41 @@ actor ScalpingTradeMonitor {
     func updatePrice(symbol: String, price: Double, indicators: IndicatorSet?) async {
         let trades = activeTrades.values.filter { $0.symbol == symbol }
         for trade in trades {
-            // 1. Take Profit
-            if await checkTakeProfit(trade: trade, currentPrice: price) {
-                await closeTrade(trade, exitPrice: price, reason: "Take Profit")
-                continue
-            }
-            // 2. Trailing Stop
-            if await checkTrailingStop(trade: trade, currentPrice: price) {
-                await closeTrade(trade, exitPrice: price, reason: "Trailing Stop")
-                continue
-            }
-            // 3. Partial TP (multi-level)
-            await checkPartialTakeProfit(trade: trade, currentPrice: price)
-            // 4. Update trailing stop (tight, early activation)
-            await updateTrailingStop(trade: trade, currentPrice: price)
-            // 5. Time exit
+            // ELITE V9.0: Mechanical exits (SL, TP, Trail, BE) are handled by the EA.
+            // Swift now only monitors "Soft Exits" (Indicators, Time) and safety fallbacks.
+
+            // 1. Time exit (Institutional Hold Limit)
             if await checkTimeExit(trade: trade) {
                 await closeTrade(trade, exitPrice: price, reason: "Time Expiry")
                 continue
             }
-            // 6. Indicator reversal
+            
+            // 2. Indicator reversal (Logical Exit)
             if let indicators = indicators {
                 if await shouldExitViaIndicatorReversal(trade: trade, indicators: indicators) {
                     await closeTrade(trade, exitPrice: price, reason: "Indicator Reversal")
                     continue
                 }
             }
-            // 7. Stop Loss (last resort)
-            if await checkStopLoss(trade: trade, currentPrice: price) {
-                await closeTrade(trade, exitPrice: price, reason: "Stop Loss")
+
+            // 3. EMERGENCY FALLBACK: Only close if broker SL/TP hasn't triggered but price is way past
+            if await checkEmergencyFallback(trade: trade, currentPrice: price) {
+                await closeTrade(trade, exitPrice: price, reason: "Emergency Fallback")
                 continue
             }
         }
+    }
+
+    private func checkEmergencyFallback(trade: TradeRecord, currentPrice: Double) async -> Bool {
+        // Close if price is 5 pips past the original SL (Network/EA failure protection)
+        guard let sl = trade.stopLoss else { return false }
+        let pipSize = trade.symbol.contains("JPY") ? 0.01 : 0.0001
+        let buffer = 5.0 * pipSize
+        
+        if trade.type == .buy && currentPrice <= (sl - buffer) { return true }
+        if trade.type == .sell && currentPrice >= (sl + buffer) { return true }
+        
+        return false
     }
 
     // MARK: - Take Profit (ELITE: Early capture)
