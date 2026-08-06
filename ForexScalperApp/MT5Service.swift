@@ -415,7 +415,7 @@ actor MT5Service {
         
         // Return cached value if we have it
         if let mode = symbolTradeMode[cleanSymbol] {
-            return mode == 0
+            return mode == 4 || mode == 1 || mode == 2 // Full, Long Only, or Short Only
         }
         
         do {
@@ -426,7 +426,8 @@ actor MT5Service {
                 max: info.volume_max ?? 100.0,
                 step: info.volume_step ?? 0.01
             )
-            return info.trade_mode == 0
+            let mode = info.trade_mode
+            return mode == 4 || mode == 1 || mode == 2
         } catch {
             return true 
         }

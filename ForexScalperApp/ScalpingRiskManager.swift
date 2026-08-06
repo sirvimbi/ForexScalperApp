@@ -88,14 +88,18 @@ actor ScalpingRiskManager: RiskManagerProtocol {
         let riskInUsd = riskAmount / kesToUsdRate
         var lotSize = riskInUsd / (slDistance * 100000)
         
-        let limits = await MT5Service.shared.getVolumeLimits(for: signal.symbol)
-        let steps = round(lotSize / limits.step)
-        lotSize = max(limits.min, min(steps * limits.step, limits.max))
-        lotSize = min(lotSize, 0.05)
+        // 1. Hard cap before broker limits
+        lotSize = min(lotSize, 0.1) // Increased cap to 0.1 for more flexibility
         
+        // 2. Reduce risk based on performance
         let losses = consecutiveLosses[signal.symbol] ?? 0
         if losses >= 2 { lotSize *= 0.5 }
         if losses >= 3 { lotSize *= 0.5 }
+        
+        // 3. Apply broker limits (Final step ensures validity)
+        let limits = await MT5Service.shared.getVolumeLimits(for: signal.symbol)
+        let steps = round(lotSize / limits.step)
+        lotSize = max(limits.min, min(steps * limits.step, limits.max))
         
         let stopLoss = signal.type == .buy ? signal.price - slDistance : signal.price + slDistance
         let takeProfit = signal.type == .buy ? signal.price + tpDistance : signal.price - tpDistance

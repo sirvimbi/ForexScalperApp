@@ -12,9 +12,10 @@ struct MT5AccountInfo: Codable, Sendable {
     let profit: Double
     let currency: String
     let server: String
+    let algo_trading_enabled: Int?
     
     enum CodingKeys: String, CodingKey {
-        case login, balance, equity, margin, margin_free, profit, currency, server
+        case login, balance, equity, margin, margin_free, profit, currency, server, algo_trading_enabled
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -27,6 +28,7 @@ struct MT5AccountInfo: Codable, Sendable {
         self.profit = try container.decode(Double.self, forKey: .profit)
         self.currency = try container.decode(String.self, forKey: .currency)
         self.server = try container.decode(String.self, forKey: .server)
+        self.algo_trading_enabled = try container.decodeIfPresent(Int.self, forKey: .algo_trading_enabled)
     }
 
     nonisolated func encode(to encoder: Encoder) throws {
@@ -39,6 +41,7 @@ struct MT5AccountInfo: Codable, Sendable {
         try container.encode(profit, forKey: .profit)
         try container.encode(currency, forKey: .currency)
         try container.encode(server, forKey: .server)
+        try container.encodeIfPresent(algo_trading_enabled, forKey: .algo_trading_enabled)
     }
 }
 

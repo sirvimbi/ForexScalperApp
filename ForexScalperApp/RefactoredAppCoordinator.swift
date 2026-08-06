@@ -805,6 +805,19 @@ class RefactoredAppCoordinator: ObservableObject {
     }
 
     private func updateTradingStatus() async {
+        // 🎯 1. CHECK MT5 ALGO TRADING STATUS
+        let mt5Connected = (try? await MT5Service.shared.checkConnection()) ?? false
+        if mt5Connected {
+            if let accountInfo = try? await MT5Service.shared.getAccountInfo() {
+                if accountInfo.algo_trading_enabled == 0 {
+                    godLog("🔴 CRITICAL: MT5 Algo Trading is DISABLED in Terminal", level: .error)
+                    await MainActor.run {
+                        NotificationCenter.default.post(name: .newGodModeInsight, object: "Algo Trading is DISABLED in MT5. Please enable it in the terminal (top button).")
+                    }
+                }
+            }
+        }
+
         let metrics = await scalpingRiskManager.getCurrentRiskMetrics()
         let hour = Calendar.current.component(.hour, from: Date())
 
