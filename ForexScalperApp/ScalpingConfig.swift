@@ -159,6 +159,7 @@ class ScalpingConfig: ObservableObject {
             self.minTPPips = config.minTPPips
             self.partialTPPercent = config.partialTPPercent
             self.brokerSuffix = config.brokerSuffix ?? "m"
+            self.manualLotSize = config.manualLotSize ?? 0.01
             self.enableNewsFilter = config.enableNewsFilter ?? true
             self.autoRaiseSpreadDuringNews = config.autoRaiseSpreadDuringNews ?? true
             self.newsSpreadMultiplier = config.newsSpreadMultiplier ?? 2.0
@@ -194,6 +195,7 @@ class ScalpingConfig: ObservableObject {
             minTPPips: minTPPips,
             partialTPPercent: partialTPPercent,
             brokerSuffix: brokerSuffix,
+            manualLotSize: manualLotSize,
             enableNewsFilter: enableNewsFilter,
             autoRaiseSpreadDuringNews: autoRaiseSpreadDuringNews,
             newsSpreadMultiplier: newsSpreadMultiplier
@@ -234,6 +236,7 @@ class ScalpingConfig: ObservableObject {
         let minTPPips: Double
         let partialTPPercent: Double
         let brokerSuffix: String?
+        let manualLotSize: Double?
         let enableNewsFilter: Bool?
         let autoRaiseSpreadDuringNews: Bool?
         let newsSpreadMultiplier: Double?

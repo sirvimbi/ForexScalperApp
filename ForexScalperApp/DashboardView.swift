@@ -1982,10 +1982,16 @@ struct DashboardView: View {
                                                 .labelsHidden()
                                             
                                             if viewModel.scalpingConfig.useManualLot {
-                                                TextField("0.01", value: $viewModel.scalpingConfig.manualLotSize, format: .number)
-                                                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                                                    .frame(width: 50)
-                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                Picker("", selection: $viewModel.scalpingConfig.manualLotSize) {
+                                                    ForEach([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 1.00], id: \.self) { size in
+                                                        Text(String(format: "%.2f", size)).tag(size)
+                                                    }
+                                                }
+                                                .pickerStyle(MenuPickerStyle())
+                                                .frame(width: 80)
+                                                .background(Color.black.opacity(0.2))
+                                                .cornerRadius(4)
+                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
                                             }
                                         }
                                     }
@@ -2450,9 +2456,12 @@ struct DashboardView: View {
             if viewModel.scalpingConfig.useManualLot {
                 HStack {
                     Text("Lot Size"); Spacer()
-                    TextField("0.01", value: $viewModel.scalpingConfig.manualLotSize, format: .number)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
+                    Picker("", selection: $viewModel.scalpingConfig.manualLotSize) {
+                        ForEach([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 1.00], id: \.self) { size in
+                            Text(String(format: "%.2f", size)).tag(size)
+                        }
+                    }
+                    .pickerStyle(MenuPickerStyle())
                 }
             }
 
