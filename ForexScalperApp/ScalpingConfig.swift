@@ -43,20 +43,6 @@ class ScalpingConfig: ObservableObject {
     @Published var minTPPips: Double = 8.0
     @Published var partialTPPercent: Double = 0.50
     
-    // MARK: - SYMBOL-SPECIFIC SETTINGS
-    var symbolSettings: [String: SymbolConfig] = [
-        "EURUSD": SymbolConfig(minConfidence: 75, baseSL: 7, baseTP: 12, maxSpread: 1.2),
-        "GBPUSD": SymbolConfig(minConfidence: 78, baseSL: 8, baseTP: 14, maxSpread: 1.5),
-        "USDJPY": SymbolConfig(minConfidence: 75, baseSL: 6, baseTP: 10, maxSpread: 1.0),
-        "AUDUSD": SymbolConfig(minConfidence: 80, baseSL: 9, baseTP: 15, maxSpread: 1.5),
-        "EURJPY": SymbolConfig(minConfidence: 78, baseSL: 7, baseTP: 12, maxSpread: 1.2),
-        "GBPJPY": SymbolConfig(minConfidence: 80, baseSL: 8, baseTP: 14, maxSpread: 1.5),
-        "AUDJPY": SymbolConfig(minConfidence: 80, baseSL: 9, baseTP: 15, maxSpread: 1.5),
-        "NZDUSD": SymbolConfig(minConfidence: 82, baseSL: 10, baseTP: 16, maxSpread: 1.8),
-        "EURGBP": SymbolConfig(minConfidence: 85, baseSL: 8, baseTP: 12, maxSpread: 1.5),
-        "EURCHF": SymbolConfig(minConfidence: 85, baseSL: 8, baseTP: 12, maxSpread: 1.5)
-    ]
-    
     // MARK: - SESSION SETTINGS
     var sessionMultipliers: [String: SessionMultiplier] = [
         "Asian": SessionMultiplier(confidence: 1.15, sl: 0.8, tp: 0.8, spread: 1.2),
@@ -99,13 +85,11 @@ class ScalpingConfig: ObservableObject {
     }
     
     func getConfidenceThreshold(for symbol: String) -> Double {
-        let normalized = normalizeSymbol(symbol)
-        return symbolSettings[normalized]?.minConfidence ?? confidenceThreshold
+        return confidenceThreshold
     }
     
     func getSymbolConfig(_ symbol: String) -> SymbolConfig {
-        let normalized = normalizeSymbol(symbol)
-        return symbolSettings[normalized] ?? SymbolConfig(
+        return SymbolConfig(
             minConfidence: confidenceThreshold,
             baseSL: baseSLPips,
             baseTP: baseTPPips,
