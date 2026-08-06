@@ -200,7 +200,7 @@ actor ScalpingSignalEngine {
             // ELITE: If historical win rate for this confidence bucket is poor, penalize confidence
             if winRate < 0.5 && signal.confidence > 80 {
                 let adjustedConfidence = signal.confidence * 0.8
-                return await signal.withConfidence(adjustedConfidence)
+                return signal.withConfidence(adjustedConfidence)
             }
         }
         return signal

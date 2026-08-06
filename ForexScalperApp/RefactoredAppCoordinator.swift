@@ -681,6 +681,7 @@ class RefactoredAppCoordinator: ObservableObject {
 
         // 2. Sync Closed History
         do {
+            let mt5ActivePositions = (try? await MT5Service.shared.getPositionsAndOrders())?.active ?? []
             let history = try await MT5Service.shared.getTradeHistory(days: 3)
 
             for pos in history {
@@ -696,6 +697,20 @@ class RefactoredAppCoordinator: ObservableObject {
                         let closeTime = parseMT5Time(pos.close_time) ?? Date()
                         if closeTime <= existingTrade.entryTime.addingTimeInterval(1) {
                             godLog("⚠️ Sync: Detected MT5 history anomaly for \(normalizedSymbol). Ignoring stale record.", level: .diagnostic)
+                            continue
+                        }
+
+                        // 🔥 GHOST FIX: Only notify if the position is no longer active in MT5
+                        let isStillActive = mt5ActivePositions.contains { String($0.ticket) == dealId }
+                        
+                        if isStillActive {
+                            // This was a partial close (Level hit)
+                            godLog("🎯 MT5: Partial TP level hit for \(normalizedSymbol). Trade remains active.", level: .diagnostic)
+                            
+                            // Update internal volume but keep status as active
+                            var partialUpdate = existingTrade
+                            partialUpdate.positionSize = mt5ActivePositions.first { String($0.ticket) == dealId }?.volume
+                            await tradeHistory.updateTrade(partialUpdate)
                             continue
                         }
 

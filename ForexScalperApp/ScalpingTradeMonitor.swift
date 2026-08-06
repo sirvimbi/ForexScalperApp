@@ -254,9 +254,6 @@ actor ScalpingTradeMonitor {
         await PerformanceAnalyzer.shared.recordTrade(updatedTrade)
         if let onTradeClosed = self.onTradeClosed { await onTradeClosed(updatedTrade) }
         
-        // Notify user ONLY after verified closure
-        await NotificationManager.shared.sendTradeClosedNotification(updatedTrade)
-        
         let isWin = (updatedTrade.pnl ?? 0) > 0
         godLog("📊 Verified Close: \(trade.symbol) - P&L: KES \(String(format: "%.2f", updatedTrade.pnl ?? 0))", level: isWin ? .success : .warning)
     }

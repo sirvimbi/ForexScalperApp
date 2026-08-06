@@ -396,7 +396,7 @@ struct TradeRecord: Identifiable, Codable, Sendable {
     let confidence: Double
     var takeProfit: Double?
     var stopLoss: Double?
-    let positionSize: Double?
+    var positionSize: Double?
     var pnl: Double?
     var pnlPercent: Double?
     var status: TradeStatus
