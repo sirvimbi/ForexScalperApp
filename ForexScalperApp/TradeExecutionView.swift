@@ -23,7 +23,7 @@ struct TradeExecutionView: View {
         #if os(iOS)
         NavigationView {
             Form {
-                Section("God Mode Execution") {
+                Section("Stellas Execution") {
                     HStack {
                         Text("Asset"); Spacer()
                         Text(signal.symbol).font(.headline).foregroundColor(.accentCyan)

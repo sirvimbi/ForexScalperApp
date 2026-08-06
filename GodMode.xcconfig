@@ -1,4 +1,4 @@
-PRODUCT_NAME = God Mode
+PRODUCT_NAME = Stellas
 PRODUCT_BUNDLE_IDENTIFIER = com.godmode.scalper
 CODE_SIGN_IDENTITY = -
 CODE_SIGN_STYLE = Manual

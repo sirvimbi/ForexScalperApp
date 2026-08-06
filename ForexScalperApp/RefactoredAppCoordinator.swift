@@ -905,7 +905,7 @@ class RefactoredAppCoordinator: ObservableObject {
                 
                 // Also send a special notification
                 let content = UNMutableNotificationContent()
-                content.title = "🧠 God Mode Insight: \(normalizedSymbol)"
+                content.title = "🧠 Stellas Insight: \(normalizedSymbol)"
                 content.body = insight
                 content.sound = .default
                 let request = UNNotificationRequest(identifier: "insight_\(normalizedSignal.id)", content: content, trigger: nil)

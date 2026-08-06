@@ -162,7 +162,7 @@ class NotificationManager: NSObject, ObservableObject {
     
     func sendTestNotification() {
         let content = UNMutableNotificationContent()
-        content.title = "God Mode System Check"
+        content.title = "Stellas System Check"
         content.body = "Notification pipe is now active and synced."
         content.sound = .default
         

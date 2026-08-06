@@ -9,9 +9,9 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>God Mode</string>
+	<string>Stellas</string>
 	<key>CFBundleDisplayName</key>
-	<string>God Mode</string>
+	<string>Stellas</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>CFBundleShortVersionString</key>
@@ -30,8 +30,8 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.finance</string>
 	<key>NSDownloadsFolderUsageDescription</key>
-	<string>God Mode needs access to save your trade history and system logs.</string>
+	<string>Stellas needs access to save your trade history and system logs.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
-	<string>God Mode needs access to save reports and configuration data.</string>
+	<string>Stellas needs access to save reports and configuration data.</string>
 </dict>
 </plist>

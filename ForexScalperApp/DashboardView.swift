@@ -322,11 +322,11 @@ struct DashboardView: View {
                         .shadow(color: .accentCyan.opacity(0.8), radius: 6)
                 }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("YAJOOT SCALPER")
+                    Text("STELLAS")
                         .font(.system(size: 18, weight: .black, design: .rounded))
                         .foregroundColor(.textPrimary)
                         .tracking(2)
-                    Text("GodMode Ver. v6.0")
+                    Text("Version v6.0")
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundColor(.textMuted)
                         .tracking(3)
@@ -920,7 +920,7 @@ struct DashboardView: View {
             }
         }
         #if os(iOS)
-        .navigationTitle("Forex Scalper")
+        .navigationTitle("Stellas")
         .navigationBarTitleDisplayMode(.inline)
         #endif
     }
@@ -2111,7 +2111,7 @@ struct DashboardView: View {
                         }
                         
                         VStack(spacing: 14) {
-                            // MT5 API CONNECTION CARD (God Mode)
+                            // MT5 API CONNECTION CARD (Stellas)
                             GlassCard(borderColor: viewModel.mt5Connected ? Color.accentCyan.opacity(0.4) : Color.borderSubtle) {
                                 VStack(alignment: .leading, spacing: 14) {
                                     HStack {
@@ -2316,7 +2316,7 @@ struct DashboardView: View {
                                         NotificationManager.shared.requestAuthorization()
                                         // Send dummy to force registration
                                         let content = UNMutableNotificationContent()
-                                        content.title = "God Mode System Check"
+                                        content.title = "Stellas System Check"
                                         content.body = "Notification pipe is now active and synced."
                                         content.sound = .default
                                         let request = UNNotificationRequest(identifier: "test_mac", content: content, trigger: nil)
@@ -2594,7 +2594,7 @@ struct DashboardView: View {
                 NotificationManager.shared.requestAuthorization()
                 // Send dummy to force registration
                 let content = UNMutableNotificationContent()
-                content.title = "God Mode Active"
+                content.title = "Stellas Active"
                 content.body = "Notifications are now synced with macOS."
                 let request = UNNotificationRequest(identifier: "test", content: content, trigger: nil)
                 UNUserNotificationCenter.current().add(request)

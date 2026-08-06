@@ -21,7 +21,7 @@ struct ForexScalperApp: App {
         .windowResizability(.contentSize)
         
         #if os(macOS)
-        MenuBarExtra("Scalper", systemImage: "chart.xyaxis.line") {
+        MenuBarExtra("Stellas", systemImage: "chart.xyaxis.line") {
             MenuBarView(coordinator: coordinator)
         }
         .menuBarExtraStyle(.window)

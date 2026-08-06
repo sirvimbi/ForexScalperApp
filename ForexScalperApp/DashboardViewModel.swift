@@ -404,7 +404,7 @@ class DashboardViewModel: ObservableObject {
                     self?.allInsights.insert(insight, at: 0)
                     if (self?.allInsights.count ?? 0) > 100 { self?.allInsights.removeLast() }
                     
-                    self?.showNotification(title: "🧠 God Mode Insight", message: "\(signal.symbol): \(insight.message)")
+                    self?.showNotification(title: "🧠 Stellas Insight", message: "\(signal.symbol): \(insight.message)")
                 }
             }
             .store(in: &cancellables)
