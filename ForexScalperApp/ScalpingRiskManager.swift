@@ -71,6 +71,10 @@ actor ScalpingRiskManager: RiskManagerProtocol {
     }
     
     func calculatePositionSize(for signal: Signal) async -> PositionSize? {
+        let (useManual, manualSize) = await MainActor.run {
+            (ScalpingConfig.shared.useManualLot, ScalpingConfig.shared.manualLotSize)
+        }
+        
         let balance = parameters.accountBalance
         let riskAmount = balance * parameters.riskPerTrade
         
@@ -84,17 +88,24 @@ actor ScalpingRiskManager: RiskManagerProtocol {
         let tpPips = max(8.0, min(25.0, atrPips * 2.5))
         let tpDistance = tpPips * pipSize
         
-        let kesToUsdRate = 130.0
-        let riskInUsd = riskAmount / kesToUsdRate
-        var lotSize = riskInUsd / (slDistance * 100000)
+        var lotSize: Double
         
-        // 1. Hard cap before broker limits
-        lotSize = min(lotSize, 0.1) // Increased cap to 0.1 for more flexibility
-        
-        // 2. Reduce risk based on performance
-        let losses = consecutiveLosses[signal.symbol] ?? 0
-        if losses >= 2 { lotSize *= 0.5 }
-        if losses >= 3 { lotSize *= 0.5 }
+        if useManual {
+            lotSize = manualSize
+            godLog("🛡 Risk Manager: Using manual lot size: \(lotSize)", level: .info)
+        } else {
+            let kesToUsdRate = 130.0
+            let riskInUsd = riskAmount / kesToUsdRate
+            lotSize = riskInUsd / (slDistance * 100000)
+            
+            // 1. Hard cap before broker limits
+            lotSize = min(lotSize, 0.1) // Increased cap to 0.1 for more flexibility
+            
+            // 2. Reduce risk based on performance
+            let losses = consecutiveLosses[signal.symbol] ?? 0
+            if losses >= 2 { lotSize *= 0.5 }
+            if losses >= 3 { lotSize *= 0.5 }
+        }
         
         // 3. Apply broker limits (Final step ensures validity)
         let limits = await MT5Service.shared.getVolumeLimits(for: signal.symbol)
