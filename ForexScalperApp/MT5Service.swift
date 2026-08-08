@@ -14,6 +14,8 @@ actor MT5Service {
         return URLSession(configuration: config)
     }()
     
+    private let decoder = JSONDecoder()
+    
     private var customBaseURL: String?
     private var customAuthToken: String?
     
@@ -588,7 +590,7 @@ actor MT5Service {
     }
     
     private nonisolated func decode<T: Decodable & Sendable>(_ type: T.Type, from data: Data) throws -> T {
-        return try JSONDecoder().decode(type, from: data)
+        return try decoder.decode(type, from: data)
     }
 }
 

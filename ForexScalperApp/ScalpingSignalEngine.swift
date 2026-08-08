@@ -5,6 +5,7 @@ actor ScalpingSignalEngine {
     private let marketData: MarketDataProvider
     private let tradeHistory: RefactoredTradeHistoryManager
     private let riskManager: RiskManagerProtocol
+    private let mlModel: MLModelHandler
 
     // Multi-timeframe analysis
     private let timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "D1", "W1"]
@@ -30,10 +31,12 @@ actor ScalpingSignalEngine {
     init(marketData: MarketDataProvider, 
          tradeHistory: RefactoredTradeHistoryManager, 
          riskManager: RiskManagerProtocol,
+         mlModel: MLModelHandler,
          config: ScalpingConfig) {
         self.marketData = marketData
         self.tradeHistory = tradeHistory
         self.riskManager = riskManager
+        self.mlModel = mlModel
     }
 
     func updateSymbolPerformance(symbol: String, pnl: Double) {
@@ -75,12 +78,14 @@ actor ScalpingSignalEngine {
             return nil
         }
 
-        let (enabledNews, highMin, medMin, cooldown, spreadTol) = await MainActor.run {
-            (ScalpingConfig.shared.enableNewsFilter, 
-             ScalpingConfig.shared.pauseBeforeHighImpactMinutes, 
-             ScalpingConfig.shared.pauseBeforeMediumImpactMinutes,
-             ScalpingConfig.shared.cooldownSeconds,
-             ScalpingConfig.shared.spreadTolerance)
+        let (enabledNews, highMin, medMin, cooldown, spreadTol, rocPeriod) = await MainActor.run {
+            let config = ScalpingConfig.shared
+            return (config.enableNewsFilter, 
+                    config.pauseBeforeHighImpactMinutes, 
+                    config.pauseBeforeMediumImpactMinutes,
+                    config.cooldownSeconds,
+                    config.spreadTolerance,
+                    config.rocPeriod)
         }
 
         // NEWS CHECK
@@ -115,7 +120,7 @@ actor ScalpingSignalEngine {
             return nil
         }
         
-        let indicators = await calculateAllIndicators(symbol: symbol, candlesByTimeframe: candlesByTimeframe)
+        let indicators = await calculateAllIndicators(symbol: symbol, candlesByTimeframe: candlesByTimeframe, rocPeriod: rocPeriod)
 
         // SPREAD CHECK
         let pointSize = symbol.contains("JPY") ? 0.01 : 0.0001
@@ -138,7 +143,7 @@ actor ScalpingSignalEngine {
             return nil
         }
 
-        var finalSignal = await generateSignal(symbol: symbol, indicators: indicators)
+        var finalSignal = await generateSignal(symbol: symbol, indicators: indicators, candles1m: candlesByTimeframe["1m"]!)
         if let warning = learningWarning {
             finalSignal = finalSignal.withSelfLearningInsight(warning)
         }
@@ -148,7 +153,7 @@ actor ScalpingSignalEngine {
         
         // Detailed Logging
         let metPillars = finalSignal.confidenceFactors.keys.sorted()
-        let allPillars = ["HTF Power Alignment", "Elite Dip Buy", "Elite Rally Sell", "Smart Money Volume", "Structural Support", "Structural Resistance", "BB Lower Sweep", "BB Upper Sweep", "Cyclical Strength", "SAR Support", "SAR Resistance"]
+        let allPillars = ["HTF Power Alignment", "Elite Dip Buy", "Elite Rally Sell", "Smart Money Volume", "Structural Support", "Structural Resistance", "BB Lower Sweep", "BB Upper Sweep", "Cyclical Strength", "SAR Support", "SAR Resistance", "Momentum Surge", "ML Confirmed", "Order Flow Buy", "Order Flow Sell"]
         let failedPillars = allPillars.filter { pillar in
             !metPillars.contains { $0 == pillar }
         }
@@ -236,7 +241,7 @@ actor ScalpingSignalEngine {
         return atrPercentage >= minVol && atrPercentage <= 0.50
     }
 
-    private func calculateAllIndicators(symbol: String, candlesByTimeframe: [String: [Kline]]) async -> IndicatorSet {
+    private func calculateAllIndicators(symbol: String, candlesByTimeframe: [String: [Kline]], rocPeriod: Int) async -> IndicatorSet {
         let c1m = candlesByTimeframe["1m"]!
         let c5m = candlesByTimeframe["5m"]!
         let c4h = candlesByTimeframe["4h"]!
@@ -275,6 +280,11 @@ actor ScalpingSignalEngine {
         // Sessions
         let sessions = AdvancedIndicators.sessionAnalysis(c1m)
         
+        // V10.0 Precision Fields
+        let (momentum, isAccel) = getMomentumScore(candles: c1m, rocPeriod: rocPeriod)
+        let gaps = AdvancedIndicators.detectFairValueGaps(c1m)
+        let delta = await MT5WebSocketService.shared.getDeltaVolume(for: symbol)
+        
         return IndicatorSet(
             rsi: rsi,
             stochasticK: stochK, stochasticD: stochD, 
@@ -291,7 +301,11 @@ actor ScalpingSignalEngine {
             currentPrice: currentPrice, 
             h4Trend: calculateHTFTrend(candles: c4h), 
             d1Trend: calculateHTFTrend(candles: cD1), 
-            w1Trend: calculateHTFTrend(candles: cW1)
+            w1Trend: calculateHTFTrend(candles: cW1),
+            momentumScore: momentum,
+            isAccelerating: isAccel,
+            fvgGaps: gaps,
+            deltaVolume: delta
         )
     }
 
@@ -305,73 +319,124 @@ actor ScalpingSignalEngine {
         return .none
     }
 
-    private func generateSignal(symbol: String, indicators: IndicatorSet) async -> ScalpingSignal {
+    private func generateSignal(symbol: String, indicators: IndicatorSet, candles1m: [Kline]) async -> ScalpingSignal {
+        let (deltaThreshold, mlThreshold, newsMultiplierVal, swingLookback, pullbackEMAPeriod, weights) = await MainActor.run {
+            let config = ScalpingConfig.shared
+            let weights = [
+                "HTF": config.weightHTFAlignment,
+                "Momentum": config.weightMomentumExhaustion,
+                "Volume": config.weightVolumeSurge,
+                "EMA": config.weightEMAStack,
+                "BB": config.weightBollingerRejection,
+                "CCI": config.weightCCICycle,
+                "SAR": config.weightSARTrend,
+                "Accel": config.weightMomentumSurge,
+                "OrderFlow": config.weightOrderFlow,
+                "ML": config.weightMLConfirmed,
+                "FixedSL": config.fixedSLPips
+            ]
+            return (config.orderFlowThreshold,
+                    config.mlConfidenceThreshold,
+                    config.newsSpreadMultiplier,
+                    config.swingLookback,
+                    config.pullbackEMAPeriod,
+                    weights)
+        }
+        
         var buyScore: Double = 0
         var sellScore: Double = 0
         var factors: [String: Double] = [:]
 
-        // PILLAR 1: Institutional Trend Alignment (H4 + D1)
+        // PILLAR 1: Institutional Trend Alignment (H4 + D1) - STRICT
+        let htfWeight = weights["HTF"] ?? 25.0
         if indicators.h4Trend == .buy && indicators.d1Trend == .buy {
-            buyScore += 25
-            factors["HTF Power Alignment"] = 25
+            buyScore += htfWeight
+            factors["HTF Power Alignment"] = htfWeight
         } else if indicators.h4Trend == .sell && indicators.d1Trend == .sell {
-            sellScore += 25
-            factors["HTF Power Alignment"] = 25
+            sellScore += htfWeight
+            factors["HTF Power Alignment"] = htfWeight
+        } else {
+            // SKIP: Trend doesn't align with Higher Timeframe
+            return ScalpingSignal(type: .none, symbol: symbol, price: indicators.currentPrice, confidence: 0, score: 0, sellScore: 0, indicators: indicators, confidenceFactors: [:], timestamp: Date())
         }
 
         // PILLAR 2: Momentum & Exhaustion (RSI + Stoch)
+        let momWeight = weights["Momentum"] ?? 15.0
         if indicators.rsi < 32 && indicators.stochasticK < 15 {
-            buyScore += 15
-            factors["Elite Dip Buy"] = 15
+            buyScore += momWeight
+            factors["Elite Dip Buy"] = momWeight
         } else if indicators.rsi > 68 && indicators.stochasticK > 85 {
-            sellScore += 15
-            factors["Elite Rally Sell"] = 15
+            sellScore += momWeight
+            factors["Elite Rally Sell"] = momWeight
         }
 
         // PILLAR 3: Institutional Volume Surge
+        let volWeight = weights["Volume"] ?? 12.0
         if indicators.volumeRatio >= 1.5 {
-            buyScore += 12
-            sellScore += 12
-            factors["Smart Money Volume"] = 12
+            buyScore += volWeight
+            sellScore += volWeight
+            factors["Smart Money Volume"] = volWeight
         }
 
         // PILLAR 4: EMA Stack Confluence (M1 + M5)
+        let emaWeight = weights["EMA"] ?? 18.0
         let buyStack = indicators.ema9 > indicators.ema21 && indicators.ema21 > indicators.ema50
         let sellStack = indicators.ema9 < indicators.ema21 && indicators.ema21 < indicators.ema50
         
         if buyStack {
-            buyScore += 18
-            factors["Structural Support"] = 18
+            buyScore += emaWeight
+            factors["Structural Support"] = emaWeight
         } else if sellStack {
-            sellScore += 18
-            factors["Structural Resistance"] = 18
+            sellScore += emaWeight
+            factors["Structural Resistance"] = emaWeight
         }
 
         // PILLAR 5: Bollinger Rejection
+        let bbWeight = weights["BB"] ?? 10.0
         if indicators.bbPosition < 0.05 {
-            buyScore += 10
-            factors["BB Lower Sweep"] = 10
+            buyScore += bbWeight
+            factors["BB Lower Sweep"] = bbWeight
         } else if indicators.bbPosition > 0.95 {
-            sellScore += 10
-            factors["BB Upper Sweep"] = 10
+            sellScore += bbWeight
+            factors["BB Upper Sweep"] = bbWeight
         }
         
         // PILLAR 6: CCI Cycle Alignment
+        let cciWeight = weights["CCI"] ?? 10.0
         if indicators.cci > 100 {
-            buyScore += 10
-            factors["Cyclical Strength"] = 10
+            buyScore += cciWeight
+            factors["Cyclical Strength"] = cciWeight
         } else if indicators.cci < -100 {
-            sellScore += 10
-            factors["Cyclical Strength"] = 10
+            sellScore += cciWeight
+            factors["Cyclical Strength"] = cciWeight
         }
 
         // PILLAR 7: SAR Trend Confirmation
+        let sarWeight = weights["SAR"] ?? 10.0
         if indicators.sar < indicators.currentPrice {
-            buyScore += 10
-            factors["SAR Support"] = 10
+            buyScore += sarWeight
+            factors["SAR Support"] = sarWeight
         } else if indicators.sar > indicators.currentPrice {
-            sellScore += 10
-            factors["SAR Resistance"] = 10
+            sellScore += sarWeight
+            factors["SAR Resistance"] = sarWeight
+        }
+        
+        // PILLAR 8: Momentum Acceleration (V10.0)
+        let accelWeight = weights["Accel"] ?? 12.0
+        if indicators.isAccelerating {
+            if buyScore > sellScore { buyScore += accelWeight }
+            else if sellScore > buyScore { sellScore += accelWeight }
+            factors["Momentum Surge"] = accelWeight
+        }
+        
+        // PILLAR 9: L2 Order Flow Imbalance (V10.0)
+        let flowWeight = weights["OrderFlow"] ?? 15.0
+        if indicators.deltaVolume > deltaThreshold {
+            buyScore += flowWeight
+            factors["Order Flow Buy"] = flowWeight
+        } else if indicators.deltaVolume < -deltaThreshold {
+            sellScore += flowWeight
+            factors["Order Flow Sell"] = flowWeight
         }
 
         // Final Confidence Calculation
@@ -379,19 +444,35 @@ actor ScalpingSignalEngine {
         let finalScore = type == .buy ? buyScore : sellScore
         
         // ELITE: Confidence is a weighted average of pillars
-        let confidence = min(finalScore * 1.1, 98.0) 
+        var confidence = min(finalScore * 1.1, 98.0) 
 
-        // Dynamic Stop Loss & Take Profit (ATR Based)
+        // V10.0: ML Prediction Filter
+        let (mlDir, mlConf) = await getMLTrendPrediction(symbol: symbol, candles: candles1m)
+        let mlWeight = weights["ML"] ?? 10.0
+        
+        if mlDir == type && mlConf >= mlThreshold {
+            confidence = min(confidence + (mlConf * mlWeight), 99.0)
+            factors["ML Confirmed"] = mlConf * mlWeight
+        } else if mlDir != .none && mlConf > (mlThreshold + 0.1) {
+            confidence *= 0.7 // Penalize if ML disagrees
+            factors["ML Divergence"] = -30
+        }
+
+        // News Multiplier
+        let newsMultiplier = await getNewsSpreadMultiplier(symbol: symbol, configMultiplier: newsMultiplierVal)
+
+        // V10.0: FIXED STOP LOSS (30 PIPS)
         let pipSize = symbol.contains("JPY") ? 0.01 : 0.0001
-        let atrPips = indicators.atr / pipSize
-        
-        // ELITE MATH: SL is 1.5x ATR (min 6, max 15 pips)
-        let slPips = max(6.0, min(15.0, atrPips * 1.5))
-        // ELITE MATH: TP is 2.0x ATR (min 8, max 25 pips)
-        let tpPips = max(8.0, min(25.0, atrPips * 2.0))
-        
+        let slPips = weights["FixedSL"] ?? 30.0
         let sl = type == .buy ? indicators.currentPrice - (slPips * pipSize) : indicators.currentPrice + (slPips * pipSize)
+        
+        // Dynamic Take Profit (ATR Based with News Adjustment)
+        let atrPips = indicators.atr / pipSize
+        let tpPips = max(8.0, min(25.0, (atrPips * 2.5) * newsMultiplier))
         let tp = type == .buy ? indicators.currentPrice + (tpPips * pipSize) : indicators.currentPrice - (tpPips * pipSize)
+
+        // V10.0: Find Optimal Entry (Pullback Logic)
+        let optimalEntry = findOptimalEntry(symbol: symbol, type: type, basePrice: indicators.currentPrice, candles: candles1m, atr: indicators.atr, fvgGaps: indicators.fvgGaps, emaPeriod: pullbackEMAPeriod)
 
         return ScalpingSignal(
             type: type,
@@ -405,7 +486,8 @@ actor ScalpingSignalEngine {
             timestamp: Date(),
             stopLoss: sl,
             takeProfit: tp,
-            volume: 0.1
+            volume: 0.1,
+            optimalEntryPrice: optimalEntry
         )
     }
 
@@ -416,5 +498,69 @@ actor ScalpingSignalEngine {
 
     private func validateData(_ dict: [String: [Kline]], symbol: String) -> Bool {
         return (dict["1m"]?.count ?? 0) >= 100
+    }
+
+    // MARK: - V10.0 Precision Logic
+    
+    private func findOptimalEntry(symbol: String, type: SignalType, basePrice: Double,
+                                  candles: [Kline], atr: Double, fvgGaps: [FairValueGap], emaPeriod: Int) -> Double? {
+        let closes = candles.map { $0.close }
+        let emaVal = Indicators.ema(closes, period: emaPeriod).last ?? basePrice
+        
+        let pipSize = symbol.contains("JPY") ? 0.01 : 0.0001
+        
+        if type == .buy {
+            let nearestGap = fvgGaps.filter { $0.type == .buy && $0.top < basePrice }.last?.top ?? emaVal
+            let idealEntry = min(basePrice, max(emaVal, nearestGap) + (0.2 * pipSize))
+            if abs(basePrice - emaVal) < atr * 1.5 { return idealEntry }
+        } else if type == .sell {
+            let nearestGap = fvgGaps.filter { $0.type == .sell && $0.bottom > basePrice }.last?.bottom ?? emaVal
+            let idealEntry = max(basePrice, min(emaVal, nearestGap) - (0.2 * pipSize))
+            if abs(basePrice - emaVal) < atr * 1.5 { return idealEntry }
+        }
+        return nil
+    }
+
+    private func getNewsSpreadMultiplier(symbol: String, configMultiplier: Double) async -> Double {
+        let (impact, _) = await NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: 30)
+        switch impact {
+        case .high: return configMultiplier
+        case .medium: return 1.0 + ((configMultiplier - 1.0) * 0.5) // Half impact for medium news
+        default: return 1.0
+        }
+    }
+
+    private func getMLTrendPrediction(symbol: String, candles: [Kline]) async -> (direction: SignalType, confidence: Double) {
+        let features = await mlModel.extractFeatures(symbol: symbol, candles1m: candles, candles5m: [], candles1h: [])
+        guard let prediction = await mlModel.predictSignal(features: features) else {
+            return (.none, 0)
+        }
+        let direction: SignalType = prediction.signal == .buy ? .buy : (prediction.signal == .sell ? .sell : .none)
+        return (direction, prediction.confidence)
+    }
+
+    private func getSwingSL(symbol: String, type: SignalType, candles: [Kline], lookback: Int) -> Double {
+        let swings = AdvancedIndicators.findStructuralSwings(candles, lookback: lookback)
+        let pipSize = symbol.contains("JPY") ? 0.01 : 0.0001
+        let atr = AdvancedIndicators.atr(candles, period: 14).last ?? (15.0 * pipSize)
+        let buffer = atr * 0.3
+        
+        if type == .buy {
+            let low = swings.low ?? (candles.last!.close - (10 * pipSize))
+            return low - buffer
+        } else {
+            let high = swings.high ?? (candles.last!.close + (10 * pipSize))
+            return high + buffer
+        }
+    }
+
+    private func getMomentumScore(candles: [Kline], rocPeriod: Int) -> (momentum: Double, isAccelerating: Bool) {
+        let closes = candles.map { $0.close }
+        guard closes.count >= 20 else { return (0, false) }
+        let roc1 = AdvancedIndicators.calculateROC(closes, period: rocPeriod)
+        let roc3 = AdvancedIndicators.calculateROC(closes, period: rocPeriod * 3)
+        let roc5 = AdvancedIndicators.calculateROC(closes, period: rocPeriod * 5)
+        let isAccelerating = abs(roc1) > abs(roc3) && abs(roc3) > abs(roc5)
+        return (roc1, isAccelerating)
     }
 }

@@ -176,7 +176,7 @@ struct Signal: Identifiable, Sendable, Codable {
     let id: UUID
     let type: SignalType
     var symbol: String
-    let price: Double
+    var price: Double
     let confidence: Double
     let timestamp: Date
     let timeframe: String
@@ -197,6 +197,9 @@ struct Signal: Identifiable, Sendable, Codable {
     var externalDealId: String?
     var selfLearningInsight: String?
     
+    // V10.0 Precision Fields
+    var optimalEntryPrice: Double?
+    
     var magicNumber: Int?
     var comment: String?
     var deviation: Int?
@@ -206,7 +209,7 @@ struct Signal: Identifiable, Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, type, symbol, price, confidence, timestamp, timeframe, expiryTime, status, acceptedAt, acceptedPrice, closedAt, closedPrice, pnl, pnlPercent, positionSize, stopLoss, takeProfit, source, volume, tradeId, externalDealId, selfLearningInsight
-        case magicNumber, comment, deviation, filler, orderType, executionMode
+        case magicNumber, comment, deviation, filler, orderType, executionMode, optimalEntryPrice
     }
 
     init(from decoder: Decoder) throws {
@@ -242,6 +245,7 @@ struct Signal: Identifiable, Sendable, Codable {
         self.filler = try container.decodeIfPresent(MT5FillingType.self, forKey: .filler)
         self.orderType = try container.decodeIfPresent(MT5OrderType.self, forKey: .orderType)
         self.executionMode = try container.decodeIfPresent(MT5ExecutionMode.self, forKey: .executionMode)
+        self.optimalEntryPrice = try container.decodeIfPresent(Double.self, forKey: .optimalEntryPrice)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -503,6 +507,12 @@ enum MarketRegime: String, Codable, Sendable {
     case volatile
 }
 
+struct FairValueGap: Sendable, Codable {
+    let top: Double
+    let bottom: Double
+    let type: SignalType // .buy for bullish gap, .sell for bearish gap
+}
+
 struct IndicatorSet: Sendable {
     let rsi: Double
     let stochasticK: Double
@@ -532,6 +542,12 @@ struct IndicatorSet: Sendable {
     let h4Trend: SignalType
     let d1Trend: SignalType
     let w1Trend: SignalType
+    
+    // V10.0 Precision Fields
+    let momentumScore: Double
+    let isAccelerating: Bool
+    let fvgGaps: [FairValueGap]
+    let deltaVolume: Double // Buy Volume - Sell Volume from L2
 }
 
 struct ScalpingSignal: Sendable {
@@ -553,6 +569,9 @@ struct ScalpingSignal: Sendable {
     var fillingType: MT5FillingType?
     var executionMode: MT5ExecutionMode?
     
+    // V10.0 Precision Fields
+    var optimalEntryPrice: Double?
+    
     var failedFactors: [String] = []
     var selfLearningInsight: String? = nil
     
@@ -573,6 +592,7 @@ struct ScalpingSignal: Sendable {
             orderType: orderType,
             fillingType: fillingType,
             executionMode: executionMode,
+            optimalEntryPrice: optimalEntryPrice,
             failedFactors: failedFactors,
             selfLearningInsight: selfLearningInsight
         )
@@ -647,6 +667,7 @@ extension Double {
 enum InsightType: String, Codable, Sendable {
     case performance = "PERFORMANCE"
     case newsBroadcast = "NEWS BROADCAST"
+    case signalHistory = "SIGNAL HISTORY"
 }
 
 struct GodModeInsight: Identifiable, Sendable, Codable {

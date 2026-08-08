@@ -99,6 +99,7 @@ class RefactoredAppCoordinator: ObservableObject {
             marketData: marketData,
             tradeHistory: tradeHistory,
             riskManager: scalpingRiskManager,
+            mlModel: mlModel,
             config: ScalpingConfig.shared
         )
 
@@ -192,6 +193,9 @@ class RefactoredAppCoordinator: ObservableObject {
             if mt5Connected {
                 print("✅ MT5 Connected")
                 await syncMT5Data() // Fetch history and charts
+                
+                // V10.0: Connect to MT5 WebSocket for L2 Order Flow
+                await MT5WebSocketService.shared.connect(symbols: symbols)
             }
         } catch {
             print("⚠️ MT5 connection failed: \(error.localizedDescription)")
@@ -412,6 +416,11 @@ class RefactoredAppCoordinator: ObservableObject {
         let h4TrendVal = calculateTrend(candles: Array(candles4h.suffix(20)))
         let d1TrendVal = calculateTrend(candles: Array(candlesD1.suffix(10)))
         let w1TrendVal = calculateTrend(candles: Array(candlesW1.suffix(5)))
+        
+        // V10.0 Precision Fields
+        let roc1 = (currentPrice - (candles1m.dropLast().last?.close ?? currentPrice)) / (candles1m.dropLast().last?.close ?? currentPrice) * 100
+        let gaps = AdvancedIndicators.detectFairValueGaps(candles1m)
+        let delta = await MT5WebSocketService.shared.getDeltaVolume(for: symbol)
 
         return IndicatorSet(
             rsi: rsi,
@@ -439,7 +448,11 @@ class RefactoredAppCoordinator: ObservableObject {
             currentPrice: currentPrice,
             h4Trend: h4TrendVal,
             d1Trend: d1TrendVal,
-            w1Trend: w1TrendVal
+            w1Trend: w1TrendVal,
+            momentumScore: roc1,
+            isAccelerating: false, // Simplified for monitor
+            fvgGaps: gaps,
+            deltaVolume: delta
         )
     }
 
@@ -898,6 +911,19 @@ class RefactoredAppCoordinator: ObservableObject {
 
             godLog("✅ New \(tradingMode == .scalping ? "SCALPING" : "STANDARD") signal generated: \(normalizedSymbol) \(normalizedSignal.type) @ \(normalizedSignal.price) (Confidence: \(String(format: "%.1f", normalizedSignal.confidence))%)", level: .info)
 
+            // V10.0: Push Signal to Insights
+            let historyInsight = GodModeInsight(
+                id: UUID(),
+                type: .signalHistory,
+                symbol: normalizedSymbol,
+                title: "SIGNAL: \(normalizedSymbol)",
+                message: "\(normalizedSignal.type.displayName) @ \(String(format: "%.5f", normalizedSignal.price)) | Confidence: \(Int(normalizedSignal.confidence))%",
+                sentiment: normalizedSignal.type,
+                affectedPairs: [normalizedSymbol],
+                timestamp: Date()
+            )
+            NotificationCenter.default.post(name: .newGodModeInsight, object: historyInsight)
+
             // --- SELF-LEARNING ALERT ---
             if let insight = normalizedSignal.selfLearningInsight {
                 godLog("🧠 SELF-LEARNING INSIGHT: \(normalizedSymbol) - \(insight)", level: .warning)
@@ -1029,11 +1055,27 @@ class RefactoredAppCoordinator: ObservableObject {
             godLog("📊 Low volatility: \(String(format: "%.1f", atrPips)) pips - Using instant execution", level: .info)
         }
         
+        // V10.0 Precision: Pullback Logic (Smart Entry)
+        var orderType: MT5OrderType = signal.type == .buy ? .buy : .sell
+        var executionPrice = signal.price
+        
+        if let optimal = signal.optimalEntryPrice, abs(optimal - signal.price) > (info?.point ?? 0.0001) {
+            let isBullish = signal.type == .buy
+            // If current price is worse than optimal, use Limit order to catch the pullback
+            if (isBullish && signal.price > optimal) || (!isBullish && signal.price < optimal) {
+                orderType = isBullish ? .buyLimit : .sellLimit
+                executionPrice = optimal
+                godLog("🎯 Pullback Magnet: Setting LIMIT order at \(String(format: "%.5f", optimal)) (Current: \(String(format: "%.5f", signal.price)))", level: .info)
+            }
+        }
+        
         // Modify signal with optimal settings
         var optimizedSignal = signal
         optimizedSignal.executionMode = executionMode
         optimizedSignal.deviation = deviation
         optimizedSignal.filler = filler
+        optimizedSignal.orderType = orderType
+        optimizedSignal.price = executionPrice
         optimizedSignal.positionSize = positionSize.units
         optimizedSignal.stopLoss = positionSize.stopLoss
         optimizedSignal.takeProfit = positionSize.takeProfit
@@ -1260,6 +1302,19 @@ class RefactoredAppCoordinator: ObservableObject {
         
         // Remove from correlation filter
         await CorrelationFilter.shared.removeTrade(symbol: trade.symbol)
+
+        // V10.0: Push Closed Trade to Insights
+        let tradeResultInsight = GodModeInsight(
+            id: UUID(),
+            type: .signalHistory,
+            symbol: trade.symbol,
+            title: "TRADE CLOSED: \(trade.symbol)",
+            message: "Result: \(String(format: "KES %.2f", trade.pnl ?? 0)) | Exit: \(String(format: "%.5f", trade.exitPrice ?? 0))",
+            sentiment: (trade.pnl ?? 0) > 0 ? .buy : .sell,
+            affectedPairs: [trade.symbol],
+            timestamp: Date()
+        )
+        NotificationCenter.default.post(name: .newGodModeInsight, object: tradeResultInsight)
 
         godLog("📊 Trade closed: \(trade.symbol) P&L: KES \(String(format: "%.2f", trade.pnl ?? 0))", level: trade.isWin == true ? .success : .warning)
         

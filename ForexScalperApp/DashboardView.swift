@@ -194,7 +194,7 @@ struct DashboardView: View {
     @StateObject private var newsService = NewsService.shared
     @State private var isNotificationBannerDismissed = false
     
-    private let tabs     = ["Signals", "Insights", "History", "Performance", "Logs", "Settings"]
+    private let tabs     = ["Signals", "Insights", "Performance", "Logs", "Settings"]
     private let tabIcons = ["bolt.fill", "brain.head.profile", "clock.fill", "chart.bar.fill", "terminal.fill", "gearshape.fill"]
     
     init() {
@@ -217,12 +217,12 @@ struct DashboardView: View {
                 insightsView
                     .tabItem { Label("Insights", systemImage: "brain.head.profile") }
                     .tag(1)
-                historyView
-                    .tabItem { Label("History", systemImage: "clock.fill") }
+                performanceView
+                    .tabItem { Label("Performance", systemImage: "chart.bar.xaxis") }
                     .tag(2)
                 settingsView
                     .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-                    .tag(5)
+                    .tag(4)
             }
             .accentColor(.accentCyan)
             #else
@@ -438,10 +438,9 @@ struct DashboardView: View {
                 switch selectedTab {
                 case 0: liveSignalsView
                 case 1: insightsView
-                case 2: historyView
-                case 3: performanceView
-                case 4: systemLogsView
-                case 5: settingsView
+                case 2: performanceView
+                case 3: systemLogsView
+                case 4: settingsView
                 default: EmptyView()
                 }
             }
@@ -478,10 +477,17 @@ struct DashboardView: View {
                         .padding(.top, 100)
                     } else {
                         ForEach(viewModel.allInsights) { insight in
-                            GlassCard(borderColor: insight.type == .newsBroadcast ? Color.accentGold.opacity(0.3) : Color.accentCyan.opacity(0.3)) {
+                            let color: Color = {
+                                switch insight.type {
+                                case .newsBroadcast: return .accentGold
+                                case .signalHistory: return .accentGreen
+                                default: return .accentCyan
+                                }
+                            }()
+                            GlassCard(borderColor: color.opacity(0.3)) {
                                 VStack(alignment: .leading, spacing: 10) {
                                     HStack {
-                                        TagBadge(text: insight.type.rawValue, color: insight.type == .newsBroadcast ? .accentGold : .accentCyan)
+                                        TagBadge(text: insight.type.rawValue, color: color)
                                         Text(insight.title)
                                             .font(.system(size: 14, weight: .black, design: .monospaced))
                                             .foregroundColor(.textPrimary)
@@ -580,7 +586,7 @@ struct DashboardView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(consoleLogger.logs) { entry in
+                        ForEach(consoleLogger.logs.reversed()) { entry in
                             HStack(alignment: .top, spacing: 10) {
                                 Text(formatLogTime(entry.timestamp))
                                     .font(.system(size: 10, design: .monospaced))
@@ -604,9 +610,9 @@ struct DashboardView: View {
                     .padding(.vertical, 14)
                 }
                 .onChange(of: consoleLogger.logs.count) { old, newValue in
-                    if let last = ConsoleLogger.shared.logs.last {
+                    if let first = ConsoleLogger.shared.logs.last {
                         withAnimation {
-                            proxy.scrollTo(last.id, anchor: .bottom)
+                            proxy.scrollTo(first.id, anchor: .top)
                         }
                     }
                 }
@@ -1824,6 +1830,7 @@ struct DashboardView: View {
             Form {
                 riskSection
                 scalpingConfigSection
+                elitePrecisionSection
                 tradingPairsSection
                 mt5APISection
                 igAPISection
@@ -1853,6 +1860,36 @@ struct DashboardView: View {
                             ScalpingConfig.shared.brokerSuffix = viewModel.scalpingConfig.brokerSuffix
                             ScalpingConfig.shared.enableHourlyLimit = viewModel.enableHourlyLimit
                             ScalpingConfig.shared.maxHourlyTrades = Int(viewModel.maxHourlyTrades)
+                            
+                            // V10.0 Save Sync
+                            ScalpingConfig.shared.enableOrderFlowFilter = viewModel.scalpingConfig.enableOrderFlowFilter
+                            ScalpingConfig.shared.orderFlowThreshold = viewModel.scalpingConfig.orderFlowThreshold
+                            ScalpingConfig.shared.enablePullbackEntry = viewModel.scalpingConfig.enablePullbackEntry
+                            ScalpingConfig.shared.pullbackEMAPeriod = viewModel.scalpingConfig.pullbackEMAPeriod
+                            ScalpingConfig.shared.rocPeriod = viewModel.scalpingConfig.rocPeriod
+                            ScalpingConfig.shared.enableMLTrendFilter = viewModel.scalpingConfig.enableMLTrendFilter
+                            ScalpingConfig.shared.mlConfidenceThreshold = viewModel.scalpingConfig.mlConfidenceThreshold
+                            ScalpingConfig.shared.enableSwingSL = viewModel.scalpingConfig.enableSwingSL
+                            ScalpingConfig.shared.swingLookback = viewModel.scalpingConfig.swingLookback
+                            ScalpingConfig.shared.volatilityMultiplierMin = viewModel.scalpingConfig.volatilityMultiplierMin
+                            
+                            // V10.0 Partial TP Sync
+                            ScalpingConfig.shared.partialTP1_Pips = viewModel.scalpingConfig.partialTP1_Pips
+                            ScalpingConfig.shared.partialTP2_Pips = viewModel.scalpingConfig.partialTP2_Pips
+                            ScalpingConfig.shared.partialTP3_Pips = viewModel.scalpingConfig.partialTP3_Pips
+                            
+                            // Strategy Weights Sync
+                            ScalpingConfig.shared.weightHTFAlignment = viewModel.scalpingConfig.weightHTFAlignment
+                            ScalpingConfig.shared.weightMomentumExhaustion = viewModel.scalpingConfig.weightMomentumExhaustion
+                            ScalpingConfig.shared.weightVolumeSurge = viewModel.scalpingConfig.weightVolumeSurge
+                            ScalpingConfig.shared.weightEMAStack = viewModel.scalpingConfig.weightEMAStack
+                            ScalpingConfig.shared.weightBollingerRejection = viewModel.scalpingConfig.weightBollingerRejection
+                            ScalpingConfig.shared.weightCCICycle = viewModel.scalpingConfig.weightCCICycle
+                            ScalpingConfig.shared.weightSARTrend = viewModel.scalpingConfig.weightSARTrend
+                            ScalpingConfig.shared.weightMomentumSurge = viewModel.scalpingConfig.weightMomentumSurge
+                            ScalpingConfig.shared.weightOrderFlow = viewModel.scalpingConfig.weightOrderFlow
+                            ScalpingConfig.shared.weightMLConfirmed = viewModel.scalpingConfig.weightMLConfirmed
+                            ScalpingConfig.shared.fixedSLPips = viewModel.scalpingConfig.fixedSLPips
                             
                             viewModel.saveSettings() 
                         }) {
@@ -2105,6 +2142,135 @@ struct DashboardView: View {
                                     }
                                     .help("Minimum number of strategy pillars that must align to trigger a signal.")
                                     .help("0: M1 only, 1: H4 alignment, 2: H4+D1 (Recommended), 3: H4+D1+W1 (Elite Only)")
+                                }
+                                .padding(16)
+                            }
+                            
+                            // ELITE PRECISION V10.0 CARD
+                            GlassCard {
+                                VStack(alignment: .leading, spacing: 14) {
+                                    sectionHeader("ELITE PRECISION V10.0", icon: "target", color: .accentCyan)
+                                    Divider().background(Color.borderSubtle)
+                                    
+                                    settingsRow("Order Flow Filter") {
+                                        Toggle("", isOn: $viewModel.scalpingConfig.enableOrderFlowFilter)
+                                            .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
+                                    }
+                                    
+                                    settingsRow("Delta Threshold") {
+                                        HStack(spacing: 8) {
+                                            Slider(value: $viewModel.scalpingConfig.orderFlowThreshold, in: 10...500, step: 5)
+                                                .frame(width: 110)
+                                            Text("\(Int(viewModel.scalpingConfig.orderFlowThreshold))")
+                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.accentCyan)
+                                                .frame(width: 42, alignment: .trailing)
+                                        }
+                                    }
+                                    
+                                    settingsRow("Smart Pullback") {
+                                        Toggle("", isOn: $viewModel.scalpingConfig.enablePullbackEntry)
+                                            .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
+                                    }
+                                    
+                                    if viewModel.scalpingConfig.enablePullbackEntry {
+                                        settingsRow("Pullback EMA") {
+                                            Stepper("\(viewModel.scalpingConfig.pullbackEMAPeriod)", value: $viewModel.scalpingConfig.pullbackEMAPeriod, in: 5...100)
+                                        }
+                                    }
+                                    
+                                    settingsRow("ROC Period") {
+                                        Stepper("\(viewModel.scalpingConfig.rocPeriod)", value: $viewModel.scalpingConfig.rocPeriod, in: 1...20)
+                                    }
+                                    
+                                    settingsRow("ML Trend Filter") {
+                                        Toggle("", isOn: $viewModel.scalpingConfig.enableMLTrendFilter)
+                                            .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
+                                    }
+                                    
+                                    if viewModel.scalpingConfig.enableMLTrendFilter {
+                                        settingsRow("ML Threshold") {
+                                            HStack(spacing: 8) {
+                                                Slider(value: $viewModel.scalpingConfig.mlConfidenceThreshold, in: 0.5...0.95, step: 0.05)
+                                                    .frame(width: 110)
+                                                Text(String(format: "%.0f%%", viewModel.scalpingConfig.mlConfidenceThreshold * 100))
+                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                    .foregroundColor(.accentCyan)
+                                                    .frame(width: 42, alignment: .trailing)
+                                            }
+                                        }
+                                    }
+                                    
+                                    settingsRow("Fixed Stop Loss (Pips)") {
+                                        HStack(spacing: 8) {
+                                            Slider(value: $viewModel.scalpingConfig.fixedSLPips, in: 5...100, step: 1)
+                                                .frame(width: 110)
+                                            Text("\(Int(viewModel.scalpingConfig.fixedSLPips))")
+                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.accentCyan)
+                                                .frame(width: 42, alignment: .trailing)
+                                        }
+                                    }
+                                    
+                                    settingsRow("Volatility Scale Min") {
+                                        HStack(spacing: 8) {
+                                            Slider(value: $viewModel.scalpingConfig.volatilityMultiplierMin, in: 0.1...1.0, step: 0.1)
+                                                .frame(width: 110)
+                                            Text(String(format: "%.1fx", viewModel.scalpingConfig.volatilityMultiplierMin))
+                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.accentCyan)
+                                                .frame(width: 42, alignment: .trailing)
+                                        }
+                                    }
+                                    
+                                    Divider().background(Color.borderSubtle)
+                                    
+                                    sectionHeader("PARTIAL TP (50/30/20)", icon: "chart.pie.fill", color: .accentGold)
+                                    
+                                    settingsRow("Level 1 Pips") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.partialTP1_Pips))", value: $viewModel.scalpingConfig.partialTP1_Pips, in: 5...50)
+                                    }
+                                    settingsRow("Level 2 Pips") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.partialTP2_Pips))", value: $viewModel.scalpingConfig.partialTP2_Pips, in: 10...100)
+                                    }
+                                    settingsRow("Level 3 Pips") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.partialTP3_Pips))", value: $viewModel.scalpingConfig.partialTP3_Pips, in: 15...150)
+                                    }
+
+                                    Divider().background(Color.borderSubtle)
+                                    
+                                    sectionHeader("STRATEGY WEIGHTS", icon: "scalemass", color: .accentCyan)
+                                    
+                                    settingsRow("HTF Alignment") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.weightHTFAlignment))", value: $viewModel.scalpingConfig.weightHTFAlignment, in: 0...100)
+                                    }
+                                    settingsRow("Momentum Exhaustion") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.weightMomentumExhaustion))", value: $viewModel.scalpingConfig.weightMomentumExhaustion, in: 0...100)
+                                    }
+                                    settingsRow("Volume Surge") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.weightVolumeSurge))", value: $viewModel.scalpingConfig.weightVolumeSurge, in: 0...100)
+                                    }
+                                    settingsRow("EMA Stack") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.weightEMAStack))", value: $viewModel.scalpingConfig.weightEMAStack, in: 0...100)
+                                    }
+                                    settingsRow("Bollinger Reject") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.weightBollingerRejection))", value: $viewModel.scalpingConfig.weightBollingerRejection, in: 0...100)
+                                    }
+                                    settingsRow("CCI Cycle") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.weightCCICycle))", value: $viewModel.scalpingConfig.weightCCICycle, in: 0...100)
+                                    }
+                                    settingsRow("SAR Trend") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.weightSARTrend))", value: $viewModel.scalpingConfig.weightSARTrend, in: 0...100)
+                                    }
+                                    settingsRow("Momentum Surge") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.weightMomentumSurge))", value: $viewModel.scalpingConfig.weightMomentumSurge, in: 0...100)
+                                    }
+                                    settingsRow("Order Flow") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.weightOrderFlow))", value: $viewModel.scalpingConfig.weightOrderFlow, in: 0...100)
+                                    }
+                                    settingsRow("ML Confirmation") {
+                                        Stepper("\(Int(viewModel.scalpingConfig.weightMLConfirmed))", value: $viewModel.scalpingConfig.weightMLConfirmed, in: 0...100)
+                                    }
                                 }
                                 .padding(16)
                             }
@@ -2500,6 +2666,53 @@ struct DashboardView: View {
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .frame(width: 60)
                     .multilineTextAlignment(.trailing)
+            }
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+    
+    @ViewBuilder
+    var elitePrecisionSection: some View {
+        #if os(iOS)
+        Section("Elite Precision V10.0") {
+            Toggle("Order Flow Filter", isOn: $viewModel.scalpingConfig.enableOrderFlowFilter)
+            HStack {
+                Text("Delta Threshold"); Spacer()
+                Slider(value: $viewModel.scalpingConfig.orderFlowThreshold, in: 10...500, step: 5)
+                Text("\(Int(viewModel.scalpingConfig.orderFlowThreshold))")
+            }
+            Toggle("Smart Pullback Entry", isOn: $viewModel.scalpingConfig.enablePullbackEntry)
+            Toggle("ML Trend Filter", isOn: $viewModel.scalpingConfig.enableMLTrendFilter)
+            HStack {
+                Text("Fixed Stop Loss"); Spacer()
+                Slider(value: $viewModel.scalpingConfig.fixedSLPips, in: 5...100, step: 1)
+                Text("\(Int(viewModel.scalpingConfig.fixedSLPips))")
+            }
+            HStack {
+                Text("Volatility Scale Min"); Spacer()
+                Slider(value: $viewModel.scalpingConfig.volatilityMultiplierMin, in: 0.1...1.0, step: 0.1)
+                Text(String(format: "%.1fx", viewModel.scalpingConfig.volatilityMultiplierMin))
+            }
+            
+            Section("Partial Take Profit") {
+                Stepper("TP1: \(Int(viewModel.scalpingConfig.partialTP1_Pips)) pips", value: $viewModel.scalpingConfig.partialTP1_Pips, in: 5...50)
+                Stepper("TP2: \(Int(viewModel.scalpingConfig.partialTP2_Pips)) pips", value: $viewModel.scalpingConfig.partialTP2_Pips, in: 10...100)
+                Stepper("TP3: \(Int(viewModel.scalpingConfig.partialTP3_Pips)) pips", value: $viewModel.scalpingConfig.partialTP3_Pips, in: 15...150)
+            }
+
+            Section("Strategy Weights") {
+                Stepper("HTF Alignment: \(Int(viewModel.scalpingConfig.weightHTFAlignment))", value: $viewModel.scalpingConfig.weightHTFAlignment, in: 0...100)
+                Stepper("Momentum Exhaust: \(Int(viewModel.scalpingConfig.weightMomentumExhaustion))", value: $viewModel.scalpingConfig.weightMomentumExhaustion, in: 0...100)
+                Stepper("Volume Surge: \(Int(viewModel.scalpingConfig.weightVolumeSurge))", value: $viewModel.scalpingConfig.weightVolumeSurge, in: 0...100)
+                Stepper("EMA Stack: \(Int(viewModel.scalpingConfig.weightEMAStack))", value: $viewModel.scalpingConfig.weightEMAStack, in: 0...100)
+                Stepper("Bollinger Reject: \(Int(viewModel.scalpingConfig.weightBollingerRejection))", value: $viewModel.scalpingConfig.weightBollingerRejection, in: 0...100)
+                Stepper("CCI Cycle: \(Int(viewModel.scalpingConfig.weightCCICycle))", value: $viewModel.scalpingConfig.weightCCICycle, in: 0...100)
+                Stepper("SAR Trend: \(Int(viewModel.scalpingConfig.weightSARTrend))", value: $viewModel.scalpingConfig.weightSARTrend, in: 0...100)
+                Stepper("Momentum Surge: \(Int(viewModel.scalpingConfig.weightMomentumSurge))", value: $viewModel.scalpingConfig.weightMomentumSurge, in: 0...100)
+                Stepper("Order Flow: \(Int(viewModel.scalpingConfig.weightOrderFlow))", value: $viewModel.scalpingConfig.weightOrderFlow, in: 0...100)
+                Stepper("ML Prediction: \(Int(viewModel.scalpingConfig.weightMLConfirmed))", value: $viewModel.scalpingConfig.weightMLConfirmed, in: 0...100)
             }
         }
         #else

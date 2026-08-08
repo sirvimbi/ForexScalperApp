@@ -325,9 +325,10 @@ struct MT5SymbolInfo: Codable, Sendable {
     let volume_min: Double?
     let volume_max: Double?
     let volume_step: Double?
+    let point: Double?
 
     enum CodingKeys: String, CodingKey {
-        case name, trade_mode, spread, digits, volume_min, volume_max, volume_step
+        case name, trade_mode, spread, digits, volume_min, volume_max, volume_step, point
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -339,6 +340,7 @@ struct MT5SymbolInfo: Codable, Sendable {
         self.volume_min = try container.decodeIfPresent(Double.self, forKey: .volume_min)
         self.volume_max = try container.decodeIfPresent(Double.self, forKey: .volume_max)
         self.volume_step = try container.decodeIfPresent(Double.self, forKey: .volume_step)
+        self.point = try container.decodeIfPresent(Double.self, forKey: .point)
     }
 
     nonisolated func encode(to encoder: Encoder) throws {
@@ -350,6 +352,7 @@ struct MT5SymbolInfo: Codable, Sendable {
         try container.encodeIfPresent(volume_min, forKey: .volume_min)
         try container.encodeIfPresent(volume_max, forKey: .volume_max)
         try container.encodeIfPresent(volume_step, forKey: .volume_step)
+        try container.encodeIfPresent(point, forKey: .point)
     }
 }
 

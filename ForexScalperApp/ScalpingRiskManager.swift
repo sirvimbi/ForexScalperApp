@@ -20,6 +20,8 @@ actor ScalpingRiskManager: RiskManagerProtocol {
     private var lastResetDate: Date = Date()
     private var symbolATRCache: [String: (atr: Double, timestamp: Date)] = [:]
     private let atrCacheDuration: TimeInterval = 60
+    private var averageATRCache: [String: [Double]] = [:]
+    private let maxAvgATRCount = 50
     
     func updateParameters(_ params: RiskParameters) {
         self.parameters = params
@@ -36,7 +38,15 @@ actor ScalpingRiskManager: RiskManagerProtocol {
             lastResetDate = now
         }
         
-        let maxDaily = await MainActor.run { ScalpingConfig.shared.maxDailyTrades }
+        let (maxDaily, hourlyEnabled, maxHourly, cooldown, maxSpread) = await MainActor.run {
+            let config = ScalpingConfig.shared
+            return (config.maxDailyTrades, 
+                    config.enableHourlyLimit, 
+                    config.maxHourlyTrades, 
+                    config.cooldownSeconds,
+                    config.spreadTolerance)
+        }
+        
         guard dailyTradeCount < maxDaily else { return false }
         
         let today = calendar.startOfDay(for: now)
@@ -44,9 +54,6 @@ actor ScalpingRiskManager: RiskManagerProtocol {
         let maxLoss = parameters.accountBalance * parameters.maxDailyRisk
         if todayPnL <= -maxLoss { return false }
         
-        let (hourlyEnabled, maxHourly) = await MainActor.run { 
-            (ScalpingConfig.shared.enableHourlyLimit, ScalpingConfig.shared.maxHourlyTrades)
-        }
         if hourlyEnabled {
             let currentHour = calendar.date(bySettingHour: calendar.component(.hour, from: now), minute: 0, second: 0, of: now) ?? now
             let hourlyTrades = hourlyTradeCount[currentHour] ?? 0
@@ -59,30 +66,44 @@ actor ScalpingRiskManager: RiskManagerProtocol {
         let losses = consecutiveLosses[symbol] ?? 0
         if losses >= 3 { return false }
         
-        let cooldown = await MainActor.run { ScalpingConfig.shared.cooldownSeconds }
         if let lastTrade = tradeOpenTime[symbol], now.timeIntervalSince(lastTrade) < cooldown { return false }
         
+        // SPREAD CHECK
         if let spread = try? await MT5Service.shared.getCurrentSpread(symbol: symbol) {
-            let symbolConfig = await MainActor.run { ScalpingConfig.shared.getSymbolConfig(symbol) }
-            if spread > symbolConfig.maxSpread { return false }
+            if spread > maxSpread { return false }
         }
         
         return true
     }
     
     func calculatePositionSize(for signal: Signal) async -> PositionSize? {
-        let (useManual, manualSize) = await MainActor.run {
-            (ScalpingConfig.shared.useManualLot, ScalpingConfig.shared.manualLotSize)
+        let (useManual, manualSize, minMult, maxMult, fixedSL, useFixed) = await MainActor.run {
+            let config = ScalpingConfig.shared
+            return (config.useManualLot, 
+                    config.manualLotSize, 
+                    config.volatilityMultiplierMin, 
+                    config.volatilityMultiplierMax,
+                    config.fixedSLPips,
+                    config.useFixedSL)
         }
         
         let balance = parameters.accountBalance
-        let riskAmount = balance * parameters.riskPerTrade
+        let baseRiskAmount = balance * parameters.riskPerTrade
         
         let atr = await getATR(symbol: signal.symbol)
         let pipSize = signal.symbol.contains("JPY") ? 0.01 : 0.0001
         let atrPips = atr / pipSize
         
-        let slPips = max(6.0, min(15.0, atrPips * 1.5))
+        // V10.0: Volatility-Weighted Position Sizing
+        let volatilityMultiplier = getATRMultiplier(symbol: signal.symbol, currentATR: atr, minMult: minMult, maxMult: maxMult)
+        let adjustedRiskAmount = baseRiskAmount * volatilityMultiplier
+        
+        let slPips: Double
+        if useFixed {
+            slPips = fixedSL
+        } else {
+            slPips = max(6.0, min(15.0, atrPips * 1.5))
+        }
         let slDistance = slPips * pipSize
         
         let tpPips = max(8.0, min(25.0, atrPips * 2.5))
@@ -95,7 +116,7 @@ actor ScalpingRiskManager: RiskManagerProtocol {
             godLog("🛡 Risk Manager: Using manual lot size: \(lotSize)", level: .info)
         } else {
             let kesToUsdRate = 130.0
-            let riskInUsd = riskAmount / kesToUsdRate
+            let riskInUsd = adjustedRiskAmount / kesToUsdRate
             lotSize = riskInUsd / (slDistance * 100000)
             
             // 1. Hard cap before broker limits
@@ -119,9 +140,27 @@ actor ScalpingRiskManager: RiskManagerProtocol {
             units: lotSize,
             stopLoss: stopLoss,
             takeProfit: takeProfit,
-            riskAmount: riskAmount,
-            potentialReward: riskAmount * 1.5
+            riskAmount: adjustedRiskAmount,
+            potentialReward: adjustedRiskAmount * 1.5
         )
+    }
+
+    private func getAverageATR(symbol: String, currentATR: Double) -> Double {
+        var history = averageATRCache[symbol] ?? []
+        history.append(currentATR)
+        if history.count > maxAvgATRCount { history.removeFirst() }
+        averageATRCache[symbol] = history
+        
+        let sum = history.reduce(0, +)
+        return history.isEmpty ? currentATR : sum / Double(history.count)
+    }
+
+    private func getATRMultiplier(symbol: String, currentATR: Double, minMult: Double, maxMult: Double) -> Double {
+        let avgATR = getAverageATR(symbol: symbol, currentATR: currentATR)
+        guard avgATR > 0 else { return 1.0 }
+        let ratio = currentATR / avgATR
+        
+        return min(max(ratio, minMult), maxMult) // Volatility-Weighted Position Sizing
     }
     
     private func getATR(symbol: String) async -> Double {

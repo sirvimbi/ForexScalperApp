@@ -132,6 +132,68 @@ class DashboardViewModel: ObservableObject {
         scalpingConfig.minConfluencePillars = UserDefaults.standard.double(forKey: "eliteMinConfluencePillars") != 0 ?
             UserDefaults.standard.double(forKey: "eliteMinConfluencePillars") : 3.0
         
+        // V10.0 Precision Settings
+        scalpingConfig.enableOrderFlowFilter = UserDefaults.standard.object(forKey: "enableOrderFlowFilter") != nil ? 
+            UserDefaults.standard.bool(forKey: "enableOrderFlowFilter") : true
+        scalpingConfig.orderFlowThreshold = UserDefaults.standard.double(forKey: "orderFlowThreshold") != 0 ?
+            UserDefaults.standard.double(forKey: "orderFlowThreshold") : 50.0
+        scalpingConfig.enablePullbackEntry = UserDefaults.standard.object(forKey: "enablePullbackEntry") != nil ? 
+            UserDefaults.standard.bool(forKey: "enablePullbackEntry") : true
+        scalpingConfig.enableMLTrendFilter = UserDefaults.standard.object(forKey: "enableMLTrendFilter") != nil ? 
+            UserDefaults.standard.bool(forKey: "enableMLTrendFilter") : true
+        scalpingConfig.enableSwingSL = UserDefaults.standard.object(forKey: "enableSwingSL") != nil ? 
+            UserDefaults.standard.bool(forKey: "enableSwingSL") : true
+        scalpingConfig.volatilityMultiplierMin = UserDefaults.standard.double(forKey: "volatilityMultiplierMin") != 0 ?
+            UserDefaults.standard.double(forKey: "volatilityMultiplierMin") : 0.5
+        scalpingConfig.fixedSLPips = UserDefaults.standard.double(forKey: "fixedSLPips") != 0 ?
+            UserDefaults.standard.double(forKey: "fixedSLPips") : 30.0
+        
+        // V10.0 More Precision
+        scalpingConfig.pullbackEMAPeriod = UserDefaults.standard.integer(forKey: "pullbackEMAPeriod") != 0 ?
+            UserDefaults.standard.integer(forKey: "pullbackEMAPeriod") : 21
+        scalpingConfig.rocPeriod = UserDefaults.standard.integer(forKey: "rocPeriod") != 0 ?
+            UserDefaults.standard.integer(forKey: "rocPeriod") : 1
+        scalpingConfig.mlConfidenceThreshold = UserDefaults.standard.double(forKey: "mlConfidenceThreshold") != 0 ?
+            UserDefaults.standard.double(forKey: "mlConfidenceThreshold") : 0.7
+        scalpingConfig.swingLookback = UserDefaults.standard.integer(forKey: "swingLookback") != 0 ?
+            UserDefaults.standard.integer(forKey: "swingLookback") : 20
+        
+        // V10.0 Partial TP Settings
+        scalpingConfig.partialTP1_Percent = UserDefaults.standard.double(forKey: "partialTP1_Percent") != 0 ?
+            UserDefaults.standard.double(forKey: "partialTP1_Percent") : 0.50
+        scalpingConfig.partialTP1_Pips = UserDefaults.standard.double(forKey: "partialTP1_Pips") != 0 ?
+            UserDefaults.standard.double(forKey: "partialTP1_Pips") : 10.0
+        scalpingConfig.partialTP2_Percent = UserDefaults.standard.double(forKey: "partialTP2_Percent") != 0 ?
+            UserDefaults.standard.double(forKey: "partialTP2_Percent") : 0.30
+        scalpingConfig.partialTP2_Pips = UserDefaults.standard.double(forKey: "partialTP2_Pips") != 0 ?
+            UserDefaults.standard.double(forKey: "partialTP2_Pips") : 15.0
+        scalpingConfig.partialTP3_Percent = UserDefaults.standard.double(forKey: "partialTP3_Percent") != 0 ?
+            UserDefaults.standard.double(forKey: "partialTP3_Percent") : 0.20
+        scalpingConfig.partialTP3_Pips = UserDefaults.standard.double(forKey: "partialTP3_Pips") != 0 ?
+            UserDefaults.standard.double(forKey: "partialTP3_Pips") : 20.0
+        
+        // Strategy Weights
+        scalpingConfig.weightHTFAlignment = UserDefaults.standard.double(forKey: "weightHTFAlignment") != 0 ?
+            UserDefaults.standard.double(forKey: "weightHTFAlignment") : 25.0
+        scalpingConfig.weightMomentumExhaustion = UserDefaults.standard.double(forKey: "weightMomentumExhaustion") != 0 ?
+            UserDefaults.standard.double(forKey: "weightMomentumExhaustion") : 15.0
+        scalpingConfig.weightVolumeSurge = UserDefaults.standard.double(forKey: "weightVolumeSurge") != 0 ?
+            UserDefaults.standard.double(forKey: "weightVolumeSurge") : 12.0
+        scalpingConfig.weightEMAStack = UserDefaults.standard.double(forKey: "weightEMAStack") != 0 ?
+            UserDefaults.standard.double(forKey: "weightEMAStack") : 18.0
+        scalpingConfig.weightBollingerRejection = UserDefaults.standard.double(forKey: "weightBollingerRejection") != 0 ?
+            UserDefaults.standard.double(forKey: "weightBollingerRejection") : 10.0
+        scalpingConfig.weightCCICycle = UserDefaults.standard.double(forKey: "weightCCICycle") != 0 ?
+            UserDefaults.standard.double(forKey: "weightCCICycle") : 10.0
+        scalpingConfig.weightSARTrend = UserDefaults.standard.double(forKey: "weightSARTrend") != 0 ?
+            UserDefaults.standard.double(forKey: "weightSARTrend") : 10.0
+        scalpingConfig.weightMomentumSurge = UserDefaults.standard.double(forKey: "weightMomentumSurge") != 0 ?
+            UserDefaults.standard.double(forKey: "weightMomentumSurge") : 12.0
+        scalpingConfig.weightOrderFlow = UserDefaults.standard.double(forKey: "weightOrderFlow") != 0 ?
+            UserDefaults.standard.double(forKey: "weightOrderFlow") : 15.0
+        scalpingConfig.weightMLConfirmed = UserDefaults.standard.double(forKey: "weightMLConfirmed") != 0 ?
+            UserDefaults.standard.double(forKey: "weightMLConfirmed") : 10.0
+        
         // MT5 Settings
         mt5BridgeURL = UserDefaults.standard.string(forKey: "mt5BridgeURL") ?? "http://127.0.0.1:8891"
         mt5AuthToken = UserDefaults.standard.string(forKey: "mt5AuthToken") ?? "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"
@@ -178,6 +240,41 @@ class DashboardViewModel: ObservableObject {
         UserDefaults.standard.set(scalpingConfig.minVolatilityATR, forKey: "eliteMinVolatilityATR")
         UserDefaults.standard.set(scalpingConfig.minVolumeRatio, forKey: "eliteMinVolumeRatio")
         UserDefaults.standard.set(scalpingConfig.minConfluencePillars, forKey: "eliteMinConfluencePillars")
+        
+        // V10.0 Precision Save
+        UserDefaults.standard.set(scalpingConfig.enableOrderFlowFilter, forKey: "enableOrderFlowFilter")
+        UserDefaults.standard.set(scalpingConfig.orderFlowThreshold, forKey: "orderFlowThreshold")
+        UserDefaults.standard.set(scalpingConfig.enablePullbackEntry, forKey: "enablePullbackEntry")
+        UserDefaults.standard.set(scalpingConfig.enableMLTrendFilter, forKey: "enableMLTrendFilter")
+        UserDefaults.standard.set(scalpingConfig.enableSwingSL, forKey: "enableSwingSL")
+        UserDefaults.standard.set(scalpingConfig.volatilityMultiplierMin, forKey: "volatilityMultiplierMin")
+        UserDefaults.standard.set(scalpingConfig.fixedSLPips, forKey: "fixedSLPips")
+        
+        // V10.0 More Precision Save
+        UserDefaults.standard.set(scalpingConfig.pullbackEMAPeriod, forKey: "pullbackEMAPeriod")
+        UserDefaults.standard.set(scalpingConfig.rocPeriod, forKey: "rocPeriod")
+        UserDefaults.standard.set(scalpingConfig.mlConfidenceThreshold, forKey: "mlConfidenceThreshold")
+        UserDefaults.standard.set(scalpingConfig.swingLookback, forKey: "swingLookback")
+        
+        // V10.0 Partial TP Save
+        UserDefaults.standard.set(scalpingConfig.partialTP1_Percent, forKey: "partialTP1_Percent")
+        UserDefaults.standard.set(scalpingConfig.partialTP1_Pips, forKey: "partialTP1_Pips")
+        UserDefaults.standard.set(scalpingConfig.partialTP2_Percent, forKey: "partialTP2_Percent")
+        UserDefaults.standard.set(scalpingConfig.partialTP2_Pips, forKey: "partialTP2_Pips")
+        UserDefaults.standard.set(scalpingConfig.partialTP3_Percent, forKey: "partialTP3_Percent")
+        UserDefaults.standard.set(scalpingConfig.partialTP3_Pips, forKey: "partialTP3_Pips")
+        
+        // Strategy Weights Save
+        UserDefaults.standard.set(scalpingConfig.weightHTFAlignment, forKey: "weightHTFAlignment")
+        UserDefaults.standard.set(scalpingConfig.weightMomentumExhaustion, forKey: "weightMomentumExhaustion")
+        UserDefaults.standard.set(scalpingConfig.weightVolumeSurge, forKey: "weightVolumeSurge")
+        UserDefaults.standard.set(scalpingConfig.weightEMAStack, forKey: "weightEMAStack")
+        UserDefaults.standard.set(scalpingConfig.weightBollingerRejection, forKey: "weightBollingerRejection")
+        UserDefaults.standard.set(scalpingConfig.weightCCICycle, forKey: "weightCCICycle")
+        UserDefaults.standard.set(scalpingConfig.weightSARTrend, forKey: "weightSARTrend")
+        UserDefaults.standard.set(scalpingConfig.weightMomentumSurge, forKey: "weightMomentumSurge")
+        UserDefaults.standard.set(scalpingConfig.weightOrderFlow, forKey: "weightOrderFlow")
+        UserDefaults.standard.set(scalpingConfig.weightMLConfirmed, forKey: "weightMLConfirmed")
         
         UserDefaults.standard.set(enableHourlyLimit, forKey: "enableHourlyLimit")
         UserDefaults.standard.set(Int(maxHourlyTrades), forKey: "maxHourlyTrades")

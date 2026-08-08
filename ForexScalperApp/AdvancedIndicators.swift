@@ -236,6 +236,41 @@ struct AdvancedIndicators {
         )
     }
     
+    // MARK: - V10.0 Precision Indicators
+    
+    // Momentum Score (Rate of Change)
+    nonisolated static func calculateROC(_ values: [Double], period: Int = 1) -> Double {
+        guard values.count > period else { return 0 }
+        let current = values.last!
+        let previous = values[values.count - 1 - period]
+        guard previous != 0 else { return 0 }
+        return (current - previous) / previous * 100
+    }
+
+    // Fair Value Gaps (FVG)
+    nonisolated static func detectFairValueGaps(_ candles: [Kline]) -> [FairValueGap] {
+        guard candles.count >= 3 else { return [] }
+        var gaps: [FairValueGap] = []
+        
+        for i in 1..<(candles.count - 1) {
+            let prev = candles[i-1]
+            let next = candles[i+1]
+            
+            if next.low > prev.high {
+                gaps.append(FairValueGap(top: next.low, bottom: prev.high, type: .buy))
+            } else if next.high < prev.low {
+                gaps.append(FairValueGap(top: prev.low, bottom: next.high, type: .sell))
+            }
+        }
+        return gaps
+    }
+
+    // Structural Swings
+    nonisolated static func findStructuralSwings(_ candles: [Kline], lookback: Int = 20) -> (low: Double?, high: Double?) {
+        let recent = candles.suffix(lookback)
+        return (recent.map { $0.low }.min(), recent.map { $0.high }.max())
+    }
+    
     nonisolated private static func sma(_ values: [Double], period: Int) -> [Double] {
         guard values.count >= period else { return [] }
         var result: [Double] = []
