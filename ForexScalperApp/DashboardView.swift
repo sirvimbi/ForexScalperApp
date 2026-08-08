@@ -194,7 +194,7 @@ struct DashboardView: View {
     @StateObject private var newsService = NewsService.shared
     @State private var isNotificationBannerDismissed = false
     
-    private let tabs     = ["Signals", "Insights", "Performance", "Logs", "Settings"]
+    private let tabs     = ["Signals", "Insights", "History", "Performance", "Logs", "Settings"]
     private let tabIcons = ["bolt.fill", "brain.head.profile", "clock.fill", "chart.bar.fill", "terminal.fill", "gearshape.fill"]
     
     init() {
@@ -217,12 +217,15 @@ struct DashboardView: View {
                 insightsView
                     .tabItem { Label("Insights", systemImage: "brain.head.profile") }
                     .tag(1)
+                historyView
+                    .tabItem { Label("History", systemImage: "clock.fill") }
+                    .tag(2)
                 performanceView
                     .tabItem { Label("Performance", systemImage: "chart.bar.xaxis") }
-                    .tag(2)
+                    .tag(3)
                 settingsView
                     .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-                    .tag(4)
+                    .tag(5)
             }
             .accentColor(.accentCyan)
             #else
@@ -438,9 +441,10 @@ struct DashboardView: View {
                 switch selectedTab {
                 case 0: liveSignalsView
                 case 1: insightsView
-                case 2: performanceView
-                case 3: systemLogsView
-                case 4: settingsView
+                case 2: historyView
+                case 3: performanceView
+                case 4: systemLogsView
+                case 5: settingsView
                 default: EmptyView()
                 }
             }
