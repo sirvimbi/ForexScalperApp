@@ -179,15 +179,9 @@ actor ScalpingSignalEngine {
         }
         
         // RISK/REWARD CHECK
-        let (rrEnabled, minRR) = await MainActor.run {
-            (ScalpingConfig.shared.enableRRCheck, ScalpingConfig.shared.minRRRatio)
-        }
-        
-        if rrEnabled {
-            guard validateRiskReward(adjustedSignal, minRatio: minRR) else {
-                godLog("⚠️ \(symbol) skipped: Risk/Reward ratio < \(String(format: "%.1f", minRR))", level: .diagnostic)
-                return nil
-            }
+        guard await RRLock.validate(signal: adjustedSignal) else {
+            godLog("⚠️ \(symbol) skipped: Risk/Reward check failed", level: .diagnostic)
+            return nil
         }
 
         // Track quality for self-learning
@@ -495,11 +489,6 @@ actor ScalpingSignalEngine {
             volume: 0.1,
             optimalEntryPrice: optimalEntry
         )
-    }
-
-    private func validateRiskReward(_ signal: ScalpingSignal, minRatio: Double) -> Bool {
-        guard let sl = signal.stopLoss, let tp = signal.takeProfit else { return false }
-        return abs(tp - signal.price) / max(abs(signal.price - sl), 0.00001) >= minRatio
     }
 
     private func validateData(_ dict: [String: [Kline]], symbol: String) -> Bool {
