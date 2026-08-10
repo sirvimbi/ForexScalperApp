@@ -147,6 +147,10 @@ class DashboardViewModel: ObservableObject {
             UserDefaults.standard.double(forKey: "volatilityMultiplierMin") : 0.5
         scalpingConfig.fixedSLPips = UserDefaults.standard.double(forKey: "fixedSLPips") != 0 ?
             UserDefaults.standard.double(forKey: "fixedSLPips") : 30.0
+        scalpingConfig.enableRRCheck = UserDefaults.standard.object(forKey: "enableRRCheck") != nil ?
+            UserDefaults.standard.bool(forKey: "enableRRCheck") : true
+        scalpingConfig.minRRRatio = UserDefaults.standard.double(forKey: "minRRRatio") != 0 ?
+            UserDefaults.standard.double(forKey: "minRRRatio") : 1.5
         
         // V10.0 More Precision
         scalpingConfig.pullbackEMAPeriod = UserDefaults.standard.integer(forKey: "pullbackEMAPeriod") != 0 ?
@@ -249,6 +253,8 @@ class DashboardViewModel: ObservableObject {
         UserDefaults.standard.set(scalpingConfig.enableSwingSL, forKey: "enableSwingSL")
         UserDefaults.standard.set(scalpingConfig.volatilityMultiplierMin, forKey: "volatilityMultiplierMin")
         UserDefaults.standard.set(scalpingConfig.fixedSLPips, forKey: "fixedSLPips")
+        UserDefaults.standard.set(scalpingConfig.enableRRCheck, forKey: "enableRRCheck")
+        UserDefaults.standard.set(scalpingConfig.minRRRatio, forKey: "minRRRatio")
         
         // V10.0 More Precision Save
         UserDefaults.standard.set(scalpingConfig.pullbackEMAPeriod, forKey: "pullbackEMAPeriod")

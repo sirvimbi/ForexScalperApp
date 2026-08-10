@@ -1894,6 +1894,8 @@ struct DashboardView: View {
                             ScalpingConfig.shared.weightOrderFlow = viewModel.scalpingConfig.weightOrderFlow
                             ScalpingConfig.shared.weightMLConfirmed = viewModel.scalpingConfig.weightMLConfirmed
                             ScalpingConfig.shared.fixedSLPips = viewModel.scalpingConfig.fixedSLPips
+                            ScalpingConfig.shared.enableRRCheck = viewModel.scalpingConfig.enableRRCheck
+                            ScalpingConfig.shared.minRRRatio = viewModel.scalpingConfig.minRRRatio
                             
                             viewModel.saveSettings() 
                         }) {
@@ -2198,6 +2200,24 @@ struct DashboardView: View {
                                                 Slider(value: $viewModel.scalpingConfig.mlConfidenceThreshold, in: 0.5...0.95, step: 0.05)
                                                     .frame(width: 110)
                                                 Text(String(format: "%.0f%%", viewModel.scalpingConfig.mlConfidenceThreshold * 100))
+                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                    .foregroundColor(.accentCyan)
+                                                    .frame(width: 42, alignment: .trailing)
+                                            }
+                                        }
+                                    }
+                                    
+                                    settingsRow("Risk/Reward Check") {
+                                        Toggle("", isOn: $viewModel.scalpingConfig.enableRRCheck)
+                                            .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
+                                    }
+                                    
+                                    if viewModel.scalpingConfig.enableRRCheck {
+                                        settingsRow("Min R:R Ratio") {
+                                            HStack(spacing: 8) {
+                                                Slider(value: $viewModel.scalpingConfig.minRRRatio, in: 0.5...5.0, step: 0.1)
+                                                    .frame(width: 110)
+                                                Text(String(format: "%.1f", viewModel.scalpingConfig.minRRRatio))
                                                     .font(.system(size: 12, weight: .bold, design: .monospaced))
                                                     .foregroundColor(.accentCyan)
                                                     .frame(width: 42, alignment: .trailing)
@@ -2689,6 +2709,14 @@ struct DashboardView: View {
             }
             Toggle("Smart Pullback Entry", isOn: $viewModel.scalpingConfig.enablePullbackEntry)
             Toggle("ML Trend Filter", isOn: $viewModel.scalpingConfig.enableMLTrendFilter)
+            Toggle("Risk/Reward Check", isOn: $viewModel.scalpingConfig.enableRRCheck)
+            if viewModel.scalpingConfig.enableRRCheck {
+                HStack {
+                    Text("Min R:R Ratio"); Spacer()
+                    Slider(value: $viewModel.scalpingConfig.minRRRatio, in: 0.5...5.0, step: 0.1)
+                    Text(String(format: "%.1f", viewModel.scalpingConfig.minRRRatio))
+                }
+            }
             HStack {
                 Text("Fixed Stop Loss"); Spacer()
                 Slider(value: $viewModel.scalpingConfig.fixedSLPips, in: 5...100, step: 1)

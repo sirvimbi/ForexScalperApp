@@ -29,6 +29,8 @@ class ScalpingConfig: ObservableObject {
     @Published var maxCorrelatedTrades: Int = 1
     @Published var enableHourlyLimit: Bool = true
     @Published var maxHourlyTrades: Int = 3
+    @Published var enableRRCheck: Bool = true
+    @Published var minRRRatio: Double = 1.5
     
     // MARK: - STOP LOSS (ELITE)
     @Published var useFixedSL: Bool = true
@@ -163,6 +165,8 @@ class ScalpingConfig: ObservableObject {
             self.maxConcurrentScalps = config.maxConcurrentScalps
             self.enableHourlyLimit = config.enableHourlyLimit ?? true
             self.maxHourlyTrades = config.maxHourlyTrades ?? 3
+            self.enableRRCheck = config.enableRRCheck ?? true
+            self.minRRRatio = config.minRRRatio ?? 1.5
             self.fixedSLPips = config.fixedSLPips ?? 30.0
             self.useFixedSL = config.useFixedSL ?? true
             self.baseSLPips = config.baseSLPips
@@ -229,6 +233,8 @@ class ScalpingConfig: ObservableObject {
             maxConcurrentScalps: maxConcurrentScalps,
             enableHourlyLimit: enableHourlyLimit,
             maxHourlyTrades: maxHourlyTrades,
+            enableRRCheck: enableRRCheck,
+            minRRRatio: minRRRatio,
             fixedSLPips: fixedSLPips,
             useFixedSL: useFixedSL,
             baseSLPips: baseSLPips,
@@ -295,6 +301,8 @@ class ScalpingConfig: ObservableObject {
         let maxConcurrentScalps: Int
         let enableHourlyLimit: Bool?
         let maxHourlyTrades: Int?
+        let enableRRCheck: Bool?
+        let minRRRatio: Double?
         let fixedSLPips: Double?
         let useFixedSL: Bool?
         let baseSLPips: Double
