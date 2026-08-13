@@ -69,7 +69,7 @@ struct HistoryView: View {
                                 .font(.system(size: 16, weight: .bold, design: .monospaced))
                             TagBadge(text: trade.type.rawValue.uppercased(), color: trade.type == .buy ? .accentGreen : .accentRed)
                         }
-                        Text(formatDate(trade.timestamp))
+                        Text(formatDate(trade.entryTime))
                             .font(.system(size: 10))
                             .foregroundColor(.textMuted)
                     }
