@@ -82,25 +82,23 @@ struct DashboardView: View {
         
         NotificationCenter.default.addObserver(forName: .newGodModeInsight, object: nil, queue: .main) { notification in
             if let insight = notification.object as? GodModeInsight {
-                viewModel.allInsights.insert(insight, at: 0)
-                #if os(macOS)
-                if insight.type == .newsBroadcast {
-                    let sound = NSSound(named: "Glass")
-                    sound?.play()
+                Task { @MainActor in
+                    viewModel.allInsights.insert(insight, at: 0)
+                    #if os(macOS)
+                    if insight.type == .newsBroadcast {
+                        let sound = NSSound(named: "Glass")
+                        sound?.play()
+                    }
+                    #endif
                 }
-                #endif
             }
         }
     }
 
     private func handleNotificationAccept(_ signal: Signal) {
-        Task {
-            await coordinator.acceptSignal(signal)
-            await MainActor.run {
-                self.selectedSignal = nil
-                self.showNotificationAlert = false
-            }
-        }
+        coordinator.acceptSignal(signal)
+        self.selectedSignal = nil
+        self.showNotificationAlert = false
     }
 
     private func handleNotificationDeny(_ signal: Signal) {

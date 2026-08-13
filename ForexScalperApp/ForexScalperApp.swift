@@ -6,17 +6,22 @@ import Combine
 
 @main
 struct ForexScalperApp: App {
-    @StateObject private var coordinator = RefactoredAppCoordinator()
+    @StateObject private var coordinator: RefactoredAppCoordinator
+    @StateObject private var viewModel: DashboardViewModel
     
     init() {
+        let coord = RefactoredAppCoordinator()
+        let vm = DashboardViewModel(coordinator: coord)
+        self._coordinator = StateObject(wrappedValue: coord)
+        self._viewModel = StateObject(wrappedValue: vm)
+        
         // Request notification permissions via the manager
         NotificationManager.shared.requestAuthorization()
     }
     
     var body: some Scene {
         WindowGroup {
-            DashboardView()
-                .environmentObject(coordinator)
+            DashboardView(viewModel: viewModel, coordinator: coordinator)
         }
         .windowResizability(.contentSize)
         
