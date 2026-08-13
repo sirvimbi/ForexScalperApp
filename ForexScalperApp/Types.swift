@@ -308,7 +308,8 @@ struct Signal: Identifiable, Sendable, Codable {
          deviation: Int? = nil,
          filler: MT5FillingType? = .ioc,
          orderType: MT5OrderType? = nil,
-         executionMode: MT5ExecutionMode? = .market) {
+         executionMode: MT5ExecutionMode? = .market,
+         optimalEntryPrice: Double? = nil) {
         self.id = id
         self.type = type
         self.symbol = symbol
@@ -337,6 +338,7 @@ struct Signal: Identifiable, Sendable, Codable {
         self.filler = filler
         self.orderType = orderType ?? (type == .buy ? .buy : .sell)
         self.executionMode = executionMode
+        self.optimalEntryPrice = optimalEntryPrice
     }
     
     var isActive: Bool {
@@ -405,17 +407,22 @@ struct TradeRecord: Identifiable, Codable, Sendable {
     var pnlPercent: Double?
     var status: TradeStatus
     var externalDealId: String?
-    
+
     // God Mode Enhanced Fields
     var swap: Double?
     var commission: Double?
     var signalTime: Date?
     var isAccepted: Bool = true
-    
+
+    // ✅ NEW: Partial Close Tracking Fields
+    var originalVolume: Double?  // Original trade size
+    var remainingVolume: Double? // Current remaining size after partials
+    var isPartialClosed: Bool = false
+
     enum TradeStatus: String, Codable {
         case active, completed, stopped, expired, pending
     }
-    
+
     init(id: UUID = UUID(),
          signalId: UUID,
          symbol: String,
@@ -434,7 +441,10 @@ struct TradeRecord: Identifiable, Codable, Sendable {
          externalDealId: String? = nil,
          swap: Double? = nil,
          commission: Double? = nil,
-         signalTime: Date? = nil) {
+         signalTime: Date? = nil,
+         originalVolume: Double? = nil,
+         remainingVolume: Double? = nil,
+         isPartialClosed: Bool = false) {
         self.id = id
         self.signalId = signalId
         self.symbol = symbol
@@ -454,12 +464,19 @@ struct TradeRecord: Identifiable, Codable, Sendable {
         self.swap = swap
         self.commission = commission
         self.signalTime = signalTime ?? entryTime
+        self.originalVolume = originalVolume
+        self.remainingVolume = remainingVolume
+        self.isPartialClosed = isPartialClosed
     }
-    
+
     var isActive: Bool { status == .active }
     var isWin: Bool? {
         guard let pnl = pnl else { return nil }
         return pnl > 0
+    }
+
+    var isPartiallyClosed: Bool {
+        return isPartialClosed && (remainingVolume ?? 0) > 0
     }
 }
 
@@ -695,6 +712,9 @@ extension Notification.Name {
     nonisolated static let igTradeExecuted = Notification.Name("igTradeExecuted")
     nonisolated static let mt5AccountUpdated = Notification.Name("mt5AccountUpdated")
     nonisolated static let mt5TradeExecuted = Notification.Name("mt5TradeExecuted")
+    nonisolated static let mt5TradeClosed = Notification.Name("mt5TradeClosed")
+    nonisolated static let mt5PriceUpdated = Notification.Name("mt5PriceUpdated")
+    nonisolated static let mt5OhlcUpdated = Notification.Name("mt5OhlcUpdated")
     nonisolated static let signalSourceChanged = Notification.Name("signalSourceChanged")
     nonisolated static let sourceMetricsUpdated = Notification.Name("sourceMetricsUpdated")
     nonisolated static let newLogEntry = Notification.Name("newLogEntry")

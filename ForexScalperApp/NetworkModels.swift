@@ -13,7 +13,7 @@ struct MT5AccountInfo: Codable, Sendable {
     let currency: String
     let server: String
     let algo_trading_enabled: Int?
-    
+
     enum CodingKeys: String, CodingKey {
         case login, balance, equity, margin, margin_free, profit, currency, server, algo_trading_enabled
     }
@@ -43,6 +43,30 @@ struct MT5AccountInfo: Codable, Sendable {
         try container.encode(server, forKey: .server)
         try container.encodeIfPresent(algo_trading_enabled, forKey: .algo_trading_enabled)
     }
+
+    // Swift 6: explicit construction must be nonisolated because this model
+    // is used from the MT5Service actor and from decoding/background contexts.
+    nonisolated init(
+        login: Int,
+        balance: Double,
+        equity: Double,
+        margin: Double,
+        margin_free: Double,
+        profit: Double,
+        currency: String,
+        server: String,
+        algo_trading_enabled: Int?
+    ) {
+        self.login = login
+        self.balance = balance
+        self.equity = equity
+        self.margin = margin
+        self.margin_free = margin_free
+        self.profit = profit
+        self.currency = currency
+        self.server = server
+        self.algo_trading_enabled = algo_trading_enabled
+    }
 }
 
 struct MT5Position: Codable, Sendable {
@@ -58,7 +82,7 @@ struct MT5Position: Codable, Sendable {
     let magic: Int64?
     let comment: String?
     let openTime: Int64?
-    
+
     enum CodingKeys: String, CodingKey {
         case ticket, symbol, type, volume, sl, tp, magic, comment, profit
         case priceOpen = "price_open", priceCurrent = "price_current", openTime = "open_time"
@@ -94,6 +118,35 @@ struct MT5Position: Codable, Sendable {
         try container.encodeIfPresent(magic, forKey: .magic)
         try container.encodeIfPresent(comment, forKey: .comment)
         try container.encodeIfPresent(openTime, forKey: .openTime)
+    }
+
+    // ✅ CUSTOM INITIALIZER - MUST BE NONISOLATED
+    nonisolated init(
+        ticket: Int64,
+        symbol: String,
+        type: String,
+        volume: Double,
+        priceOpen: Double,
+        sl: Double,
+        tp: Double,
+        priceCurrent: Double,
+        profit: Double,
+        magic: Int64?,
+        comment: String?,
+        openTime: Int64?
+    ) {
+        self.ticket = ticket
+        self.symbol = symbol
+        self.type = type
+        self.volume = volume
+        self.priceOpen = priceOpen
+        self.sl = sl
+        self.tp = tp
+        self.priceCurrent = priceCurrent
+        self.profit = profit
+        self.magic = magic
+        self.comment = comment
+        self.openTime = openTime
     }
 }
 
@@ -188,7 +241,7 @@ struct MT5Candle: Codable, Sendable {
     let tick_volume: Double?
     let spread: Int?
     let real_volume: Double?
-    
+
     nonisolated var totalVolume: Double {
         return volume ?? tick_volume ?? 0
     }
@@ -314,6 +367,37 @@ struct MT5HistoryPosition: Codable, Sendable {
         try container.encode(swap, forKey: .swap)
         try container.encodeIfPresent(comment, forKey: .comment)
         try container.encodeIfPresent(magic, forKey: .magic)
+    }
+
+    // ✅ CUSTOM INITIALIZER - MUST BE NONISOLATED
+    nonisolated init(
+        symbol: String,
+        ticket: Int64,
+        type: String,
+        volume: Double,
+        open_price: Double,
+        close_price: Double,
+        open_time: Int64,
+        close_time: Int64,
+        profit: Double,
+        commission: Double,
+        swap: Double,
+        comment: String?,
+        magic: Int64?
+    ) {
+        self.symbol = symbol
+        self.ticket = ticket
+        self.type = type
+        self.volume = volume
+        self.open_price = open_price
+        self.close_price = close_price
+        self.open_time = open_time
+        self.close_time = close_time
+        self.profit = profit
+        self.commission = commission
+        self.swap = swap
+        self.comment = comment
+        self.magic = magic
     }
 }
 

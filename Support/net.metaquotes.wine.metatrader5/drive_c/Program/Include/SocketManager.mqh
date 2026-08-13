@@ -57,7 +57,7 @@ bool CSocketManager::CreateServer(int port) {
     sockaddr_in addr;
     addr.sin_family = AF_INET;
     addr.sin_addr = 0x00000000;
-    addr.sin_port = htons(port);
+    addr.sin_port = (ushort)htons((ushort)port);
 
     ref_sockaddr ref;
     sockaddrIn2RefSockaddr(addr, ref);
@@ -76,7 +76,9 @@ bool CSocketManager::CreateServer(int port) {
 
 bool CSocketManager::SetNonBlocking() {
     int non_block = 1;
-    return ioctlsocket(m_socket, FIONBIO, non_block) == NO_ERROR;
+    uint u_cmd = FIONBIO;
+    int cmd = (int)u_cmd;
+    return ioctlsocket(m_socket, cmd, non_block) == NO_ERROR;
 }
 
 SOCKET64 CSocketManager::AcceptClient() {
@@ -88,7 +90,9 @@ SOCKET64 CSocketManager::AcceptClient() {
     SOCKET64 clientSock = accept(m_socket, clientRef.ref, addrLen);
     if (clientSock != INVALID_SOCKET64) {
         int non_block = 1;
-        ioctlsocket(clientSock, FIONBIO, non_block);
+        uint u_cmd = FIONBIO;
+        int cmd = (int)u_cmd;
+        ioctlsocket(clientSock, cmd, non_block);
     }
 
     return clientSock;

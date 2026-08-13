@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 @MainActor
 class DashboardViewModel: ObservableObject {
     // MARK: - Published Properties (Syncs with Settings UI)
-    @Published var accountBalance: Double = 10000
+    @Published var accountBalance: Double = 10000 { didSet { syncRiskParameters() } }
     @Published var accountCurrency: String = "KES"
     @Published var riskPerTrade: Double = 0.008 { didSet { syncRiskParameters() } }
     @Published var maxDailyRisk: Double = 0.02 { didSet { syncRiskParameters() } }
@@ -26,7 +26,7 @@ class DashboardViewModel: ObservableObject {
     
     // MARK: - MT5 Settings
     @Published var mt5Connected: Bool = false
-    @Published var mt5BridgeURL: String = "http://127.0.0.1:8891"
+    @Published var mt5BridgeURL: String = "http://127.0.0.1:8890"
     @Published var mt5AuthToken: String = "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"
     @Published var mt5MagicNumber: Int = 888888
     @Published var mt5Login: String = "134522550"
@@ -199,7 +199,16 @@ class DashboardViewModel: ObservableObject {
             UserDefaults.standard.double(forKey: "weightMLConfirmed") : 10.0
         
         // MT5 Settings
-        mt5BridgeURL = UserDefaults.standard.string(forKey: "mt5BridgeURL") ?? "http://127.0.0.1:8891"
+        // V10.3 ELITE: Force reset if saved URL is using the legacy 8891 port
+        let savedURL = UserDefaults.standard.string(forKey: "mt5BridgeURL") ?? "http://127.0.0.1:8890"
+        if savedURL.contains(":8891") {
+            print("🛡️ MT5: Correcting legacy port 8891 to 8890 in settings...")
+            let corrected = savedURL.replacingOccurrences(of: ":8891", with: ":8890")
+            UserDefaults.standard.set(corrected, forKey: "mt5BridgeURL")
+            mt5BridgeURL = corrected
+        } else {
+            mt5BridgeURL = savedURL
+        }
         mt5AuthToken = UserDefaults.standard.string(forKey: "mt5AuthToken") ?? "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"
         mt5MagicNumber = UserDefaults.standard.integer(forKey: "mt5MagicNumber") != 0 ?
             UserDefaults.standard.integer(forKey: "mt5MagicNumber") : 888888
@@ -525,9 +534,17 @@ class DashboardViewModel: ObservableObject {
         NotificationCenter.default.publisher(for: .mt5AccountUpdated)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
+                guard let self = self else { return }
                 if let account = notification.object as? MT5AccountInfo {
-                    self?.accountBalance = account.equity
-                    self?.accountCurrency = account.currency
+                    godLog("💰 Dashboard: Live Balance Sync - Equity: \(account.equity)", level: .info)
+                    // Update balance only if it's different to prevent redundant UI refreshes
+                    if self.accountBalance != account.equity {
+                        self.accountBalance = account.equity
+                        self.accountCurrency = account.currency
+                        // FORCE SAVE TO USERDEFAULTS TO OVERWRITE STALE VALUES
+                        UserDefaults.standard.set(account.equity, forKey: "accountBalance")
+                        self.syncRiskParameters()
+                    }
                 }
             }
             .store(in: &cancellables)

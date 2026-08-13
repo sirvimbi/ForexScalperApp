@@ -2323,7 +2323,7 @@ struct DashboardView: View {
                                     Divider().background(Color.borderSubtle)
                                     
                                     settingsRow("Bridge URL") {
-                                        TextField("http://localhost:8891", text: $viewModel.mt5BridgeURL)
+                                        TextField("http://localhost:8890", text: $viewModel.mt5BridgeURL)
                                             .textFieldStyle(RoundedBorderTextFieldStyle())
                                             .frame(width: 200)
                                     }

@@ -5,13 +5,15 @@ import UserNotifications
 actor ScalpingTradeMonitor {
     private var activeTrades: [UUID: TradeRecord] = [:]
     private var tradeEntryIndicators: [UUID: IndicatorSet] = [:]
-    
+    private var partialTradeMonitors: [UUID: Task<Void, Never>] = [:]
+
     private let marketData: MarketDataProvider
     private let tradeHistory: RefactoredTradeHistoryManager
     private let signalEngine: ScalpingSignalEngine
     private var onPendingReconciliation: ((TradeRecord) async -> Void)?
     private var onTradeClosed: ((TradeRecord) async -> Void)?
-    
+    private var onPartialClose: ((TradeRecord) async -> Void)?
+
     init(marketData: MarketDataProvider,
          tradeHistory: RefactoredTradeHistoryManager,
          signalEngine: ScalpingSignalEngine,
@@ -31,7 +33,7 @@ actor ScalpingTradeMonitor {
                 await closeTrade(trade, exitPrice: price, reason: "Time Expiry")
                 continue
             }
-            
+
             // 2. Indicator reversal (Logical Exit)
             if let indicators = indicators {
                 if await shouldExitViaIndicatorReversal(trade: trade, indicators: indicators) {
@@ -52,10 +54,10 @@ actor ScalpingTradeMonitor {
         guard let sl = trade.stopLoss else { return false }
         let pipSize = trade.symbol.contains("JPY") ? 0.01 : 0.0001
         let buffer = 5.0 * pipSize
-        
+
         if trade.type == .buy && currentPrice <= (sl - buffer) { return true }
         if trade.type == .sell && currentPrice >= (sl + buffer) { return true }
-        
+
         return false
     }
 
@@ -63,7 +65,7 @@ actor ScalpingTradeMonitor {
     private func shouldExitViaIndicatorReversal(trade: TradeRecord, indicators: IndicatorSet) async -> Bool {
         let enableExit = await MainActor.run { ScalpingConfig.shared.enableIndicatorExit }
         guard enableExit else { return false }
-        
+
         guard let entryIndicators = tradeEntryIndicators[trade.id] else { return false }
         if trade.type == .buy {
             if indicators.rsi > 70 && indicators.rsi < entryIndicators.rsi - 3 { return true }
@@ -87,50 +89,104 @@ actor ScalpingTradeMonitor {
         return false
     }
 
-    // MARK: - Close Trade
-    private func closeTrade(_ trade: TradeRecord, exitPrice: Double, reason: String) async {
-        godLog("🎯 EXIT: \(trade.symbol) (\(reason)) @ \(String(format: "%.5f", exitPrice))", level: .info)
-        
-        var successfullyClosed = false
-        if let ticketStr = trade.externalDealId, let ticket = Int64(ticketStr) {
-            do {
-                successfullyClosed = try await MT5Service.shared.closePosition(ticket: ticket)
-                if successfullyClosed {
-                    await onPendingReconciliation?(trade)
-                } else {
-                    let (activePositions, _) = try await MT5Service.shared.getPositionsAndOrders()
-                    let stillExists = activePositions.contains { $0.ticket == ticket }
-                    
-                    if !stillExists {
-                        godLog("ℹ️ MT5: Position #\(ticket) no longer exists. Marking as completed.", level: .success)
-                        successfullyClosed = true 
-                    } else {
-                        godLog("⚠️ MT5: Failed to close #\(ticket).", level: .warning)
-                        return 
+    // MARK: - Check if Trade Still Active in MT5
+    private func isTradeStillActive(trade: TradeRecord) async -> Bool {
+        guard let ticketStr = trade.externalDealId,
+              let ticketInt = Int64(ticketStr) else { return false }
+
+        do {
+            let (activePositions, _) = try await MT5Service.shared.getPositionsAndOrders()
+            // ✅ FIX: Compare Int64 with Int64, not String
+            return activePositions.contains { $0.ticket == ticketInt }
+        } catch {
+            return false
+        }
+    }
+
+    // MARK: - Calculate New SL After Partial Close
+    private func calculateNewSL(trade: TradeRecord, exitPrice: Double) -> Double? {
+        guard let currentSL = trade.stopLoss else { return nil }
+        // Move SL to breakeven or slightly better
+        if trade.type == .buy {
+            return max(currentSL, exitPrice - 0.0005)
+        } else {
+            return min(currentSL, exitPrice + 0.0005)
+        }
+    }
+
+    // MARK: - Monitor Remaining Partial Trade
+    private func monitorPartialTrade(trade: TradeRecord) async {
+        guard let dealIdString = trade.externalDealId else { return }
+
+        partialTradeMonitors[trade.id] = Task {
+            while !Task.isCancelled {
+                // Check every 2 seconds
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+
+                let stillActive = await isTradeStillActive(trade: trade)
+                if !stillActive {
+                    // Position is now fully closed
+                    // ✅ FIX: Pass the String directly
+                    if let updatedTrade = await fetchTradeStatus(dealId: dealIdString) {
+                        await sendFinalClosureNotification(updatedTrade)
+                        partialTradeMonitors.removeValue(forKey: trade.id)
+                        break
                     }
                 }
-            } catch {
-                godLog("❌ MT5: Error closing #\(ticket): \(error.localizedDescription).", level: .error)
-                return 
             }
         }
-        
-        var updatedTrade = trade
-        updatedTrade.exitPrice = exitPrice
-        updatedTrade.exitTime = Date()
-        updatedTrade.status = .completed
-        updatedTrade.pnl = calculatePnL(trade: trade, exitPrice: exitPrice)
+    }
 
-        activeTrades.removeValue(forKey: trade.id)
-        tradeEntryIndicators.removeValue(forKey: trade.id)
+    private func fetchTradeStatus(dealId: String) async -> TradeRecord? {
+        // Fetch from MT5 history to get final P&L
+        do {
+            let history = try await MT5Service.shared.getTradeHistory(days: 1)
+            if let closedTrade = history.first(where: { "\($0.ticket)" == dealId }) {
+                var trade = activeTrades.values.first { $0.externalDealId == dealId }
+                trade?.exitPrice = closedTrade.close_price
+                trade?.exitTime = parseMT5Time("\(closedTrade.close_time)")
+                trade?.pnl = closedTrade.profit + closedTrade.commission + closedTrade.swap
+                trade?.status = .completed
+                trade?.remainingVolume = 0
+                return trade
+            }
+        } catch {
+            print("⚠️ Failed to get trade status: \(error)")
+        }
+        return nil
+    }
 
-        await ScalpingRiskManager.shared.closeTrade(updatedTrade)
-        await CorrelationFilter.shared.removeTrade(symbol: trade.symbol)
-        await PerformanceAnalyzer.shared.recordTrade(updatedTrade)
-        if let onTradeClosed = self.onTradeClosed { await onTradeClosed(updatedTrade) }
-        
-        let isWin = (updatedTrade.pnl ?? 0) > 0
-        godLog("📊 Verified Close: \(trade.symbol) - P&L: KES \(String(format: "%.2f", updatedTrade.pnl ?? 0))", level: isWin ? .success : .warning)
+    private func sendFinalClosureNotification(_ trade: TradeRecord) async {
+        if let onTradeClosed = self.onTradeClosed {
+            await onTradeClosed(trade)
+        }
+    }
+
+    private func parseMT5Time(_ timeStr: String?) -> Date? {
+        guard let timeStr = timeStr else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy.MM.dd HH:mm:ss"
+        return formatter.date(from: timeStr)
+    }
+
+    // MARK: - Close Trade (FIXED: Partial vs Full Detection)
+    private func closeTrade(_ trade: TradeRecord, exitPrice: Double, reason: String) async {
+        // V10.3: Trade management is now primary handled by the EA's OnTick throttled loop.
+        // The app monitor serves as an emergency fallback and event listener.
+        godLog("🎯 EXIT FALLBACK: \(trade.symbol) (\(reason)) @ \(String(format: "%.5f", exitPrice))", level: .info)
+
+        // Delegate to MT5Service for actual closure
+        if let ticketStr = trade.externalDealId, let ticket = Int64(ticketStr) {
+            do {
+                let success = try await MT5Service.shared.closePosition(ticket: ticket)
+                if success {
+                    godLog("✅ MT5: Closure request sent for #\(ticket)", level: .success)
+                }
+            } catch {
+                godLog("❌ MT5: Closure failed for #\(ticket): \(error.localizedDescription)", level: .error)
+            }
+        }
     }
 
     private func calculatePnL(trade: TradeRecord, exitPrice: Double) -> Double {
@@ -141,7 +197,10 @@ actor ScalpingTradeMonitor {
 
     // MARK: - Public Methods
     func addTrade(_ trade: TradeRecord, indicators: IndicatorSet?) {
-        activeTrades[trade.id] = trade
+        var newTrade = trade
+        newTrade.originalVolume = trade.positionSize
+        newTrade.remainingVolume = trade.positionSize
+        activeTrades[trade.id] = newTrade
         if let indicators = indicators { tradeEntryIndicators[trade.id] = indicators }
         godLog("📊 Trade opened: \(trade.symbol) \(trade.type) @ \(trade.entryPrice)", level: .trade)
     }
@@ -149,6 +208,8 @@ actor ScalpingTradeMonitor {
     func removeTrade(id: UUID) {
         activeTrades.removeValue(forKey: id)
         tradeEntryIndicators.removeValue(forKey: id)
+        partialTradeMonitors[id]?.cancel()
+        partialTradeMonitors.removeValue(forKey: id)
     }
 
     func getActiveTrades() -> [TradeRecord] { return Array(activeTrades.values) }
@@ -160,5 +221,8 @@ actor ScalpingTradeMonitor {
     }
     func setOnTradeClosedCallback(_ callback: @escaping (TradeRecord) async -> Void) {
         self.onTradeClosed = callback
+    }
+    func setOnPartialCloseCallback(_ callback: @escaping (TradeRecord) async -> Void) {
+        self.onPartialClose = callback
     }
 }

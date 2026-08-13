@@ -29,7 +29,7 @@ struct Order {
     ulong magic;
     string comment;
     string type_filling;   // "IOC", "FOK", etc.
-    int deviation;
+    ulong deviation;
     bool async;
     datetime expiration;   // For pending orders only
 
@@ -68,12 +68,12 @@ public:
     }
 
 
-    JsonResponse SetSymbols(string &symbols[]);
-    JsonResponse SetOhlcRequests(OhlcRequest &symbols[]);
+    JsonResponse SetSymbols(string &symbols_arg[]);
+    JsonResponse SetOhlcRequests(OhlcRequest &requests_arg[]);
     JsonResponse SetOrderEvents(bool enabled);
-    JsonResponse SetMbook(string &symbols[]);
+    JsonResponse SetMbook(string &symbols_arg[]);
     JsonResponse GetQuote(string symbol);
-    JsonResponse RetriveHistoricalData(string symbol, string timeFrame, string from_date_str, string to_date_str);
+    JsonResponse RetriveHistoricalData(string symbol, string timeFrame, string from_date_str, string to_date_str, int count = 0);
     JsonResponse GetHistoryByMode(string mode, string from_date_str, string to_date_str);
     JsonResponse GetOrderList();
     JsonResponse PlaceOrder(Order &order);
@@ -102,7 +102,7 @@ JsonResponse CCommandCore::PlaceOrder(Order &order) {
     // Set pre-trade configs
     trade.SetExpertMagicNumber(order.magic);
     trade.SetAsyncMode(order.async);
-    trade.SetDeviation(order.deviation);
+    trade.SetDeviationInPoints(order.deviation);
 
     // Set filling type if provided
     if (order.type_filling != "") {
@@ -116,11 +116,14 @@ JsonResponse CCommandCore::PlaceOrder(Order &order) {
     bool result = false;
     double price = 0;
     bool is_pending = false;
+    ENUM_ORDER_TYPE type_enum;
 
     // Determine if market or price for pending
     if (order.order_type == "buy") {
+        type_enum = ORDER_TYPE_BUY;
         price = SymbolInfoDouble(order.symbol, SYMBOL_ASK);
     } else if (order.order_type == "sell") {
+        type_enum = ORDER_TYPE_SELL;
         price = SymbolInfoDouble(order.symbol, SYMBOL_BID);
     } else {
         if (order.price <= 0) {
@@ -128,6 +131,20 @@ JsonResponse CCommandCore::PlaceOrder(Order &order) {
         }
         price = order.price;
         is_pending = true;
+
+        if (order.order_type == "buy_limit") type_enum = ORDER_TYPE_BUY_LIMIT;
+        else if (order.order_type == "buy_stop") type_enum = ORDER_TYPE_BUY_STOP;
+        else if (order.order_type == "sell_limit") type_enum = ORDER_TYPE_SELL_LIMIT;
+        else type_enum = ORDER_TYPE_SELL_STOP;
+    }
+
+    // Normalize prices and volume
+    price = NormalizePrice(order.symbol, price);
+    order.volume = NormalizeVolume(order.symbol, order.volume);
+
+    // Automatic Stop Repair (God Mode: Ensure Execution)
+    if (order.sl > 0 || order.tp > 0) {
+        RepairStops(order.symbol, type_enum, price, order.sl, order.tp);
     }
 
     // Expiration type
@@ -151,6 +168,7 @@ JsonResponse CCommandCore::PlaceOrder(Order &order) {
         result = trade.SellStop(order.volume, order.symbol, price, order.sl, order.tp, time_type_enum, order.expiration, order.comment);
     }
 
+
     // Handle result
     if (result) {
         ulong order_ticket = trade.ResultOrder();
@@ -161,6 +179,7 @@ JsonResponse CCommandCore::PlaceOrder(Order &order) {
 
         string json = StringFormat(
             "\"msg\":\"order_send\","
+            "\"retcode\":10009,"
             "\"type\":\"order_type_%s\","
             "\"deal\":%I64u,"
             "\"order\":%I64u,"
@@ -203,6 +222,9 @@ JsonResponse CCommandCore::CloseOrder(ulong ticket, double volume, bool async) {
         volume = positionVolume;
     }
 
+    // Normalize volume for partial close
+    volume = NormalizeVolume(symbol, volume);
+
     CTrade trade;
     trade.SetAsyncMode(async);
 
@@ -216,7 +238,7 @@ JsonResponse CCommandCore::CloseOrder(ulong ticket, double volume, bool async) {
         return SendJson("\"message\":\"close order submitted\"");
     }
 
-    int retcode = trade.ResultRetcode();
+    int retcode = (int)trade.ResultRetcode();
     if (retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_DONE_PARTIAL) {
         // Extract result data
         ulong order_ticket = trade.ResultOrder();
@@ -228,15 +250,17 @@ JsonResponse CCommandCore::CloseOrder(ulong ticket, double volume, bool async) {
         string type = (volume == positionVolume) ? "fully_closed" : "partial_closed";
 
         string json = StringFormat(
-            "\"message\":\"order closed successfully\"," \
-            "\"ticket\":%d," \
-            "\"type\":\"%s\"," \
-            "\"deal\":%d," \
-            "\"order\":%d," \
-            "\"volume\":%.2f," \
-            "\"price\":%.5f," \
-            "\"bid\":%.5f," \
-            "\"ask\":%.5f" \,
+            "\"message\":\"order closed successfully\","
+            "\"retcode\":%d,"
+            "\"ticket\":%I64u,"
+            "\"type\":\"%s\","
+            "\"deal\":%I64u,"
+            "\"order\":%I64u,"
+            "\"volume\":%.2f,"
+            "\"price\":%.5f,"
+            "\"bid\":%.5f,"
+            "\"ask\":%.5f",
+            retcode,
             ticket,
             type,
             deal,
@@ -273,6 +297,15 @@ JsonResponse CCommandCore::ModifyOrder(Order &order) {
 
     double sl = (order.sl > 0) ? order.sl : current_sl;
     double tp = (order.tp > 0) ? order.tp : current_tp;
+
+    // Normalize and Repair
+    sl = NormalizePrice(symbol, sl);
+    tp = NormalizePrice(symbol, tp);
+
+    ENUM_POSITION_TYPE pos_type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+    double current_price = (pos_type == POSITION_TYPE_BUY) ? SymbolInfoDouble(symbol, SYMBOL_BID) : SymbolInfoDouble(symbol, SYMBOL_ASK);
+
+    RepairStops(symbol, (ENUM_ORDER_TYPE)pos_type, current_price, sl, tp);
 
     // Modify the position
     bool result = trade.PositionModify(symbol, sl, tp);
@@ -411,8 +444,8 @@ JsonResponse CCommandCore::GetOrderList() {
         string entry = StringFormat(
             "{"
             "\"ticket\":%I64u,"
-            "\"open_time\":\"%s\","
-            "\"time_update\":\"%s\","
+            "\"open_time\":%I64u,"
+            "\"time_update\":%I64u,"
             "\"type\":\"%s\","
             "\"magic\":%d,"
             "\"identifier\":%I64u,"
@@ -430,8 +463,8 @@ JsonResponse CCommandCore::GetOrderList() {
             "\"change\":%.2f"
             "}",
             ticket,
-            TimeToString(open_time, TIME_DATE | TIME_MINUTES | TIME_SECONDS),
-            TimeToString(time_update, TIME_DATE | TIME_MINUTES | TIME_SECONDS),
+            (ulong)open_time,
+            (ulong)time_update,
             EnumToString(type),
             magic,
             ticket,
@@ -563,7 +596,7 @@ JsonResponse CCommandCore::GetOrderList() {
 //+------------------------------------------------------------------+
 //| Retrieve historical data Command                                 |
 //+------------------------------------------------------------------+
-JsonResponse CCommandCore::RetriveHistoricalData(string symbol, string timeFrame, string from_date_str, string to_date_str)
+JsonResponse CCommandCore::RetriveHistoricalData(string symbol, string timeFrame, string from_date_str, string to_date_str, int count)
 {
     // Validate symbol and adjust if needed (e.g. GBPUSD -> GBPUSD.m)
     ValidationResponse symRes = ValidateSymbol(symbol);
@@ -571,50 +604,58 @@ JsonResponse CCommandCore::RetriveHistoricalData(string symbol, string timeFrame
         return SendError(symRes.code, symRes.message);
     }
 
-    // Convert ISO8601 strings to datetime
-    StringReplace(from_date_str, "T", " ");
-    StringReplace(to_date_str, "T", " ");
-
-    datetime from_date = StringToTime(from_date_str);
-    datetime to_date   = StringToTime(to_date_str);
-
-    if (from_date == 0 || to_date == 0) {
-        return SendError(400, "Invalid date values. Parsed from: " + from_date_str + " to: " + to_date_str);
-    }
-
     ENUM_TIMEFRAMES tf = getTimeFrameEnum(timeFrame);
     MqlRates rates[];
-    int bars = CopyRates(symbol, tf, from_date, to_date, rates);
+    int bars = 0;
+
+    // Use Count if provided (more reliable for deep sync)
+    if (count > 0) {
+        bars = CopyRates(symbol, tf, 0, count, rates);
+    }
+    else {
+        // Fallback to date range
+        StringReplace(from_date_str, "T", " ");
+        StringReplace(to_date_str, "T", " ");
+
+        datetime from_date = StringToTime(from_date_str);
+        datetime to_date   = StringToTime(to_date_str);
+
+        if (from_date == 0 || to_date == 0) {
+            return SendError(400, "Invalid date values. Parsed from: " + from_date_str + " to: " + to_date_str);
+        }
+
+        bars = CopyRates(symbol, tf, from_date, to_date, rates);
+    }
 
     if(bars <= 0) {
         int err = GetLastError();
-        string err_msg = "No data returned for " + symbol + " between " + from_date_str + " and " + to_date_str;
-        if (err != 0) err_msg += " (MT5 Error: " + (string)err + ")";
 
-        // If it's a future date issue, be helpful
-        if (from_date > TimeCurrent()) {
-            err_msg += ". Note: Requested start date " + from_date_str + " is in the future. Terminal time is " + TimeToString(TimeCurrent());
+        // If symbol isn't synced, wait and retry once
+        if (err == 4305 || err == 4401) {
+            Print("📊 History not found for ", symbol, " [", timeFrame, "], attempting force sync...");
+            MqlTick tick;
+            SymbolInfoTick(symbol, tick);
+            Sleep(500); // Increased wait time
+
+            if (count > 0) bars = CopyRates(symbol, tf, 0, count, rates);
+            else {
+                datetime from_date = StringToTime(from_date_str);
+                datetime to_date   = StringToTime(to_date_str);
+                bars = CopyRates(symbol, tf, from_date, to_date, rates);
+            }
         }
 
-        return SendError(404, err_msg);
+        if (bars <= 0) {
+            string err_msg = "No data returned for " + symbol + " in " + timeFrame;
+            if (err != 0) err_msg += " (MT5 Error: " + (string)err + ")";
+            return SendError(404, err_msg);
+        }
     }
 
-    string norm_from = TimeToString(from_date, TIME_DATE | TIME_SECONDS);
-    string norm_to   = TimeToString(to_date, TIME_DATE | TIME_SECONDS);
-    StringReplace(norm_from, ".", "-");
-    StringReplace(norm_from, " ", "T");
-    StringReplace(norm_to, ".", "-");
-    StringReplace(norm_to, " ", "T");
-
- 
     string jsonData = "[";
     for(int i = 0; i < bars; i++) {
-        string t = TimeToString(rates[i].time, TIME_DATE | TIME_SECONDS);
-        StringReplace(t, ".", "-");
-        StringReplace(t, " ", "T");
-
         jsonData += "{";
-        jsonData += "\"time\":\"" + t + "\",";
+        jsonData += "\"time\":" + IntegerToString((long)rates[i].time) + ","; // Send Unix seconds
         jsonData += "\"open\":" + DoubleToString(rates[i].open, 5) + ",";
         jsonData += "\"high\":" + DoubleToString(rates[i].high, 5) + ",";
         jsonData += "\"low\":"  + DoubleToString(rates[i].low, 5) + ",";
@@ -626,12 +667,7 @@ JsonResponse CCommandCore::RetriveHistoricalData(string symbol, string timeFrame
     }
     jsonData += "]";
 
- 
-    string jsonStr = "\"from_date\":\"" + norm_from + "\",";
-    jsonStr += "\"to_date\":\"" + norm_to + "\",";
-    jsonStr += "\"data\":" + jsonData;
-
-    return SendJson(jsonStr);
+    return SendJson("\"data\":" + jsonData);
 }
 
 //+------------------------------------------------------------------+
@@ -650,6 +686,7 @@ JsonResponse CCommandCore::GetAccountInformation() {
         "\"margin_so_mode\":%d,"
         "\"trade_allowed\":%d,"
         "\"trade_expert\":%d,"
+        "\"algo_trading_enabled\":%d,"
         "\"margin_mode\":%d,"
         "\"currency_digits\":%d,"
         "\"fifo_close\":%d,"
@@ -675,6 +712,7 @@ JsonResponse CCommandCore::GetAccountInformation() {
         (int)AccountInfoInteger(ACCOUNT_MARGIN_SO_MODE),
         (int)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED),
         (int)AccountInfoInteger(ACCOUNT_TRADE_EXPERT),
+        (int)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED),
         (int)AccountInfoInteger(ACCOUNT_MARGIN_MODE),
         (int)AccountInfoInteger(ACCOUNT_CURRENCY_DIGITS),
         (int)AccountInfoInteger(ACCOUNT_FIFO_CLOSE),
@@ -822,8 +860,8 @@ JsonResponse CCommandCore::GetHistoryByMode(string mode, string from_date_str, s
             string row = StringFormat(
                 "{"
                 "\"symbol\":\"%s\","
-                "\"open_time\":%d,"
-                "\"ticket\":%d,"
+                "\"open_time\":%I64u,"
+                "\"ticket\":%I64u,"
                 "\"type\":\"%s\","
                 "\"volume\":%.2f,"
                 "\"open_price\":%.5f,"
@@ -832,7 +870,7 @@ JsonResponse CCommandCore::GetHistoryByMode(string mode, string from_date_str, s
                 "\"tp_price\":%.5f,"
                 "\"tp_pips\":%.1f,"
                 "\"close_price\":%.5f,"
-                "\"close_time\":%d,"
+                "\"close_time\":%I64u,"
                 "\"duration\":%d,"
                 "\"swap\":%.2f,"
                 "\"commission\":%.2f,"
@@ -845,8 +883,8 @@ JsonResponse CCommandCore::GetHistoryByMode(string mode, string from_date_str, s
                 "\"magic\":%d"
                 "}",
                 positionInfo[i].symbol,
-                positionInfo[i].openTime,
-                positionInfo[i].ticket,
+                (ulong)positionInfo[i].openTime,
+                (ulong)positionInfo[i].ticket,
                 EnumToString(positionInfo[i].type),
                 positionInfo[i].volume,
                 positionInfo[i].openPrice,
@@ -855,7 +893,7 @@ JsonResponse CCommandCore::GetHistoryByMode(string mode, string from_date_str, s
                 positionInfo[i].tpPrice,
                 positionInfo[i].tpPips,
                 positionInfo[i].closePrice,
-                positionInfo[i].closeTime,
+                (ulong)positionInfo[i].closeTime,
                 positionInfo[i].duration,
                 positionInfo[i].swap,
                 positionInfo[i].commission,
@@ -889,7 +927,7 @@ JsonResponse CCommandCore::GetQuote(string symbol){
       return SendError(500, "Failed to get tick for: '" + symbol + "'");
    }
    
-   datetime time = tick.time_msc / 1000;
+   datetime time = (datetime)(tick.time_msc / 1000);
    int ms        = (int)(tick.time_msc % 1000);
 
    // Format ISO 8601 datetime string: "YYYY-MM-DDTHH:MM:SS.mmmZ"
@@ -1037,15 +1075,15 @@ JsonResponse CCommandCore::GetSymbolInfo(string symbol) {
 //+------------------------------------------------------------------+
 //| Set Tracking for symbols                                         |
 //+------------------------------------------------------------------+
-JsonResponse CCommandCore::SetSymbols(string &symbols[])
+JsonResponse CCommandCore::SetSymbols(string &symbols_arg[])
 {
     string validSymbols[];
     string invalidSymbols[];
-    int count = ArraySize(symbols);
+    int count = ArraySize(symbols_arg);
 
     for(int i = 0; i < count; i++)
     {
-        string sym = symbols[i];
+        string sym = symbols_arg[i];
         bool selected = SymbolSelect(sym, true);
         if(selected)
         {
@@ -1090,21 +1128,21 @@ JsonResponse CCommandCore::SetSymbols(string &symbols[])
 //+------------------------------------------------------------------+
 //| Set Tracking for ohlc                                            |
 //+------------------------------------------------------------------+
-JsonResponse CCommandCore::SetOhlcRequests(OhlcRequest &requests[]) {
+JsonResponse CCommandCore::SetOhlcRequests(OhlcRequest &requests_arg[]) {
     // Set valid OHLCs
-    if (dataSender != NULL && ArraySize(requests) > 0) {
-        dataSender.setOhlcs(requests);
+    if (dataSender != NULL && ArraySize(requests_arg) > 0) {
+        dataSender.setOhlcs(requests_arg);
     }
 
     string validStr = "[";
-    for (int i = 0; i < ArraySize(requests); i++) {
+    for (int i = 0; i < ArraySize(requests_arg); i++) {
         if (i > 0)
             validStr += ",";
-        Print("timeframe:" + timeframeToString(requests[i].timeframe));
-        string tfStr = timeframeToString(requests[i].timeframe);
+        Print("timeframe:" + timeframeToString(requests_arg[i].timeframe));
+        string tfStr = timeframeToString(requests_arg[i].timeframe);
 
         validStr += "{";
-        validStr += "\"symbol\":\"" + requests[i].symbol + "\",";
+        validStr += "\"symbol\":\"" + requests_arg[i].symbol + "\",";
         validStr += "\"time_frame\":\"" + tfStr + "\"";
         validStr += "}";
     }
@@ -1133,15 +1171,15 @@ JsonResponse CCommandCore::SetOrderEvents(bool enabled) {
 //+------------------------------------------------------------------+
 //| Set Tracking for order events                                    |
 //+------------------------------------------------------------------+
-JsonResponse CCommandCore::SetMbook(string &symbols[])
+JsonResponse CCommandCore::SetMbook(string &symbols_arg[])
 {
     string validSymbols[];
     string invalidSymbols[];
-    int count = ArraySize(symbols);
+    int count = ArraySize(symbols_arg);
 
     for(int i = 0; i < count; i++)
     {
-        string sym = symbols[i];
+        string sym = symbols_arg[i];
         bool selected = SymbolSelect(sym, true);
         if(selected)
         {
