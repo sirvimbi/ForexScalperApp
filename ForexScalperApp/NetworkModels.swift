@@ -4,57 +4,66 @@ import Foundation
 // MARK: - MT5 Models
 
 struct MT5AccountInfo: Codable, Sendable {
-    let login: Int
+    let login: Int?
     let balance: Double
     let equity: Double
     let margin: Double
     let margin_free: Double
     let profit: Double
     let currency: String
-    let server: String
+    let server: String?
     let algo_trading_enabled: Int?
 
     enum CodingKeys: String, CodingKey {
-        case login, balance, equity, margin, margin_free, profit, currency, server, algo_trading_enabled
+        case login, balance, equity, margin, profit, currency, server, algo_trading_enabled
+        case margin_free, free_margin
     }
 
     nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.login = try container.decode(Int.self, forKey: .login)
+        self.login = try container.decodeIfPresent(Int.self, forKey: .login)
         self.balance = try container.decode(Double.self, forKey: .balance)
         self.equity = try container.decode(Double.self, forKey: .equity)
         self.margin = try container.decode(Double.self, forKey: .margin)
-        self.margin_free = try container.decode(Double.self, forKey: .margin_free)
         self.profit = try container.decode(Double.self, forKey: .profit)
         self.currency = try container.decode(String.self, forKey: .currency)
-        self.server = try container.decode(String.self, forKey: .server)
+        self.server = try container.decodeIfPresent(String.self, forKey: .server)
         self.algo_trading_enabled = try container.decodeIfPresent(Int.self, forKey: .algo_trading_enabled)
+
+        // Flexible margin decoding
+        if let mf = try? container.decode(Double.self, forKey: .margin_free) {
+            self.margin_free = mf
+        } else if let fm = try? container.decode(Double.self, forKey: .free_margin) {
+            self.margin_free = fm
+        } else {
+            self.margin_free = 0
+        }
     }
 
     nonisolated func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(login, forKey: .login)
+        try container.encodeIfPresent(login, forKey: .login)
         try container.encode(balance, forKey: .balance)
         try container.encode(equity, forKey: .equity)
         try container.encode(margin, forKey: .margin)
         try container.encode(margin_free, forKey: .margin_free)
         try container.encode(profit, forKey: .profit)
         try container.encode(currency, forKey: .currency)
-        try container.encode(server, forKey: .server)
+        try container.encodeIfPresent(server, forKey: .server)
         try container.encodeIfPresent(algo_trading_enabled, forKey: .algo_trading_enabled)
     }
 
     // Swift 6: explicit construction must be nonisolated because this model
     // is used from the MT5Service actor and from decoding/background contexts.
     nonisolated init(
-        login: Int,
+        login: Int?,
         balance: Double,
         equity: Double,
         margin: Double,
         margin_free: Double,
         profit: Double,
         currency: String,
-        server: String,
+        server: String?,
         algo_trading_enabled: Int?
     ) {
         self.login = login
