@@ -185,6 +185,7 @@ class RefactoredAppCoordinator: ObservableObject {
 
             if mt5Connected {
                 godLog("✅ MT5: Connected successfully", level: .success)
+                await MainActor.run { self.connectionStatus = "Connected" }
 
                 // Get account info to verify
                 if let account = try? await MT5Service.shared.getAccountInfo() {
@@ -203,6 +204,7 @@ class RefactoredAppCoordinator: ObservableObject {
                 // Start MT5 reconnection monitor
                 startMT5ReconnectionMonitor()
             } else {
+                await MainActor.run { self.connectionStatus = "Connecting..." }
                 godLog("⚠️ MT5: Bridge online but EA not connected. Retrying...", level: .warning)
 
                 // Retry connection with a delay
@@ -212,8 +214,10 @@ class RefactoredAppCoordinator: ObservableObject {
                 let retryConnected = try await MT5Service.shared.checkConnection()
                 if retryConnected {
                     godLog("✅ MT5: Connected on retry", level: .success)
+                    await MainActor.run { self.connectionStatus = "Connected" }
                     await syncMT5Data()
                 } else {
+                    await MainActor.run { self.connectionStatus = "Disconnected" }
                     godLog("❌ MT5: Could not establish connection. Please check:", level: .error)
                     godLog("   1. MT5 Terminal is running", level: .error)
                     godLog("   2. Algo Trading is enabled (AutoTrading button is green)", level: .error)
@@ -222,6 +226,7 @@ class RefactoredAppCoordinator: ObservableObject {
                 }
             }
         } catch {
+            await MainActor.run { self.connectionStatus = "Error" }
             godLog("❌ MT5: Connection error - \(error.localizedDescription)", level: .error)
         }
     }

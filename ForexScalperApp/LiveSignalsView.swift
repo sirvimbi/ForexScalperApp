@@ -256,7 +256,7 @@ struct LiveSignalsView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color.black.opacity(0.2))
+        .background(Color.bgSecondary.opacity(0.4))
         .cornerRadius(6)
         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.05), lineWidth: 1))
     }

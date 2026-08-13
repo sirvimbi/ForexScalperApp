@@ -196,7 +196,7 @@ struct SystemLogsView: View {
                 }
             }
         }
-        .background(Color.black.opacity(0.3))
+        .background(Color.bgSecondary.opacity(0.5))
         
         #if !os(macOS)
         .fileExporter(

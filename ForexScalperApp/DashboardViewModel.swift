@@ -503,11 +503,19 @@ class DashboardViewModel: ObservableObject {
         NotificationCenter.default.publisher(for: .newGodModeInsight)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] note in
+                guard let self = self else { return }
                 if let insight = note.object as? GodModeInsight {
-                    self?.allInsights.insert(insight, at: 0)
-                    if (self?.allInsights.count ?? 0) > 100 { self?.allInsights.removeLast() }
-                    
-                    self?.showNotification(title: "🧠 \(insight.type.rawValue)", message: "\(insight.title): \(insight.message)")
+                    // Prevent duplicate news/performance alerts
+                    if !self.allInsights.contains(where: { 
+                        $0.type == insight.type && 
+                        $0.title == insight.title && 
+                        abs($0.timestamp.timeIntervalSince(insight.timestamp)) < 60 
+                    }) {
+                        self.allInsights.insert(insight, at: 0)
+                        if self.allInsights.count > 100 { self.allInsights.removeLast() }
+                        
+                        self.showNotification(title: "🧠 \(insight.type.rawValue)", message: "\(insight.title): \(insight.message)")
+                    }
                 }
             }
             .store(in: &cancellables)
@@ -526,10 +534,16 @@ class DashboardViewModel: ObservableObject {
                         affectedPairs: [signal.symbol],
                         timestamp: Date()
                     )
-                    self?.allInsights.insert(insight, at: 0)
-                    if (self?.allInsights.count ?? 0) > 100 { self?.allInsights.removeLast() }
                     
-                    self?.showNotification(title: "🧠 Stellas Insight", message: "\(signal.symbol): \(insight.message)")
+                    if !self.allInsights.contains(where: { 
+                        $0.type == insight.type && 
+                        $0.title == insight.title && 
+                        $0.message == insight.message
+                    }) {
+                        self.allInsights.insert(insight, at: 0)
+                        if self.allInsights.count > 100 { self.allInsights.removeLast() }
+                        self.showNotification(title: "🧠 Stellas Insight", message: "\(signal.symbol): \(insight.message)")
+                    }
                 }
             }
             .store(in: &cancellables)

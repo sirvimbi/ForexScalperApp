@@ -83,7 +83,6 @@ struct DashboardView: View {
         NotificationCenter.default.addObserver(forName: .newGodModeInsight, object: nil, queue: .main) { notification in
             if let insight = notification.object as? GodModeInsight {
                 Task { @MainActor in
-                    viewModel.allInsights.insert(insight, at: 0)
                     #if os(macOS)
                     if insight.type == .newsBroadcast {
                         let sound = NSSound(named: "Glass")
