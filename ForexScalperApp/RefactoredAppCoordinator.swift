@@ -332,7 +332,19 @@ class RefactoredAppCoordinator: ObservableObject {
             let mt5History = try await MT5Service.shared.getTradeHistory(days: 90)
             if !mt5History.isEmpty {
                 godLog("📥 Deep Sync: Merging \(mt5History.count) closed deals from MT5...", level: .info)
+                
+                // PERFORMANCE FIX: Map existing trades by external ID for O(1) lookup
+                let existingTrades = await tradeHistory.getAllTrades()
+                let existingExternalIds = Set(existingTrades.compactMap { $0.externalDealId })
+                
                 for pos in mt5History {
+                    let ticketStr = String(pos.ticket)
+                    
+                    // PREVENT DUPLICATES: Only add if ticket doesn't already exist
+                    guard !existingExternalIds.contains(ticketStr) else {
+                        continue
+                    }
+                    
                     let record = TradeRecord(
                         id: UUID(),
                         signalId: UUID(),
@@ -346,7 +358,7 @@ class RefactoredAppCoordinator: ObservableObject {
                         positionSize: pos.volume,
                         pnl: pos.profit + pos.commission + pos.swap,
                         status: .completed,
-                        externalDealId: String(pos.ticket),
+                        externalDealId: ticketStr,
                         swap: pos.swap,
                         commission: pos.commission
                     )
@@ -582,7 +594,10 @@ class RefactoredAppCoordinator: ObservableObject {
 
     private func cleanupExpiredSignals() async {
         let now = Date()
-        let activeSignals = signals.filter { $0.status == .pending || $0.status == .accepted }
+        let activeSignals = signals.filter { signal in
+            let status = signal.status
+            return status == .pending || status == .accepted
+        }
 
         for signal in activeSignals {
             if signal.expiryTime < now {
@@ -874,14 +889,22 @@ class RefactoredAppCoordinator: ObservableObject {
         let gaps = AdvancedIndicators.detectFairValueGaps(candles1m)
         let delta = await MT5WebSocketService.shared.getDeltaVolume(for: symbol)
 
+        let stochK = stoch.k.last ?? 50
+        let stochD = stoch.d.last ?? 50
+        let currentSpread = candles1m.last?.spread
+        let asiaRange = (high: 0.0, low: 0.0)
+        let londonRange = (high: 0.0, low: 0.0)
+        let usRange = (high: 0.0, low: 0.0)
+        let sessionRanges = (asiaRange: asiaRange, londonRange: londonRange, usRange: usRange)
+
         return IndicatorSet(
             rsi: rsi,
-            stochasticK: stoch.k.last ?? 50,
-            stochasticD: stoch.d.last ?? 50,
+            stochasticK: stochK,
+            stochasticD: stochD,
             cci: cci,
             sar: sar,
             atr: atr,
-            spread: candles1m.last?.spread,
+            spread: currentSpread,
             ema9: ema9,
             ema21: ema21,
             ema50: ema50,
@@ -893,7 +916,7 @@ class RefactoredAppCoordinator: ObservableObject {
             volumeProfilePOC: 0,
             support: 0,
             resistance: 0,
-            sessions: (asiaRange: (0,0), londonRange: (0,0), usRange: (0,0)),
+            sessions: sessionRanges,
             trendStrength: 0,
             pricePattern: .none,
             regime: .ranging,

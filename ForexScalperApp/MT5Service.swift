@@ -554,7 +554,8 @@ actor MT5Service {
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 {
                         let result = try decoder.decode(MT5TradeResult.self, from: data)
-                        return result.retcode == 10009
+                        return result.retcode == 10009 ||
+                            result.retcode == 10010
                     } else {
                         let errorMsg = String(data: data, encoding: .utf8) ?? ""
                         godLog("⚠️ MT5: Close failed at \(path): \(httpResponse.statusCode) - \(errorMsg)", level: .warning)
@@ -588,7 +589,8 @@ actor MT5Service {
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 {
                         let result = try decoder.decode(MT5TradeResult.self, from: data)
-                        return result.retcode == 10009
+                        return result.retcode == 10009 ||
+                            result.retcode == 10010
                     } else {
                         let errorMsg = String(data: data, encoding: .utf8) ?? ""
                         godLog("⚠️ MT5: Modify failed at \(path): \(httpResponse.statusCode) - \(errorMsg)", level: .warning)

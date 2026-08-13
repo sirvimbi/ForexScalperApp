@@ -1,247 +1,58 @@
-// DashboardView.swift - Settings Section (Updated)
 import SwiftUI
 import Combine
 import UserNotifications
 import UniformTypeIdentifiers
 
-// MARK: - Design System (keep existing)
-extension Color {
-    static let bgPrimary    = Color(red: 0.05, green: 0.06, blue: 0.09)
-    static let bgSecondary  = Color(red: 0.08, green: 0.10, blue: 0.14)
-    static let bgCard       = Color(red: 0.10, green: 0.13, blue: 0.18)
-    static let bgCardHover  = Color(red: 0.13, green: 0.16, blue: 0.22)
-    static let accentCyan   = Color(red: 0.00, green: 0.85, blue: 0.95)
-    static let accentGold   = Color(red: 1.00, green: 0.78, blue: 0.20)
-    static let accentGreen  = Color(red: 0.18, green: 0.95, blue: 0.58)
-    static let accentRed    = Color(red: 1.00, green: 0.28, blue: 0.38)
-    static let accentPurple = Color(red: 0.60, green: 0.35, blue: 1.00)
-    static let borderSubtle = Color.white.opacity(0.07)
-    static let borderActive = Color(red: 0.00, green: 0.85, blue: 0.95).opacity(0.4)
-    
-    static let textPrimary   = Color.white
-    static let textSecondary = Color.white.opacity(0.55)
-    static let textMuted     = Color.white.opacity(0.30)
-}
-
-// MARK: - View Modifiers (keep existing)
-struct TableHeaderModifier: ViewModifier {
-    let width: CGFloat
-    func body(content: Content) -> some View {
-        content
-            .font(.system(size: 10, weight: .bold, design: .monospaced))
-            .foregroundColor(.textMuted)
-            .frame(width: width, alignment: .leading)
-    }
-}
-
-extension View {
-    func tableHeader(width: CGFloat) -> some View {
-        modifier(TableHeaderModifier(width: width))
-    }
-}
-
-// MARK: - Reusable Components (keep existing)
-struct GlowText: View {
-    let text: String
-    let color: Color
-    let font: Font
-    
-    var body: some View {
-        Text(text)
-            .font(font)
-            .foregroundColor(color)
-            .shadow(color: color.opacity(0.8), radius: 6, x: 0, y: 0)
-            .shadow(color: color.opacity(0.4), radius: 14, x: 0, y: 0)
-    }
-}
-
-struct GlassCard<Content: View>: View {
-    let content: Content
-    var borderColor: Color = Color.borderSubtle
-    
-    init(borderColor: Color = Color.borderSubtle, @ViewBuilder content: () -> Content) {
-        self.content = content()
-        self.borderColor = borderColor
-    }
-    
-    var body: some View {
-        content
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.bgCard)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(borderColor, lineWidth: 1)
-                    )
-            )
-    }
-}
-
-struct PulsingDot: View {
-    @State private var pulse = false
-    var color: Color = .accentGreen
-    
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(color.opacity(0.25))
-                .frame(width: 14, height: 14)
-                .scaleEffect(pulse ? 1.6 : 1.0)
-                .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: pulse)
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-        }
-        .onAppear { pulse = true }
-    }
-}
-
-struct TagBadge: View {
-    let text: String
-    let color: Color
-    
-    var body: some View {
-        Text(text)
-            .font(.system(size: 10, weight: .bold, design: .monospaced))
-            .foregroundColor(color)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.15))
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(color.opacity(0.4), lineWidth: 1)
-            )
-            .cornerRadius(4)
-    }
-}
-
-struct BarIndicator: View {
-    let value: Double
-    let color: Color
-    
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.white.opacity(0.06))
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(
-                        LinearGradient(
-                            colors: [color.opacity(0.6), color],
-                            startPoint: .leading, endPoint: .trailing
-                        )
-                    )
-                    .frame(width: geo.size.width * CGFloat(min(max(value, 0), 1)))
-                    .shadow(color: color.opacity(0.6), radius: 4)
-            }
-        }
-        .frame(height: 4)
-    }
-}
-
-// MARK: - Stat Box
-struct StatBox: View {
-    let title: String
-    let value: String
-    var accentColor: Color = .accentCyan
-    var icon: String? = nil
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                if let icon {
-                    Image(systemName: icon)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(accentColor.opacity(0.7))
-                }
-                Text(title.uppercased())
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.textMuted)
-                    .tracking(1.2)
-            }
-            Text(value)
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundColor(accentColor)
-                .shadow(color: accentColor.opacity(0.5), radius: 4)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(minWidth: 100)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.bgCard)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(accentColor.opacity(0.2), lineWidth: 1)
-                )
-        )
-    }
-}
-
-// MARK: - Main Dashboard
 struct DashboardView: View {
-    @StateObject private var viewModel: DashboardViewModel
-    @StateObject private var consoleLogger = ConsoleLogger.shared
-    @EnvironmentObject private var coordinator: RefactoredAppCoordinator
-    @State private var selectedTab = 0
-    @State private var showTradeSheet = false
+    @ObservedObject var viewModel: DashboardViewModel
+    @ObservedObject var consoleLogger = ConsoleLogger.shared
+    @ObservedObject var coordinator: RefactoredAppCoordinator
+    @State private var selectedTab: Int = 0
+    @State private var showTradeSheet: Bool = false
     @State private var selectedSignal: Signal?
-    @State private var showNotificationAlert = false
-    @State private var notificationMessage = ""
+    @State private var showNotificationAlert: Bool = false
+    @State private var notificationMessage: String = ""
     @State private var selectedTrade: TradeRecord?
     
-    @StateObject private var notificationManager = NotificationManager.shared
-    @StateObject private var newsService = NewsService.shared
-    @State private var isNotificationBannerDismissed = false
+    private let notificationManager = NotificationManager.shared
+    @State private var isNotificationBannerDismissed: Bool = false
     
-    private let tabs     = ["Signals", "Insights", "History", "Performance", "Logs", "Settings"]
-    private let tabIcons = ["bolt.fill", "brain.head.profile", "clock.fill", "chart.bar.fill", "terminal.fill", "gearshape.fill"]
-    
-    init() {
-        _viewModel = StateObject(wrappedValue: DashboardViewModel(coordinator: nil))
+    let tabs = ["Signals", "Insights", "History", "Performance", "Logs", "Settings"]
+    let tabIcons = ["bolt.fill", "brain.head.profile", "clock.fill", "chart.bar.fill", "terminal.fill", "gearshape.fill"]
+
+    init(viewModel: DashboardViewModel, coordinator: RefactoredAppCoordinator) {
+        self.viewModel = viewModel
+        self.coordinator = coordinator
     }
-    
+
     var body: some View {
         ZStack {
             Color.bgPrimary.ignoresSafeArea()
-            RadialGradient(
-                colors: [Color.accentCyan.opacity(0.04), .clear],
-                center: .topLeading, startRadius: 0, endRadius: 600
-            ).ignoresSafeArea()
             
-            #if os(iOS)
-            TabView(selection: $selectedTab) {
-                liveSignalsView
-                    .tabItem { Label("Signals", systemImage: "bolt.fill") }
-                    .tag(0)
-                insightsView
-                    .tabItem { Label("Insights", systemImage: "brain.head.profile") }
-                    .tag(1)
-                historyView
-                    .tabItem { Label("History", systemImage: "clock.fill") }
-                    .tag(2)
-                performanceView
-                    .tabItem { Label("Performance", systemImage: "chart.bar.xaxis") }
-                    .tag(3)
-                settingsView
-                    .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-                    .tag(5)
-            }
-            .accentColor(.accentCyan)
-            #else
             VStack(spacing: 0) {
+                #if os(macOS)
                 headerBar
-                customTabBar
-                tabContent
+                #endif
+                
+                HStack(spacing: 0) {
+                    #if os(macOS)
+                    customTabBar
+                    Divider().background(Color.borderSubtle)
+                    #endif
+                    
+                    tabContent
+                }
             }
-            .frame(minWidth: 900, minHeight: 650)
-            #endif
         }
-        .preferredColorScheme(.dark)
-        .onAppear {
-            viewModel.updateCoordinator(coordinator)
-            viewModel.loadSettings() // Load saved settings on appear
-            setupNotificationObservers()
+        .alert("New Signal Received", isPresented: $showNotificationAlert) {
+            Button("Accept") {
+                if let signal = selectedSignal { handleNotificationAccept(signal) }
+            }
+            Button("Deny", role: .cancel) {
+                if let signal = selectedSignal { handleNotificationDeny(signal) }
+            }
+        } message: {
+            Text(notificationMessage)
         }
         .sheet(isPresented: $showTradeSheet) {
             if let signal = selectedSignal {
@@ -250,2682 +61,289 @@ struct DashboardView: View {
                 TradeDetailView(trade: trade, viewModel: viewModel)
             }
         }
-        .alert("Notification", isPresented: $showNotificationAlert) {
-            Button("OK", role: .cancel) { }
-            Button("View Signals") { selectedTab = 0 }
-        } message: {
-            Text(notificationMessage)
+        .onAppear {
+            setupNotificationObservers()
         }
     }
-    
+
     // MARK: - Notification Observers
     private func setupNotificationObservers() {
-        NotificationCenter.default.addObserver(
-            forName: Notification.Name.acceptSignal,
-            object: nil,
-            queue: .main
-        ) { notification in
+        NotificationCenter.default.addObserver(forName: NSNotification.Name("NewSignalNotification"), object: nil, queue: .main) { notification in
             if let signal = notification.object as? Signal {
-                Task { @MainActor in
-                    handleNotificationAccept(signal)
-                }
+                self.selectedSignal = signal
+                self.notificationMessage = "\(signal.symbol) \(signal.type.rawValue.uppercased()) @ \(String(format: "%.5f", signal.price))"
+                self.showNotificationAlert = true
+                
+                #if os(macOS)
+                NSSound.beep()
+                #endif
             }
         }
-        NotificationCenter.default.addObserver(
-            forName: Notification.Name.denySignal,
-            object: nil,
-            queue: .main
-        ) { notification in
-            if let signal = notification.object as? Signal {
-                Task { @MainActor in
-                    handleNotificationDeny(signal)
-                }
-            }
-        }
-        NotificationCenter.default.addObserver(
-            forName: Notification.Name.showSignalDashboard,
-            object: nil,
-            queue: .main
-        ) { _ in
-            Task { @MainActor in
-                selectedTab = 0
-            }
-        }
-    }
-    
-    private func handleNotificationAccept(_ signal: Signal) {
-        notificationMessage = "Accepting signal for \(signal.symbol)..."
-        showNotificationAlert = true
-        selectedSignal = signal
         
-        // Use a longer delay to ensure the alert layout is settled before presenting the sheet
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            showTradeSheet = true
+        NotificationCenter.default.addObserver(forName: .newGodModeInsight, object: nil, queue: .main) { notification in
+            if let insight = notification.object as? GodModeInsight {
+                viewModel.allInsights.insert(insight, at: 0)
+                #if os(macOS)
+                if insight.type == .newsBroadcast {
+                    let sound = NSSound(named: "Glass")
+                    sound?.play()
+                }
+                #endif
+            }
         }
     }
-    
-    private func handleNotificationDeny(_ signal: Signal) {
-        notificationMessage = "Signal for \(signal.symbol) denied"
-        showNotificationAlert = true
-        viewModel.denySignal(signal)
+
+    private func handleNotificationAccept(_ signal: Signal) {
+        Task {
+            await coordinator.acceptSignal(signal)
+            await MainActor.run {
+                self.selectedSignal = nil
+                self.showNotificationAlert = false
+            }
+        }
     }
-    
+
+    private func handleNotificationDeny(_ signal: Signal) {
+        self.selectedSignal = nil
+        self.showNotificationAlert = false
+    }
+
     // MARK: - Header (macOS)
-    #if os(macOS)
     var headerBar: some View {
-        HStack(alignment: .center, spacing: 20) {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.accentCyan.opacity(0.15))
-                        .frame(width: 36, height: 36)
-                    Image(systemName: "bolt.fill")
-                        .foregroundColor(.accentCyan)
-                        .font(.system(size: 16, weight: .bold))
-                        .shadow(color: .accentCyan.opacity(0.8), radius: 6)
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("STELLAS")
-                        .font(.system(size: 18, weight: .black, design: .rounded))
+        HStack {
+            HStack(spacing: 12) {
+                Image(systemName: "bolt.shield.fill")
+                    .font(.system(size: 22))
+                    .foregroundColor(.accentCyan)
+                    .shadow(color: .accentCyan.opacity(0.5), radius: 8)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("STELLAS V10.3")
+                        .font(.system(size: 14, weight: .black, design: .monospaced))
                         .foregroundColor(.textPrimary)
-                        .tracking(2)
-                    Text("Version v6.0")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .foregroundColor(.textMuted)
-                        .tracking(3)
+                    Text("ELITE INSTITUTIONAL")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(.accentCyan)
                 }
             }
             
             Spacer()
             
-            HStack(spacing: 6) {
-                PulsingDot(color: .accentGreen)
-                Text("LIVE")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(.accentGreen)
-                    .tracking(2)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(Color.accentGreen.opacity(0.08))
-            .cornerRadius(20)
-            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Color.accentGreen.opacity(0.3), lineWidth: 1))
-            
-            VStack(spacing: 2) {
-                Text("WIN RATE")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.textMuted)
-                    .tracking(1.5)
-                GlowText(
-                    text: String(format: "%.1f%%", viewModel.winRate),
-                    color: viewModel.winRate >= 80 ? .accentGreen : .accentGold,
-                    font: .system(size: 22, weight: .black, design: .rounded)
-                )
-            }
-            
-            Rectangle()
-                .fill(Color.borderSubtle)
-                .frame(width: 1, height: 36)
-            
-            VStack(spacing: 2) {
-                Text("TODAY'S P&L")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.textMuted)
-                    .tracking(1.5)
-                GlowText(
-                    text: viewModel.todayPnLString,
-                    color: viewModel.todayPnLColor,
-                    font: .system(size: 22, weight: .black, design: .rounded)
-                )
+            HStack(spacing: 24) {
+                headerStat(label: "ACCOUNT", value: viewModel.mt5Login.isEmpty ? "DEMO" : viewModel.mt5Login, color: .accentCyan)
+                headerStat(label: "EQUITY", value: String(format: "KES %.2f", viewModel.accountBalance), color: .accentGreen)
+                
+                let dailyPnL = viewModel.totalDailyPnL
+                headerStat(label: "DAILY", value: String(format: "%@%.2f", dailyPnL >= 0 ? "+" : "", dailyPnL), color: dailyPnL >= 0 ? .accentGreen : .accentRed)
+                
+                HStack(spacing: 8) {
+                    PulsingDot(color: coordinator.connectionStatus == "Connected" ? .accentGreen : .accentRed)
+                    Text(coordinator.connectionStatus.uppercased())
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(coordinator.connectionStatus == "Connected" ? .accentGreen : .accentRed)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.white.opacity(0.05))
+                .cornerRadius(6)
             }
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, 14)
-        .background(
-            Color.bgSecondary
-                .overlay(Rectangle().fill(Color.borderSubtle).frame(height: 1), alignment: .bottom)
-        )
+        .padding(.vertical, 16)
+        .background(Color.bgSecondary)
+        .overlay(VStack { Spacer(); Divider().background(Color.borderSubtle) })
     }
-    
+
+    private func headerStat(label: String, value: String, color: Color) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(label).font(.system(size: 8, weight: .bold)).foregroundColor(.textMuted)
+            Text(value).font(.system(size: 13, weight: .bold, design: .monospaced)).foregroundColor(color)
+        }
+    }
+
     var customTabBar: some View {
-        HStack(spacing: 2) {
-            ForEach(0..<tabs.count, id: \.self) { i in
-                tabButton(index: i)
+        VStack(spacing: 8) {
+            ForEach(0..<tabs.count, id: \.self) { index in
+                tabButton(index: index)
             }
             Spacer()
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
+        .padding(.top, 24)
+        .frame(width: 200)
         .background(Color.bgSecondary)
     }
-    
+
     func tabButton(index: Int) -> some View {
-        let isSelected = selectedTab == index
-        return Button(action: { selectedTab = index }) {
-            HStack(spacing: 6) {
+        Button(action: { selectedTab = index }) {
+            HStack(spacing: 12) {
                 Image(systemName: tabIcons[index])
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 16))
+                    .frame(width: 24)
+                
                 Text(tabs[index].uppercased())
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .tracking(1.0)
-            }
-            .foregroundColor(isSelected ? .accentCyan : .textSecondary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(
-                VStack {
-                    Spacer()
-                    if isSelected {
-                        Rectangle()
-                            .fill(LinearGradient(
-                                colors: [Color.accentCyan, Color.accentPurple],
-                                startPoint: .leading, endPoint: .trailing
-                            ))
-                            .frame(height: 2)
-                            .shadow(color: .accentCyan.opacity(0.8), radius: 4)
-                    } else {
-                        Rectangle().fill(Color.clear).frame(height: 2)
-                    }
-                }
-                .background(isSelected ? Color.accentCyan.opacity(0.05) : Color.clear)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-    
-    @ViewBuilder
-    var tabContent: some View {
-        ZStack {
-            Color.bgPrimary
-            Group {
-                switch selectedTab {
-                case 0: liveSignalsView
-                case 1: insightsView
-                case 2: historyView
-                case 3: performanceView
-                case 4: systemLogsView
-                case 5: settingsView
-                default: EmptyView()
-                }
-            }
-        }
-    }
-    #endif
-    
-    // MARK: - Insights View
-    var insightsView: some View {
-        VStack(spacing: 0) {
-            #if os(macOS)
-            HStack {
-                sectionHeader("GOD MODE INSIGHTS", icon: "brain.head.profile", color: .accentCyan)
-                Spacer()
-                Button(action: { viewModel.allInsights.removeAll() }) {
-                    Text("CLEAR ALL").font(.system(size: 10, weight: .bold)).foregroundColor(.accentRed)
-                }.buttonStyle(.plain)
-            }
-            .padding(20)
-            .background(Color.bgSecondary)
-            #endif
-            
-            ScrollView {
-                VStack(spacing: 12) {
-                    if viewModel.allInsights.isEmpty {
-                        VStack(spacing: 20) {
-                            Image(systemName: "brain.head.profile")
-                                .font(.system(size: 40))
-                                .foregroundColor(.textMuted)
-                            Text("No performance or news warnings yet.")
-                                .foregroundColor(.textMuted)
-                                .font(.subheadline)
-                        }
-                        .padding(.top, 100)
-                    } else {
-                        ForEach(viewModel.allInsights) { insight in
-                            let color: Color = {
-                                switch insight.type {
-                                case .newsBroadcast: return .accentGold
-                                case .signalHistory: return .accentGreen
-                                default: return .accentCyan
-                                }
-                            }()
-                            GlassCard(borderColor: color.opacity(0.3)) {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    HStack {
-                                        TagBadge(text: insight.type.rawValue, color: color)
-                                        Text(insight.title)
-                                            .font(.system(size: 14, weight: .black, design: .monospaced))
-                                            .foregroundColor(.textPrimary)
-                                        Spacer()
-                                        Text(formatLogTime(insight.timestamp))
-                                            .font(.system(size: 10, design: .monospaced))
-                                            .foregroundColor(.textMuted)
-                                    }
-                                    
-                                    Text(insight.message)
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.textSecondary)
-                                        .lineLimit(3)
-                                    
-                                    if !insight.affectedPairs.isEmpty {
-                                        HStack(spacing: 6) {
-                                            Text("AFFECTED:")
-                                                .font(.system(size: 9, weight: .bold))
-                                                .foregroundColor(.textMuted)
-                                            
-                                            ForEach(insight.affectedPairs, id: \.self) { pair in
-                                                Text(pair)
-                                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                                    .padding(.horizontal, 6)
-                                                    .padding(.vertical, 2)
-                                                    .background(Color.white.opacity(0.05))
-                                                    .cornerRadius(3)
-                                            }
-                                            
-                                            Spacer()
-                                            
-                                            if insight.sentiment != .none {
-                                                HStack(spacing: 4) {
-                                                    Image(systemName: insight.sentiment == .buy ? "chart.line.uptrend.xyaxis" : "chart.line.downtrend.xyaxis")
-                                                    Text(insight.sentiment == .buy ? "BULLISH" : "BEARISH")
-                                                }
-                                                .font(.system(size: 9, weight: .black))
-                                                .foregroundColor(insight.sentiment == .buy ? .accentGreen : .accentRed)
-                                            }
-                                        }
-                                        .padding(.top, 4)
-                                    }
-                                }
-                                .padding(14)
-                            }
-                        }
-                    }
-                }
-                .padding(20)
-            }
-        }
-        .background(Color.bgPrimary)
-    }
-
-    // MARK: - System Logs View
-    var systemLogsView: some View {
-        VStack(spacing: 0) {
-            #if os(macOS)
-            HStack {
-                Text("SYSTEM LOGS & DIAGNOSTICS")
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    .foregroundColor(.accentCyan)
-                    .tracking(2)
+                    .tracking(1)
+                
                 Spacer()
                 
-                Button(action: {
-                    ConsoleLogger.shared.clearLogs()
-                }) {
-                    Label("CLEAR", systemImage: "trash.fill")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(.accentRed)
+                if index == 0 && coordinator.signals.filter({ $0.status == .pending }).count > 0 {
+                    Circle()
+                        .fill(Color.accentRed)
+                        .frame(width: 6, height: 6)
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(Color.accentRed.opacity(0.1))
-                .cornerRadius(4)
-                
-                Button(action: {
-                    exportLogs()
-                }) {
-                    Label("EXPORT (.TXT)", systemImage: "square.and.arrow.down.fill")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(.bgPrimary)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(Color.accentCyan)
-                .cornerRadius(4)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
-            
-            Divider().background(Color.borderSubtle)
-            #endif
-            
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(consoleLogger.logs.reversed()) { entry in
-                            HStack(alignment: .top, spacing: 10) {
-                                Text(formatLogTime(entry.timestamp))
-                                    .font(.system(size: 10, design: .monospaced))
-                                    .foregroundColor(.textMuted)
-                                    .frame(width: 80, alignment: .leading)
-                                
-                                Text(entry.level.icon)
-                                    .font(.system(size: 11))
-                                
-                                Text(entry.message)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(entry.level.color)
-                                    .textSelection(.enabled)
-                                
-                                Spacer()
-                            }
-                            .padding(.horizontal, 20)
-                            .id(entry.id)
-                        }
-                    }
-                    .padding(.vertical, 14)
-                }
-                .onChange(of: consoleLogger.logs.count) { old, newValue in
-                    if let first = ConsoleLogger.shared.logs.last {
-                        withAnimation {
-                            proxy.scrollTo(first.id, anchor: .top)
-                        }
-                    }
-                }
-            }
-            .background(Color.black.opacity(0.3))
-        }
-        #if !os(macOS)
-        .fileExporter(
-            isPresented: $isExportingLogs,
-            document: logDocument,
-            contentType: .plainText,
-            defaultFilename: "GodMode_Logs_\(Int(Date().timeIntervalSince1970)).txt"
-        ) { result in
-            if case .success(let url) = result {
-                print("✅ Logs exported to: \(url.path)")
-            }
-        }
-        #endif
-    }
-    
-    @State private var isExportingLogs = false
-    @State private var logDocument = LogDocument(text: "")
-    
-    private func exportLogs() {
-        let logsText = ConsoleLogger.shared.exportLogs()
-        let fileName = "GodMode_Logs_\(Int(Date().timeIntervalSince1970)).txt"
-        
-        #if os(macOS)
-        let savePanel = NSSavePanel()
-        savePanel.allowedContentTypes = [.plainText]
-        savePanel.nameFieldStringValue = fileName
-        savePanel.message = "Choose where to save your System Logs"
-        
-        if savePanel.runModal() == .OK, let url = savePanel.url {
-            do {
-                try logsText.write(to: url, atomically: true, encoding: .utf8)
-                godLog("📁 Logs Exported: \(url.path)", level: .success)
-                viewModel.showNotification(title: "Export Successful", message: "Logs saved successfully.")
-            } catch {
-                godLog("❌ Export Failed: \(error.localizedDescription)", level: .error)
-                viewModel.showNotification(title: "Export Failed", message: error.localizedDescription)
-            }
-        }
-        #else
-        logDocument.text = logsText
-        isExportingLogs = true
-        #endif
-    }
-    
-    private func formatLogTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-        return formatter.string(from: date)
-    }
-    
-    // MARK: - Live Signals
-    // MARK: - News Ticker
-    var newsTicker: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "globe.americas.fill")
-                .foregroundColor(.accentGold)
-                .font(.system(size: 12))
-            
-            if newsService.isFetching && newsService.upcomingEvents.isEmpty {
-                Text("LOADING CALENDAR...")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(.textMuted)
-            } else if let nextEvent = newsService.upcomingEvents.first(where: { $0.time > Date() }) {
-                HStack(spacing: 6) {
-                    TagBadge(text: nextEvent.currency, color: .white.opacity(0.8))
-                    Text(nextEvent.title.uppercased())
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(.textPrimary)
-                        .lineLimit(1)
-                    
-                    Text(formatNewsTime(nextEvent.time))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.accentGold)
-                    
-                    TagBadge(text: nextEvent.impact.rawValue, color: nextEvent.impact.color)
-                }
-            } else {
-                Text("NO UPCOMING HIGH IMPACT NEWS")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(.textMuted)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(Color.black.opacity(0.2))
-        .cornerRadius(6)
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.05), lineWidth: 1))
-    }
-    
-    private func formatNewsTime(_ date: Date) -> String {
-        let diff = date.timeIntervalSinceNow
-        if diff < 3600 {
-            return "in \(Int(diff/60))m"
-        } else {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm"
-            return "at \(formatter.string(from: date))"
-        }
-    }
-
-    var liveSignalsView: some View {
-        VStack(spacing: 0) {
-            #if os(macOS)
-            HStack {
-                Text("LIVE SIGNALS")
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    .foregroundColor(.accentCyan)
-                    .tracking(2)
-                
-                Spacer()
-                
-                newsTicker
-                
-                Spacer()
-                
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(Color.accentGreen)
-                        .frame(width: 6, height: 6)
-                    Text("LIVE 0.5s")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(.accentGreen)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.accentGreen.opacity(0.1))
-                .cornerRadius(4)
-                
-                HStack(spacing: 8) {
-                    Text("SOURCE:")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(.textMuted)
-                        .tracking(1)
-                    
-                    ForEach(SignalSource.allCases.filter { $0 != .both }, id: \.self) { source in
-                        Button(action: {
-                            coordinator.switchSignalSource(source)
-                        }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: source.icon)
-                                    .font(.system(size: 10))
-                                Text(source.displayName)
-                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(
-                                coordinator.selectedSignalSource == source ?
-                                (source == .binance ? Color.yellow.opacity(0.3) :
-                                    source == .ig ? Color.purple.opacity(0.3) :
-                                    Color.accentCyan.opacity(0.3)) :
-                                    Color.bgCardHover
-                            )
-                            .foregroundColor(
-                                coordinator.selectedSignalSource == source ?
-                                (source == .binance ? .yellow :
-                                    source == .ig ? .purple :
-                                    .accentCyan) :
-                                    .textSecondary
-                            )
-                            .cornerRadius(6)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(
-                                        coordinator.selectedSignalSource == source ?
-                                        (source == .binance ? Color.yellow.opacity(0.5) :
-                                            source == .ig ? Color.purple.opacity(0.5) :
-                                            Color.accentCyan.opacity(0.5)) :
-                                            Color.borderSubtle,
-                                        lineWidth: 1
-                                    )
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .help(source == .auto ? "Auto-switch between sources based on reliability" :
-                                source == .binance ? "Use Binance signals only" :
-                                "Use IG signals only")
-                    }
-                }
-                
-                Button(action: { viewModel.refreshData() }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12, weight: .bold))
-                            .rotationEffect(.degrees(viewModel.isRefreshing ? 360 : 0))
-                            .animation(
-                                viewModel.isRefreshing
-                                    ? Animation.linear(duration: 1).repeatForever(autoreverses: false)
-                                    : .default,
-                                value: viewModel.isRefreshing
-                            )
-                        Text("REFRESH")
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .tracking(1)
-                    }
-                    .foregroundColor(.accentCyan)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.accentCyan.opacity(0.1))
-                    .cornerRadius(6)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.accentCyan.opacity(0.3), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(viewModel.isRefreshing)
-                
-                Divider()
-                    .background(Color.borderSubtle)
-                    .frame(height: 20)
-                    .padding(.horizontal, 4)
-                
-                // AUTO-TRADE TOGGLE & SLIDER
-                HStack(spacing: 12) {
-                    HStack(spacing: 8) {
-                        Toggle(isOn: $viewModel.isAutoTradeEnabled) {
-                            Image(systemName: viewModel.isAutoTradeEnabled ? "bolt.fill" : "bolt.slash.fill")
-                                .font(.system(size: 10))
-                        }
-                        .toggleStyle(SwitchToggleStyle(tint: .accentGreen))
-                        .scaleEffect(0.7)
-                        .frame(width: 45)
-                    }
-                    
-                    if viewModel.isAutoTradeEnabled {
-                        HStack(spacing: 8) {
-                            Text("\(Int(viewModel.minAutoTradeConfidence))%")
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .foregroundColor(.accentGold)
-                                .frame(width: 30)
-                            
-                            Slider(value: $viewModel.minAutoTradeConfidence, in: 50...98, step: 1)
-                                .frame(width: 80)
-                                .accentColor(.accentGold)
-                            
-                            Image(systemName: "target")
-                                .font(.system(size: 10))
-                                .foregroundColor(.textMuted)
-                        }
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(viewModel.isAutoTradeEnabled ? Color.accentGreen.opacity(0.05) : Color.clear)
-                .cornerRadius(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(viewModel.isAutoTradeEnabled ? Color.accentGreen.opacity(0.2) : Color.clear, lineWidth: 1)
-                )
-                .animation(.spring(), value: viewModel.isAutoTradeEnabled)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            
-            Divider().background(Color.borderSubtle)
-            #endif
-            
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    NotificationBanner(isAuthorized: notificationManager.isAuthorized, isDismissed: $isNotificationBannerDismissed)
-
-                    #if os(iOS)
-                    HStack {
-                        Text("Live Signals")
-                            .font(.largeTitle).bold()
-                        Spacer()
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(Color.green)
-                                .frame(width: 8, height: 8)
-                            Text("LIVE")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(.horizontal)
-                    #endif
-                    
-                    // ELITE SIGNAL RECONCILIATION
-                    let allSignals = coordinator.signals
-                    let pendingSignals = allSignals.filter { $0.status == .pending }
-                    
-                    if pendingSignals.isEmpty {
-                        NoSignalsView(connectionStatus: coordinator.connectionStatus, signalsCount: allSignals.count, signals: allSignals)
-                    } else {
-                        ForEach(pendingSignals.sorted(by: { $0.timestamp > $1.timestamp })) { signal in
-                            signalCard(signal)
-                                .transition(.opacity.combined(with: .slide))
-                                .id(signal.id)
-                        }
-                    }
-                }
-                .padding(20)
-                .animation(.easeInOut, value: coordinator.signals.filter { $0.status == .pending }.count)
-            }
-            .refreshable {
-                viewModel.refreshData()
-            }
-            .onAppear {
-                viewModel.startAutoRefresh(interval: 0.5)
-            }
-            .onDisappear {
-                viewModel.stopAutoRefresh()
-            }
-        }
-        #if os(iOS)
-        .navigationTitle("Stellas")
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-    }
-    
-    @ViewBuilder
-    func signalCard(_ signal: Signal) -> some View {
-        let isBuy = signal.type == .buy
-        let color: Color = isBuy ? .accentGreen : .accentRed
-        let minutes = Int(signal.timeRemaining) / 60
-        let seconds = Int(signal.timeRemaining) % 60
-        
-        Button(action: {
-            if let tradeId = signal.tradeId {
-                if let trade = viewModel.activeTrades.first(where: { $0.id == tradeId }) ??
-                                viewModel.tradeHistory.first(where: { $0.id == tradeId }) {
-                    selectedTrade = trade
-                    showTradeSheet = true
-                }
-            } else if signal.status == .pending {
-                selectedSignal = signal
-                showTradeSheet = true
-            }
-        }) {
-            VStack(alignment: .leading, spacing: 12) {
+            .foregroundColor(selectedTab == index ? .accentCyan : .textSecondary)
+            .background(selectedTab == index ? Color.accentCyan.opacity(0.1) : Color.clear)
+            .overlay(
                 HStack {
-                    HStack(spacing: 4) {
-                        Image(systemName: isBuy ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                            .font(.system(size: 20))
-                        Text(signal.type.displayName)
-                            .font(.system(size: 16, weight: .bold))
-                    }
-                    .foregroundColor(color)
-                    
-                    Spacer()
-                    
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(signal.source == .binance ? Color.yellow : Color.purple)
-                            .frame(width: 6, height: 6)
-                        Text(signal.source.rawValue)
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(signal.source == .binance ? Color.yellow.opacity(0.2) : Color.purple.opacity(0.2))
-                    .cornerRadius(6)
-                    
-                    TagBadge(text: signal.timeframe.uppercased(), color: .accentPurple)
-                    
-                    if signal.status != .pending {
-                        TagBadge(
-                            text: signal.status.rawValue.uppercased(),
-                            color: signal.status == .accepted ? .accentCyan :
-                                   signal.status == .completed
-                                        ? (signal.pnl ?? 0 >= 0 ? .accentGreen : .accentRed)
-                                        : .accentGold
-                        )
-                    }
-                    
-                    if signal.status == .pending {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "timer").font(.system(size: 12))
-                                Text(String(format: "%02d:%02d", minutes, seconds))
-                                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                    .foregroundColor(signal.isExpiringSoon ? .accentRed : .accentGold)
-                                    .monospacedDigit()
-                            }
-                            GeometryReader { geo in
-                                ZStack(alignment: .leading) {
-                                    Rectangle().fill(Color.white.opacity(0.1)).frame(height: 2)
-                                    Rectangle()
-                                        .fill(signal.isExpiringSoon ? Color.accentRed : Color.accentGold)
-                                        .frame(width: geo.size.width * signal.progressPercentage, height: 2)
-                                }
-                            }
-                            .frame(width: 60, height: 2)
-                        }
-                    }
-                }
-                
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Text(signal.symbol)
-                                .font(.system(size: 24, weight: .bold))
-                            
-                            if let insight = signal.selfLearningInsight {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "brain.head.profile")
-                                        .font(.system(size: 10))
-                                    Text("INSIGHT")
-                                        .font(.system(size: 9, weight: .bold))
-                                }
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(Color.accentCyan.opacity(0.2))
-                                .foregroundColor(.accentCyan)
-                                .cornerRadius(4)
-                                .help(insight)
-                            }
-                        }
+                    if selectedTab == index {
+                        Rectangle().fill(Color.accentCyan).frame(width: 3)
                     }
                     Spacer()
-                    VStack(alignment: .trailing) {
-                        Text(String(format: "KES %.5f", signal.price))
-                            .font(.system(size: 20, weight: .semibold, design: .monospaced))
-                        HStack {
-                            if signal.volume > 0 {
-                                Text("Vol: \(Int(signal.volume))")
-                                    .font(.caption).foregroundColor(.textSecondary)
-                            }
-                            Text("Confidence: \(Int(signal.confidence))%")
-                                .font(.caption).foregroundColor(.textSecondary)
-                        }
-                    }
                 }
-                
-                BarIndicator(
-                    value: signal.confidence / 100,
-                    color: signal.confidence < 70 ? .accentRed :
-                           signal.confidence < 80 ? .orange :
-                           signal.confidence < 90 ? .accentGold : .accentGreen
-                )
-                .frame(height: 4)
-                
-                if signal.status == .accepted || signal.status == .completed {
-                    VStack(spacing: 8) {
-                        HStack {
-                            Image(systemName: signal.status == .accepted ? "clock.fill" : "checkmark.circle.fill")
-                                .foregroundColor(signal.status == .accepted ? .accentCyan :
-                                               (signal.pnl ?? 0 >= 0 ? .accentGreen : .accentRed))
-                            Text(signal.status == .accepted ? "Trade Active" : "Trade Closed")
-                                .foregroundColor(signal.status == .accepted ? .accentCyan :
-                                               (signal.pnl ?? 0 >= 0 ? .accentGreen : .accentRed))
-                                .font(.headline)
-                            Spacer()
-                            if let pnl = signal.pnl {
-                                Text(String(format: "P&L: %@%@%.2f", pnl >= 0 ? "+" : "", viewModel.currencySymbol, pnl))
-                                    .font(.caption.bold())
-                                    .foregroundColor(pnl >= 0 ? .accentGreen : .accentRed)
-                            }
-                        }
-                        
-                        if let acceptedPrice = signal.acceptedPrice {
-                            HStack {
-                                Text("Entry: ").font(.caption).foregroundColor(.textSecondary)
-                                Text(String(format: "%@%.5f", viewModel.currencySymbol, acceptedPrice))
-                                    .font(.caption.monospacedDigit()).foregroundColor(.textPrimary)
-                                Spacer()
-                                if let exitPrice = signal.closedPrice {
-                                    Text("Exit: ").font(.caption).foregroundColor(.textSecondary)
-                                    Text(String(format: "%@%.5f", viewModel.currencySymbol, exitPrice))
-                                        .font(.caption.monospacedDigit()).foregroundColor(.textPrimary)
-                                }
-                            }
-                        }
-                        
-                        if let stopLoss = signal.stopLoss, let takeProfit = signal.takeProfit {
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text("Stop Loss").font(.caption2).foregroundColor(.textMuted)
-                                    Text(String(format: "%@%.5f", viewModel.currencySymbol, stopLoss))
-                                        .font(.caption2.monospacedDigit()).foregroundColor(.accentRed)
-                                }
-                                Spacer()
-                                VStack(alignment: .trailing) {
-                                    Text("Take Profit").font(.caption2).foregroundColor(.textMuted)
-                                    Text(String(format: "%@%.5f", viewModel.currencySymbol, takeProfit))
-                                        .font(.caption2.monospacedDigit()).foregroundColor(.accentGreen)
-                                }
-                            }
-                        }
-                        
-                        if let positionSize = signal.positionSize {
-                            HStack {
-                                Text("Position Size: ").font(.caption).foregroundColor(.textSecondary)
-                                Text(String(format: "%.2f Lots", positionSize))
-                                    .font(.caption.monospacedDigit()).foregroundColor(.accentCyan)
-                                Spacer()
-                                Text("Click to view details")
-                                    .font(.caption2).foregroundColor(.accentCyan).italic()
-                            }
-                        }
-                    }
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
-                }
-                
-                if signal.status == .pending {
-                    HStack(spacing: 12) {
-                        Button(action: {
-                            selectedSignal = signal
-                            showTradeSheet = true
-                        }) {
-                            HStack {
-                                Image(systemName: "checkmark.circle.fill")
-                                Text("Review Trade")
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(Color.accentGreen)
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
-                        }
-                        .buttonStyle(.plain)
-                        
-                        Button(action: { viewModel.denySignal(signal) }) {
-                            HStack {
-                                Image(systemName: "xmark.circle.fill")
-                                Text("Deny")
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(Color.accentRed)
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.bgCard)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(color.opacity(0.3), lineWidth: 1)
-                    )
-                    .shadow(color: color.opacity(0.2), radius: 8, x: 0, y: 2)
             )
         }
-        .buttonStyle(PlainButtonStyle())
-    }
-    
-    var historyView: some View {
-        #if os(iOS)
-        NavigationView { historyContent }
-        #else
-        historyContent
-        #endif
-    }
-    
-    var historyContent: some View {
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(spacing: 20) {
-                    #if os(macOS)
-                    HStack {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(DashboardTimeFilter.allCases, id: \.self) { filter in
-                                    filterButton(filter)
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                        Spacer()
-                        HStack(spacing: 8) {
-                            Button(action: { viewModel.refreshData() }) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.clockwise").font(.system(size: 11))
-                                    Text("SYNC MT5")
-                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                        .tracking(1.0)
-                                }
-                                .foregroundColor(.accentCyan)
-                                .padding(.horizontal, 12).padding(.vertical, 6)
-                                .background(Color.accentCyan.opacity(0.1))
-                                .cornerRadius(6)
-                                .overlay(RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(Color.accentCyan.opacity(0.3), lineWidth: 1))
-                            }
-                            .buttonStyle(.plain)
-
-                            Button(action: { viewModel.clearHistory() }) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "trash").font(.system(size: 11))
-                                    Text("CLEAR")
-                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                        .tracking(1.0)
-                                }
-                                .foregroundColor(.accentRed)
-                                .padding(.horizontal, 12).padding(.vertical, 6)
-                                .background(Color.accentRed.opacity(0.1))
-                                .cornerRadius(6)
-                                .overlay(RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(Color.accentRed.opacity(0.3), lineWidth: 1))
-                            }
-                            .buttonStyle(.plain)
-                            
-                            Button(action: { viewModel.clearAllHistory() }) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "trash.fill").font(.system(size: 11))
-                                    Text("CLEAR ALL")
-                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                        .tracking(1.0)
-                                }
-                                .foregroundColor(.accentRed)
-                                .padding(.horizontal, 12).padding(.vertical, 6)
-                                .background(Color.accentRed.opacity(0.15))
-                                .cornerRadius(6)
-                                .overlay(RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(Color.accentRed.opacity(0.5), lineWidth: 1))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.trailing, 20)
-                    }
-                    #endif
-                    
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            StatBox(title: "Total Trades", value: "\(viewModel.totalTrades)", accentColor: .accentCyan, icon: "chart.bar.fill")
-                            StatBox(title: "Win Rate", value: String(format: "%.1f%%", viewModel.winRate), accentColor: .accentGreen, icon: "checkmark.circle.fill")
-                            StatBox(title: "Profit Factor", value: String(format: "%.2f", viewModel.profitFactor), accentColor: .accentGold, icon: "multiply.circle.fill")
-                            StatBox(title: "Avg Win", value: String(format: "%@%.2f", viewModel.currencySymbol, viewModel.avgWin), accentColor: .accentGreen, icon: "arrow.up.right")
-                            StatBox(title: "Avg Loss", value: String(format: "%@%.2f", viewModel.currencySymbol, viewModel.avgLoss), accentColor: .accentRed, icon: "arrow.down.right")
-                        }
-                        .padding(.horizontal, 20)
-                    }
-                    
-                    if !viewModel.activeTrades.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("ACTIVE TRADES")
-                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                .foregroundColor(.accentCyan)
-                                .padding(.horizontal, 20)
-                            ForEach(viewModel.activeTrades) { trade in
-                                tradeRow(trade, isActive: true)
-                                    .padding(.horizontal, 20)
-                            }
-                        }
-                    }
-                    
-                    #if os(iOS)
-                    HStack {
-                        Text("History")
-                            .font(.largeTitle).bold()
-                        Spacer()
-                        
-                        if let url = viewModel.exportURL {
-                            ShareLink(item: url) {
-                                Image(systemName: "square.and.arrow.up")
-                                    .foregroundColor(.accentCyan)
-                            }
-                        } else {
-                            Button(action: { Task { await viewModel.prepareCSVExport() } }) {
-                                Image(systemName: "square.and.arrow.up")
-                                    .foregroundColor(.accentCyan)
-                            }
-                        }
-
-                        Button(action: { viewModel.refreshData() }) {
-                            Image(systemName: "arrow.clockwise")
-                                .foregroundColor(.accentCyan)
-                        }
-                    }
-                    .padding(.horizontal)
-
-                    List {
-                        ForEach(viewModel.tradeHistory) { trade in
-                            tradeRow(trade, isActive: false)
-                        }
-                    }
-                    .listStyle(PlainListStyle())
-                    #else
-                    HStack {
-                        Text("MASTER TRADE HISTORY")
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                            .foregroundColor(.accentCyan)
-                            .tracking(2)
-                        Spacer()
-                        
-                        Button(action: {
-                            Task {
-                                await viewModel.prepareCSVExport()
-                            }
-                        }) {
-                            Label("DOWNLOAD CSV", systemImage: "arrow.down.doc.fill")
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .padding(.horizontal, 12).padding(.vertical, 7)
-                                .background(Color.accentCyan)
-                                .foregroundColor(.bgPrimary)
-                                .cornerRadius(5)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-
-                    GlassCard {
-                        VStack(spacing: 0) {
-                            HStack {
-                                Text("SYMBOL").tableHeader(width: 90)
-                                Text("TYPE").tableHeader(width: 60)
-                                Text("ENTRY").tableHeader(width: 110)
-                                Text("EXIT").tableHeader(width: 110)
-                                Text("P&L").tableHeader(width: 110)
-                                Text("RESULT").tableHeader(width: 70)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 16).padding(.vertical, 10)
-                            .background(Color.white.opacity(0.03))
-                            
-                            Divider().background(Color.borderSubtle)
-                            
-                            if viewModel.tradeHistory.isEmpty {
-                                HStack {
-                                    Spacer()
-                                    VStack(spacing: 12) {
-                                        Image(systemName: "clock.arrow.circlepath")
-                                            .font(.system(size: 30)).foregroundColor(.textMuted)
-                                        Text("No trade history")
-                                            .font(.subheadline).foregroundColor(.textMuted)
-                                    }
-                                    .padding(.vertical, 40)
-                                    Spacer()
-                                }
-                            } else {
-                                ForEach(viewModel.tradeHistory) { trade in
-                                    tradeRow(trade, isActive: false)
-                                        .padding(.horizontal, 16)
-                                    Divider().background(Color.borderSubtle)
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    #endif
-                }
-                .padding(.vertical, 20)
-                .frame(minHeight: geometry.size.height)
-            }
-        }
-        #if os(iOS)
-        .navigationTitle("History")
-        #endif
-    }
-    
-    func filterButton(_ filter: DashboardTimeFilter) -> some View {
-        Button(action: { viewModel.updateTimeFilter(filter) }) {
-            Text(filter.rawValue)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(viewModel.selectedTimeFilter == filter ? Color.accentCyan : Color.bgCardHover)
-                .foregroundColor(viewModel.selectedTimeFilter == filter ? .bgPrimary : .textPrimary)
-                .cornerRadius(6)
-        }
         .buttonStyle(.plain)
     }
+
+    @ViewBuilder
+    var tabContent: some View {
+        switch selectedTab {
+        case 0: LiveSignalsView(viewModel: viewModel, coordinator: coordinator, selectedSignal: $selectedSignal, selectedTrade: $selectedTrade, showTradeSheet: $showTradeSheet, isNotificationBannerDismissed: $isNotificationBannerDismissed)
+        case 1: InsightsView(viewModel: viewModel)
+        case 2: HistoryView(viewModel: viewModel, selectedTrade: $selectedTrade, showTradeSheet: $showTradeSheet)
+        case 3: PerformanceView(viewModel: viewModel)
+        case 4: SystemLogsView(viewModel: viewModel)
+        case 5: SettingsView(viewModel: viewModel, coordinator: coordinator)
+        default: Text("Coming Soon").foregroundColor(.textMuted)
+        }
+    }
+}
+
+// MARK: - Performance View
+struct PerformanceView: View {
+    @ObservedObject var viewModel: DashboardViewModel
     
-    func tradeRow(_ trade: TradeRecord, isActive: Bool) -> some View {
-        let isBuy = trade.type == .buy
-        let pnlColor: Color = (trade.pnl ?? 0) >= 0 ? .accentGreen : .accentRed
-        
-        return Button(action: {
-            selectedTrade = trade
-            showTradeSheet = true
-        }) {
-            #if os(iOS)
-            VStack(alignment: .leading, spacing: 8) {
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
                 HStack {
-                    Text(trade.symbol).font(.headline)
+                    Text("PERFORMANCE METRICS")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundColor(.accentCyan)
+                        .tracking(2)
                     Spacer()
-                    Text(trade.type.displayName)
-                        .foregroundColor(isBuy ? .green : .red)
-                        .font(.caption)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(isBuy ? Color.green.opacity(0.2) : Color.red.opacity(0.2))
-                        .cornerRadius(4)
                 }
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text("Entry").font(.caption).foregroundColor(.gray)
-                        Text(String(format: "%@%.5f", viewModel.currencySymbol, trade.entryPrice)).font(.subheadline).monospacedDigit()
-                    }
-                    Spacer()
-                    if let exitPrice = trade.exitPrice {
-                        VStack(alignment: .trailing) {
-                            Text("Exit").font(.caption).foregroundColor(.gray)
-                            Text(String(format: "%@%.5f", viewModel.currencySymbol, exitPrice)).font(.subheadline).monospacedDigit()
-                        }
-                    } else {
-                        TagBadge(text: trade.status.rawValue.uppercased(), color: trade.status == .active ? .accentCyan : .accentGold)
-                    }
-                    if let pnl = trade.pnl {
-                        VStack(alignment: .trailing) {
-                            Text("P&L").font(.caption).foregroundColor(.gray)
-                            Text(String(format: "%@%@%.2f", pnl >= 0 ? "+" : "", viewModel.currencySymbol, pnl))
-                                .foregroundColor(pnl >= 0 ? .green : .red)
-                                .bold().monospacedDigit()
-                        }
-                    }
-                }
-            }
-            .padding(.vertical, 4)
-            #else
-            HStack {
-                Text(trade.symbol)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.textPrimary)
-                    .frame(width: 90, alignment: .leading)
                 
-                TagBadge(text: trade.type.displayName, color: isBuy ? .accentGreen : .accentRed)
-                    .frame(width: 60, alignment: .leading)
-                
-                Text(String(format: "%@%.5f", viewModel.currencySymbol, trade.entryPrice))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.textSecondary)
-                    .frame(width: 110, alignment: .leading)
-                
-                Group {
-                    if let exit = trade.exitPrice {
-                        Text(String(format: "%@%.5f", viewModel.currencySymbol, exit))
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.textSecondary)
-                    } else {
-                        TagBadge(text: trade.status.rawValue.uppercased(), color: trade.status == .active ? .accentCyan : .accentGold)
-                    }
-                }
-                .frame(width: 110, alignment: .leading)
-                
-                Group {
-                    if let pnl = trade.pnl {
-                        Text(String(format: "%@%@%.2f", pnl >= 0 ? "+" : "", viewModel.currencySymbol, pnl))
-                            .font(.system(size: 12, weight: .bold, design: .monospaced))
-                            .foregroundColor(pnlColor)
-                    } else {
-                        Text("—").foregroundColor(.textMuted)
-                    }
-                }
-                .frame(width: 110, alignment: .leading)
-                
-                Group {
-                    if let pnl = trade.pnl {
-                        if pnl > 0 { TagBadge(text: "WIN", color: .accentGreen) }
-                        else if pnl < 0 { TagBadge(text: "LOSS", color: .accentRed) }
-                        else { TagBadge(text: "BREAK", color: .textMuted) }
-                    } else {
-                        Text("—").foregroundColor(.textMuted)
-                    }
-                }
-                .frame(width: 70, alignment: .leading)
-                
-                Spacer()
-            }
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-            #endif
-        }
-        .buttonStyle(.plain)
-    }
-    
-    var performanceView: some View {
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(spacing: 20) {
-                    HStack {
-                        Text("PERFORMANCE ANALYTICS")
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                            .foregroundColor(.accentCyan)
-                            .tracking(2)
-                        Spacer()
-                        HStack(spacing: 6) {
-                            ForEach(DashboardTimeFilter.allCases, id: \.self) { f in
-                                Button(action: { viewModel.updateTimeFilter(f) }) {
-                                    Text(f.rawValue)
-                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                        .padding(.horizontal, 10).padding(.vertical, 5)
-                                        .background(viewModel.selectedTimeFilter == f
-                                                    ? Color.accentCyan : Color.bgCardHover)
-                                        .foregroundColor(viewModel.selectedTimeFilter == f
-                                                          ? .bgPrimary : .textSecondary)
-                                        .cornerRadius(5)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 16)
-                    
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            StatBox(title: "Total Trades", value: "\(viewModel.totalTrades)", accentColor: .accentCyan, icon: "chart.bar.fill")
-                            StatBox(title: "Return on Equity", value: String(format: "%.1f%%", viewModel.winRate), accentColor: viewModel.winRate >= 0 ? .accentGreen : .accentRed, icon: "checkmark.circle.fill")
-                            StatBox(title: "Profit Factor", value: String(format: "%.2f", viewModel.profitFactor), accentColor: .accentGold, icon: "multiply.circle.fill")
-                            StatBox(title: "Net P&L", value: viewModel.totalPnLString, accentColor: viewModel.totalPnLColor, icon: "chart.line.uptrend.xyaxis")
-                            StatBox(title: "Today's P&L", value: viewModel.todayPnLString, accentColor: viewModel.todayPnLColor, icon: "calendar.badge.clock")
-                            StatBox(title: "Avg Win", value: String(format: "%@%.2f", viewModel.currencySymbol, viewModel.avgWin), accentColor: .accentGreen, icon: "arrow.up.right")
-                            StatBox(title: "Avg Loss", value: String(format: "%@%.2f", viewModel.currencySymbol, viewModel.avgLoss), accentColor: .accentRed, icon: "arrow.down.right")
-                            StatBox(title: "Max Drawdown", value: String(format: "%@%.2f", viewModel.currencySymbol, viewModel.maxDrawdown), accentColor: .accentRed, icon: "arrow.down.to.line")
-                        }
-                        .padding(.horizontal, 20)
+                HStack(spacing: 16) {
+                    VStack(spacing: 16) {
+                        let dailyPnL = viewModel.totalDailyPnL
+                        StatBox(title: "Total P&L", value: String(format: "KES %.2f", dailyPnL), accentColor: dailyPnL >= 0 ? .accentGreen : .accentRed, icon: "dollarsign.circle.fill")
+                        StatBox(title: "Win Rate", value: String(format: "%.1f%%", viewModel.winRate), accentColor: .accentGreen, icon: "target")
                     }
                     
-                    HStack(alignment: .top, spacing: 14) {
-                        GlassCard {
-                            VStack(alignment: .leading, spacing: 14) {
-                                sectionHeader("WIN / LOSS BREAKDOWN", icon: "chart.pie.fill", color: .accentCyan)
-                                
-                                let wins = viewModel.tradeHistory.filter { ($0.pnl ?? 0) > 0 }.count
-                                let losses = viewModel.tradeHistory.filter { ($0.pnl ?? 0) < 0 }.count
-                                let total = max(wins + losses, 1)
-                                
-                                GeometryReader { g in
-                                    HStack(spacing: 2) {
-                                        RoundedRectangle(cornerRadius: 3)
-                                            .fill(Color.accentGreen)
-                                            .frame(width: g.size.width * CGFloat(wins) / CGFloat(total))
-                                        RoundedRectangle(cornerRadius: 3)
-                                            .fill(Color.accentRed)
-                                    }
-                                }
-                                .frame(height: 10)
-                                
-                                HStack {
-                                    HStack(spacing: 6) {
-                                        Circle().fill(Color.accentGreen).frame(width: 8, height: 8)
-                                        Text("Wins: \(wins)")
-                                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                            .foregroundColor(.accentGreen)
-                                    }
-                                    Spacer()
-                                    HStack(spacing: 6) {
-                                        Circle().fill(Color.accentRed).frame(width: 8, height: 8)
-                                        Text("Losses: \(losses)")
-                                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                            .foregroundColor(.accentRed)
-                                    }
-                                }
-                                
-                                Divider().background(Color.borderSubtle)
-                                
-                                perfRow(label: "Best Trade", value: String(format: "+%@%.2f", viewModel.currencySymbol, viewModel.bestTrade), color: .accentGreen)
-                                perfRow(label: "Worst Trade", value: String(format: "-%@%.2f", viewModel.currencySymbol, abs(viewModel.worstTrade)), color: .accentRed)
-                                perfRow(label: "Avg Duration", value: viewModel.avgTradeDuration)
-                                perfRow(label: "Profit Factor", value: String(format: "%.2f", viewModel.profitFactor), color: .accentGold)
-                            }
-                            .padding(16)
-                        }
+                    VStack(spacing: 16) {
+                        StatBox(title: "Profit Factor", value: String(format: "%.2f", viewModel.profitFactor), accentColor: .accentGold, icon: "chart.line.uptrend.xyaxis")
+                        StatBox(title: "Avg Trade", value: String(format: "KES %.2f", viewModel.totalPnL / Double(max(1, viewModel.totalTrades))), accentColor: .accentCyan, icon: "clock.fill")
+                    }
+                }
+                
+                GlassCard {
+                    VStack(alignment: .leading, spacing: 16) {
+                        sectionHeader("TRADE DISTRIBUTION", icon: "chart.pie.fill", color: .accentPurple)
+                        Divider().background(Color.borderSubtle)
                         
-                        GlassCard {
-                            VStack(alignment: .leading, spacing: 14) {
-                                sectionHeader("BY DIRECTION", icon: "arrow.up.arrow.down.circle.fill", color: .accentPurple)
-                                
-                                let buyTrades = viewModel.tradeHistory.filter { $0.type == .buy }
-                                let sellTrades = viewModel.tradeHistory.filter { $0.type == .sell }
-                                let buyWins = buyTrades.filter { ($0.pnl ?? 0) > 0 }.count
-                                let sellWins = sellTrades.filter { ($0.pnl ?? 0) > 0 }.count
-                                let buyPnL = buyTrades.compactMap(\.pnl).reduce(0, +)
-                                let sellPnL = sellTrades.compactMap(\.pnl).reduce(0, +)
-                                
-                                directionBlock(label: "LONG (BUY)", trades: buyTrades.count, wins: buyWins, pnl: buyPnL, color: .accentGreen)
-                                
-                                Divider().background(Color.borderSubtle)
-                                
-                                directionBlock(label: "SHORT (SELL)", trades: sellTrades.count, wins: sellWins, pnl: sellPnL, color: .accentRed)
-                            }
-                            .padding(16)
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                    
-                    GlassCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            sectionHeader("PERFORMANCE BY SYMBOL", icon: "list.bullet.rectangle.fill", color: .accentGold)
-                            
-                            if viewModel.tradeHistory.isEmpty {
-                                HStack {
-                                    Spacer()
-                                    Text("No completed trades yet")
-                                        .foregroundColor(.textMuted)
-                                        .font(.subheadline)
-                                        .padding(.vertical, 20)
-                                    Spacer()
-                                }
-                            } else {
-                                HStack {
-                                    Text("SYMBOL").tableHeader(width: 90)
-                                    Text("TRADES").tableHeader(width: 60)
-                                    Text("WINS").tableHeader(width: 60)
-                                    Text("WIN %").tableHeader(width: 70)
-                                    Text("NET P&L").tableHeader(width: 100)
-                                    Spacer()
-                                }
-                                .padding(.bottom, 4)
-                                
-                                Divider().background(Color.borderSubtle)
-                                
-                                let grouped = Dictionary(grouping: viewModel.tradeHistory, by: \.symbol)
-                                let sorted = grouped.sorted { a, b in
-                                    let pnlA = a.value.compactMap(\.pnl).reduce(0, +)
-                                    let pnlB = b.value.compactMap(\.pnl).reduce(0, +)
-                                    return pnlA > pnlB
-                                }
-                                
-                                ForEach(sorted, id: \.key) { symbol, trades in
-                                    let wins = trades.filter { ($0.pnl ?? 0) > 0 }.count
-                                    let pnl = trades.compactMap(\.pnl).reduce(0, +)
-                                    let winPct = trades.isEmpty ? 0.0 : Double(wins) / Double(trades.count) * 100
-                                    
-                                    HStack {
-                                        Text(symbol)
-                                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                            .foregroundColor(.textPrimary)
-                                            .frame(width: 90, alignment: .leading)
-                                        Text("\(trades.count)")
-                                            .font(.system(size: 12, design: .monospaced))
-                                            .foregroundColor(.textSecondary)
-                                            .frame(width: 60, alignment: .leading)
-                                        Text("\(wins)")
-                                            .font(.system(size: 12, design: .monospaced))
-                                            .foregroundColor(.accentGreen)
-                                            .frame(width: 60, alignment: .leading)
-                                        Text(String(format: "%.0f%%", winPct))
-                                            .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                            .foregroundColor(winPct >= 50 ? .accentGreen : .accentRed)
-                                            .frame(width: 70, alignment: .leading)
-                                        Text(String(format: "%@%@%.2f", pnl >= 0 ? "+" : "", viewModel.currencySymbol, pnl))
-                                            .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                            .foregroundColor(pnl >= 0 ? .accentGreen : .accentRed)
-                                            .frame(width: 100, alignment: .leading)
-                                        
-                                        GeometryReader { geo in
-                                            let allPnLs = sorted.map { $0.value.compactMap(\.pnl).reduce(0, +) }
-                                            let maxAbs = allPnLs.map(abs).max() ?? 1
-                                            let ratio = CGFloat(abs(pnl) / maxAbs)
-                                            HStack(spacing: 0) {
-                                                if pnl >= 0 {
-                                                    RoundedRectangle(cornerRadius: 2)
-                                                        .fill(Color.accentGreen.opacity(0.6))
-                                                        .frame(width: geo.size.width * ratio)
-                                                } else {
-                                                    RoundedRectangle(cornerRadius: 2)
-                                                        .fill(Color.accentRed.opacity(0.6))
-                                                        .frame(width: geo.size.width * ratio)
-                                                }
-                                                Spacer()
-                                            }
-                                        }
-                                        .frame(height: 6)
-                                    }
-                                    .padding(.vertical, 6)
-                                    
-                                    Divider().background(Color.borderSubtle)
-                                }
-                            }
-                        }
-                        .padding(16)
-                    }
-                    .padding(.horizontal, 20)
-                    
-                    GlassCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            sectionHeader("CUMULATIVE P&L", icon: "waveform.path.ecg", color: .accentCyan)
-                            
-                            if viewModel.tradeHistory.isEmpty {
-                                HStack {
-                                    Spacer()
-                                    Text("No trade data yet")
-                                        .foregroundColor(.textMuted)
-                                        .font(.subheadline)
-                                        .padding(.vertical, 20)
-                                    Spacer()
-                                }
-                            } else {
-                                let sortedTrades = viewModel.tradeHistory.sorted { $0.entryTime < $1.entryTime }
-                                let cumulative: [Double] = sortedTrades.reduce(into: []) { acc, t in
-                                    let previous = acc.last ?? 0
-                                    acc.append(previous + (t.pnl ?? 0))
-                                }
-                                let minVal = cumulative.min() ?? 0
-                                let maxVal = cumulative.max() ?? 1
-                                let range = max(maxVal - minVal, 1)
-                                
-                                GeometryReader { geo in
-                                    let w = geo.size.width
-                                    let h = geo.size.height
-                                    let step = w / CGFloat(max(cumulative.count - 1, 1))
-                                    
-                                    ZStack {
-                                        ForEach(0..<5) { i in
-                                            let y = h * CGFloat(i) / 4
-                                            Path { p in
-                                                p.move(to: CGPoint(x: 0, y: y))
-                                                p.addLine(to: CGPoint(x: w, y: y))
-                                            }
-                                            .stroke(Color.white.opacity(0.04), lineWidth: 1)
-                                        }
-                                        
-                                        let zeroY = h - h * CGFloat((0 - minVal) / range)
-                                        Path { p in
-                                            p.move(to: CGPoint(x: 0, y: zeroY))
-                                            p.addLine(to: CGPoint(x: w, y: zeroY))
-                                        }
-                                        .stroke(Color.white.opacity(0.15), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                                        
-                                        if cumulative.count > 1 {
-                                            Path { p in
-                                                for (i, val) in cumulative.enumerated() {
-                                                    let x = CGFloat(i) * step
-                                                    let y = h - h * CGFloat((val - minVal) / range)
-                                                    if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
-                                                    else { p.addLine(to: CGPoint(x: x, y: y)) }
-                                                }
-                                            }
-                                            .stroke(
-                                                LinearGradient(
-                                                    colors: [Color.accentCyan, Color.accentPurple],
-                                                    startPoint: .leading, endPoint: .trailing
-                                                ),
-                                                style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
-                                            )
-                                            .shadow(color: .accentCyan.opacity(0.4), radius: 4)
-                                        }
-                                    }
-                                }
-                                .frame(height: 140)
-                                .padding(.vertical, 4)
-                                
-                                HStack {
-                                    Text("Trade #1")
-                                        .font(.caption2).foregroundColor(.textMuted)
-                                    Spacer()
-                                    Text("Trade #\(cumulative.count)")
-                                        .font(.caption2).foregroundColor(.textMuted)
-                                }
-                            }
-                        }
-                        .padding(16)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 20)
-                }
-                .frame(minHeight: geometry.size.height)
-            }
-        }
-    }
-    
-    private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(color)
-            Text(title)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundColor(.textMuted)
-                .tracking(1.5)
-        }
-    }
-    
-    private func perfRow(label: String, value: String, color: Color = .textPrimary) -> some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(.textSecondary)
-            Spacer()
-            Text(value)
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                .foregroundColor(color)
-        }
-    }
-    
-    private func directionBlock(label: String, trades: Int, wins: Int, pnl: Double, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                TagBadge(text: label, color: color)
-                Spacer()
-                Text("\(trades) trades")
-                    .font(.caption).foregroundColor(.textMuted)
-            }
-            HStack(spacing: 20) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Wins").font(.caption2).foregroundColor(.textMuted)
-                    Text("\(wins)").font(.system(size: 16, weight: .bold)).foregroundColor(.accentGreen)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Win %").font(.caption2).foregroundColor(.textMuted)
-                    let pct = trades > 0 ? Double(wins) / Double(trades) * 100 : 0
-                    Text(String(format: "%.0f%%", pct))
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(pct >= 50 ? .accentGreen : .accentRed)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Net P&L").font(.caption2).foregroundColor(.textMuted)
-                    Text(String(format: "%@%@%.2f", pnl >= 0 ? "+" : "", viewModel.currencySymbol, pnl))
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(pnl >= 0 ? .accentGreen : .accentRed)
-                }
-            }
-        }
-    }
-    
-    // MARK: - Live Signals
-    var settingsView: some View {
-        #if os(iOS)
-        NavigationView {
-            Form {
-                riskSection
-                scalpingConfigSection
-                elitePrecisionSection
-                tradingPairsSection
-                mt5APISection
-                igAPISection
-                notificationsSection
-                saveButtonSection
-            }
-            .navigationTitle("Settings")
-        }
-        #else
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        Text("SETTINGS")
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                            .foregroundColor(.accentCyan)
-                            .tracking(2)
-                        Spacer()
-                        Button(action: { 
-                            // Ensure ScalpingConfig is updated before saving
-                            ScalpingConfig.shared.confidenceThreshold = viewModel.scalpingConfig.confidenceThreshold
-                            ScalpingConfig.shared.spreadTolerance = viewModel.scalpingConfig.spreadTolerance
-                            ScalpingConfig.shared.minVolatilityATR = viewModel.scalpingConfig.minVolatilityATR
-                            ScalpingConfig.shared.minVolumeRatio = viewModel.scalpingConfig.minVolumeRatio
-                            ScalpingConfig.shared.cooldownSeconds = viewModel.scalpingConfig.cooldownSeconds
-                            ScalpingConfig.shared.minConfluencePillars = viewModel.scalpingConfig.minConfluencePillars
-                            ScalpingConfig.shared.brokerSuffix = viewModel.scalpingConfig.brokerSuffix
-                            ScalpingConfig.shared.enableHourlyLimit = viewModel.enableHourlyLimit
-                            ScalpingConfig.shared.maxHourlyTrades = Int(viewModel.maxHourlyTrades)
-                            
-                            // V10.0 Save Sync
-                            ScalpingConfig.shared.enableOrderFlowFilter = viewModel.scalpingConfig.enableOrderFlowFilter
-                            ScalpingConfig.shared.orderFlowThreshold = viewModel.scalpingConfig.orderFlowThreshold
-                            ScalpingConfig.shared.enablePullbackEntry = viewModel.scalpingConfig.enablePullbackEntry
-                            ScalpingConfig.shared.pullbackEMAPeriod = viewModel.scalpingConfig.pullbackEMAPeriod
-                            ScalpingConfig.shared.rocPeriod = viewModel.scalpingConfig.rocPeriod
-                            ScalpingConfig.shared.enableMLTrendFilter = viewModel.scalpingConfig.enableMLTrendFilter
-                            ScalpingConfig.shared.mlConfidenceThreshold = viewModel.scalpingConfig.mlConfidenceThreshold
-                            ScalpingConfig.shared.enableSwingSL = viewModel.scalpingConfig.enableSwingSL
-                            ScalpingConfig.shared.swingLookback = viewModel.scalpingConfig.swingLookback
-                            ScalpingConfig.shared.volatilityMultiplierMin = viewModel.scalpingConfig.volatilityMultiplierMin
-                            
-                            // V10.0 Partial TP Sync
-                            ScalpingConfig.shared.partialTP1_Pips = viewModel.scalpingConfig.partialTP1_Pips
-                            ScalpingConfig.shared.partialTP2_Pips = viewModel.scalpingConfig.partialTP2_Pips
-                            ScalpingConfig.shared.partialTP3_Pips = viewModel.scalpingConfig.partialTP3_Pips
-                            
-                            // Strategy Weights Sync
-                            ScalpingConfig.shared.weightHTFAlignment = viewModel.scalpingConfig.weightHTFAlignment
-                            ScalpingConfig.shared.weightMomentumExhaustion = viewModel.scalpingConfig.weightMomentumExhaustion
-                            ScalpingConfig.shared.weightVolumeSurge = viewModel.scalpingConfig.weightVolumeSurge
-                            ScalpingConfig.shared.weightEMAStack = viewModel.scalpingConfig.weightEMAStack
-                            ScalpingConfig.shared.weightBollingerRejection = viewModel.scalpingConfig.weightBollingerRejection
-                            ScalpingConfig.shared.weightCCICycle = viewModel.scalpingConfig.weightCCICycle
-                            ScalpingConfig.shared.weightSARTrend = viewModel.scalpingConfig.weightSARTrend
-                            ScalpingConfig.shared.weightMomentumSurge = viewModel.scalpingConfig.weightMomentumSurge
-                            ScalpingConfig.shared.weightOrderFlow = viewModel.scalpingConfig.weightOrderFlow
-                            ScalpingConfig.shared.weightMLConfirmed = viewModel.scalpingConfig.weightMLConfirmed
-                            ScalpingConfig.shared.fixedSLPips = viewModel.scalpingConfig.fixedSLPips
-                            ScalpingConfig.shared.enableRRCheck = viewModel.scalpingConfig.enableRRCheck
-                            ScalpingConfig.shared.minRRRatio = viewModel.scalpingConfig.minRRRatio
-                            
-                            viewModel.saveSettings() 
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 13))
-                                Text("SAVE ALL")
-                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .tracking(1)
-                            }
-                            .foregroundColor(.bgPrimary)
-                            .padding(.horizontal, 14).padding(.vertical, 7)
-                            .background(Color.accentCyan)
-                            .cornerRadius(7)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 14)
-                    
-                    Divider().background(Color.borderSubtle)
-                    
-                    HStack(alignment: .top, spacing: 14) {
-                        VStack(spacing: 14) {
-                            // RISK MANAGEMENT CARD
-                            GlassCard {
-                                VStack(alignment: .leading, spacing: 14) {
-                                    sectionHeader("RISK MANAGEMENT", icon: "shield.fill", color: .accentRed)
-                                    Divider().background(Color.borderSubtle)
-                                    
-                                    settingsRow("Account Balance") {
-                                        HStack(spacing: 4) {
-                                            Text(viewModel.currencySymbol).foregroundColor(.textMuted).font(.subheadline)
-                                            HStack {
-                                                Text(String(format: "KES %.2f", viewModel.accountBalance))
-                                                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(.accentCyan)
-                                                Spacer()
-                                                Button(action: {
-                                                    Task { await viewModel.refreshAccountInfo() }
-                                                }) {
-                                                    Image(systemName: "arrow.clockwise")
-                                                        .font(.caption2)
-                                                        .foregroundColor(.accentCyan)
-                                                }
-                                                .buttonStyle(.plain)
-
-                                                Image(systemName: "lock.fill")
-                                                    .font(.caption2)
-                                                    .foregroundColor(.textMuted)
-                                            }
-                                            .padding(8)
-                                            .background(Color.black.opacity(0.2))
-                                            .cornerRadius(4)
-                                                .frame(width: 120)
-                                        }
-                                    }
-                                    settingsRow("Risk per Trade") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.riskPerTrade, in: 0.005...0.10, step: 0.005)
-                                                .frame(width: 110)
-                                            Text(String(format: "%.1f%%", viewModel.riskPerTrade * 100))
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentGold)
-                                                .frame(width: 42, alignment: .trailing)
-                                        }
-                                    }
-                                    settingsRow("Max Daily Risk") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.maxDailyRisk, in: 0.01...0.20, step: 0.005)
-                                                .frame(width: 110)
-                                            Text(String(format: "%.1f%%", viewModel.maxDailyRisk * 100))
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentRed)
-                                                .frame(width: 42, alignment: .trailing)
-                                        }
-                                    }
-                                    settingsRow("Max Concurrent Trades") {
-                                        Stepper("\(viewModel.maxConcurrentTrades)",
-                                                value: $viewModel.maxConcurrentTrades, in: 1...10)
-                                            .labelsHidden()
-                                            .overlay(
-                                                Text("\(viewModel.maxConcurrentTrades)")
-                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(.accentCyan)
-                                                    .frame(width: 28, alignment: .center)
-                                                    .offset(x: -46)
-                                            )
-                                    }
-
-                                    Divider().background(Color.borderSubtle)
-
-                                    settingsRow("Enable Hourly Limit") {
-                                        Toggle("", isOn: $viewModel.enableHourlyLimit)
-                                            .toggleStyle(SwitchToggleStyle(tint: .accentRed))
-                                            .scaleEffect(0.8)
-                                            .labelsHidden()
-                                    }
-
-                                    settingsRow("Max Trades per Hour") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.maxHourlyTrades, in: 1...15, step: 1)
-                                                .frame(width: 100)
-                                                .disabled(!viewModel.enableHourlyLimit)
-                                            Text("\(Int(viewModel.maxHourlyTrades))")
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                .foregroundColor(viewModel.enableHourlyLimit ? .accentRed : .textMuted)
-                                                .frame(width: 20, alignment: .trailing)
-                                        }
-                                    }
-                                    .opacity(viewModel.enableHourlyLimit ? 1.0 : 0.5)
-                                }
-                                .padding(16)
-                            }
-                            
-                            // SCALPING CONFIGURATION CARD
-                            GlassCard {
-                                VStack(alignment: .leading, spacing: 14) {
-                                    sectionHeader("SCALPING CONFIGURATION", icon: "gauge.high", color: .accentGold)
-                                    Divider().background(Color.borderSubtle)
-                                    
-                                    settingsRow("Manual Volume/Lot") {
-                                        HStack(spacing: 8) {
-                                            Toggle("", isOn: $viewModel.scalpingConfig.useManualLot)
-                                                .toggleStyle(SwitchToggleStyle(tint: .accentGreen))
-                                                .scaleEffect(0.8)
-                                                .labelsHidden()
-                                            
-                                            if viewModel.scalpingConfig.useManualLot {
-                                                Picker("", selection: $viewModel.scalpingConfig.manualLotSize) {
-                                                    ForEach([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 1.00], id: \.self) { size in
-                                                        Text(String(format: "%.2f", size)).tag(size)
-                                                    }
-                                                }
-                                                .pickerStyle(MenuPickerStyle())
-                                                .frame(width: 80)
-                                                .background(Color.black.opacity(0.2))
-                                                .cornerRadius(4)
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                            }
-                                        }
-                                    }
-
-                                    settingsRow("Confidence Threshold") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.scalpingConfig.confidenceThreshold, in: 5...95, step: 1)
-                                                .frame(width: 120)
-                                            Text("\(Int(viewModel.scalpingConfig.confidenceThreshold))%")
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentGold)
-                                                .frame(width: 36, alignment: .trailing)
-                                        }
-                                    }
-                                    
-                                    settingsRow("Spread Tolerance") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.scalpingConfig.spreadTolerance, in: 1...30, step: 1)
-                                                .frame(width: 120)
-                                            Text("\(Int(viewModel.scalpingConfig.spreadTolerance)) bps")
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentGold)
-                                                .frame(width: 42, alignment: .trailing)
-                                        }
-                                    }
-                                    
-                                    settingsRow("Min Signal Score") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.scalpingConfig.minScore, in: 10...50, step: 1)
-                                                .frame(width: 120)
-                                            Text("\(Int(viewModel.scalpingConfig.minScore))")
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentGold)
-                                                .frame(width: 30, alignment: .trailing)
-                                        }
-                                    }
-                                    
-                                    settingsRow("Volatility Threshold") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.scalpingConfig.minVolatilityATR, in: 0.005...0.2, step: 0.005)
-                                                .frame(width: 120)
-                                            Text(String(format: "%.3f%%", viewModel.scalpingConfig.minVolatilityATR))
-                                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentGold)
-                                                .frame(width: 50, alignment: .trailing)
-                                        }
-                                    }
-                                    .help("Minimum ATR % required to consider a trade. Set lower for more signals in quiet markets.")
-
-                                    settingsRow("Volume Ratio") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.scalpingConfig.minVolumeRatio, in: 0.0...3.0, step: 0.1)
-                                                .frame(width: 120)
-                                            Text(String(format: "%.1fx", viewModel.scalpingConfig.minVolumeRatio))
-                                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentGold)
-                                                .frame(width: 50, alignment: .trailing)
-                                        }
-                                    }
-                                    .help("Minimum relative volume surge (Institutional Presence) required to trade. Default: 1.3x.")
-
-                                    settingsRow("Broker Suffix") {
-                                        HStack(spacing: 8) {
-                                            TextField("e.g. m", text: $viewModel.scalpingConfig.brokerSuffix)
-                                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                                                .frame(width: 60)
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                            Spacer()
-                                        }
-                                    }
-                                    .help("Appends this suffix to symbols for execution (e.g. EURUSD -> EURUSDm for Exness Real).")
-
-                                    settingsRow("Cooldown (seconds)") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.scalpingConfig.cooldownSeconds, in: 30...600, step: 15)
-                                                .frame(width: 120)
-                                            Text("\(Int(viewModel.scalpingConfig.cooldownSeconds))s")
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentGold)
-                                                .frame(width: 40, alignment: .trailing)
-                                        }
-                                    }
-
-                                    settingsRow("Trend Confluence") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.mandatoryConfluenceLevel, in: 0...3, step: 1)
-                                                .frame(width: 120)
-                                            let levelText = ["None", "H4", "H4+D1", "Elite"][Int(viewModel.mandatoryConfluenceLevel)]
-                                            Text(levelText)
-                                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentGold)
-                                                .frame(width: 50, alignment: .trailing)
-                                        }
-                                        .onChange(of: viewModel.mandatoryConfluenceLevel) { old, newValue in
-                                            viewModel.scalpingConfig.mandatoryConfluenceLevel = Int(newValue)
-                                        }
-                                    }
-                                    
-                                    settingsRow("Strategy Pillars") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: Binding(
-                                                get: { viewModel.scalpingConfig.minConfluencePillars },
-                                                set: { viewModel.scalpingConfig.minConfluencePillars = $0 }
-                                            ), in: 1...7, step: 1)
-                                            .frame(width: 120)
-                                            Text("\(viewModel.scalpingConfig.minConfluencePillars)/7")
-                                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentGold)
-                                                .frame(width: 36, alignment: .trailing)
-                                        }
-                                    }
-                                    .help("Minimum number of strategy pillars that must align to trigger a signal.")
-                                    .help("0: M1 only, 1: H4 alignment, 2: H4+D1 (Recommended), 3: H4+D1+W1 (Elite Only)")
-                                }
-                                .padding(16)
-                            }
-                            
-                            // ELITE PRECISION V10.0 CARD
-                            GlassCard {
-                                VStack(alignment: .leading, spacing: 14) {
-                                    sectionHeader("ELITE PRECISION V10.0", icon: "target", color: .accentCyan)
-                                    Divider().background(Color.borderSubtle)
-                                    
-                                    settingsRow("Order Flow Filter") {
-                                        Toggle("", isOn: $viewModel.scalpingConfig.enableOrderFlowFilter)
-                                            .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
-                                    }
-                                    
-                                    settingsRow("Delta Threshold") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.scalpingConfig.orderFlowThreshold, in: 10...500, step: 5)
-                                                .frame(width: 110)
-                                            Text("\(Int(viewModel.scalpingConfig.orderFlowThreshold))")
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentCyan)
-                                                .frame(width: 42, alignment: .trailing)
-                                        }
-                                    }
-                                    
-                                    settingsRow("Smart Pullback") {
-                                        Toggle("", isOn: $viewModel.scalpingConfig.enablePullbackEntry)
-                                            .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
-                                    }
-                                    
-                                    if viewModel.scalpingConfig.enablePullbackEntry {
-                                        settingsRow("Pullback EMA") {
-                                            Stepper("\(viewModel.scalpingConfig.pullbackEMAPeriod)", value: $viewModel.scalpingConfig.pullbackEMAPeriod, in: 5...100)
-                                        }
-                                    }
-                                    
-                                    settingsRow("ROC Period") {
-                                        Stepper("\(viewModel.scalpingConfig.rocPeriod)", value: $viewModel.scalpingConfig.rocPeriod, in: 1...20)
-                                    }
-                                    
-                                    settingsRow("ML Trend Filter") {
-                                        Toggle("", isOn: $viewModel.scalpingConfig.enableMLTrendFilter)
-                                            .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
-                                    }
-                                    
-                                    if viewModel.scalpingConfig.enableMLTrendFilter {
-                                        settingsRow("ML Threshold") {
-                                            HStack(spacing: 8) {
-                                                Slider(value: $viewModel.scalpingConfig.mlConfidenceThreshold, in: 0.5...0.95, step: 0.05)
-                                                    .frame(width: 110)
-                                                Text(String(format: "%.0f%%", viewModel.scalpingConfig.mlConfidenceThreshold * 100))
-                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(.accentCyan)
-                                                    .frame(width: 42, alignment: .trailing)
-                                            }
-                                        }
-                                    }
-                                    
-                                    settingsRow("Risk/Reward Check") {
-                                        Toggle("", isOn: $viewModel.scalpingConfig.enableRRCheck)
-                                            .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
-                                    }
-                                    
-                                    if viewModel.scalpingConfig.enableRRCheck {
-                                        settingsRow("Min R:R Ratio") {
-                                            HStack(spacing: 8) {
-                                                Slider(value: $viewModel.scalpingConfig.minRRRatio, in: 0.5...5.0, step: 0.1)
-                                                    .frame(width: 110)
-                                                Text(String(format: "%.1f", viewModel.scalpingConfig.minRRRatio))
-                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(.accentCyan)
-                                                    .frame(width: 42, alignment: .trailing)
-                                            }
-                                        }
-                                    }
-                                    
-                                    settingsRow("Fixed Stop Loss (Pips)") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.scalpingConfig.fixedSLPips, in: 5...100, step: 1)
-                                                .frame(width: 110)
-                                            Text("\(Int(viewModel.scalpingConfig.fixedSLPips))")
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentCyan)
-                                                .frame(width: 42, alignment: .trailing)
-                                        }
-                                    }
-                                    
-                                    settingsRow("Volatility Scale Min") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.scalpingConfig.volatilityMultiplierMin, in: 0.1...1.0, step: 0.1)
-                                                .frame(width: 110)
-                                            Text(String(format: "%.1fx", viewModel.scalpingConfig.volatilityMultiplierMin))
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentCyan)
-                                                .frame(width: 42, alignment: .trailing)
-                                        }
-                                    }
-                                    
-                                    Divider().background(Color.borderSubtle)
-                                    
-                                    sectionHeader("PARTIAL TP (50/30/20)", icon: "chart.pie.fill", color: .accentGold)
-                                    
-                                    settingsRow("Level 1 Pips") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.partialTP1_Pips))", value: $viewModel.scalpingConfig.partialTP1_Pips, in: 5...50)
-                                    }
-                                    settingsRow("Level 2 Pips") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.partialTP2_Pips))", value: $viewModel.scalpingConfig.partialTP2_Pips, in: 10...100)
-                                    }
-                                    settingsRow("Level 3 Pips") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.partialTP3_Pips))", value: $viewModel.scalpingConfig.partialTP3_Pips, in: 15...150)
-                                    }
-
-                                    Divider().background(Color.borderSubtle)
-                                    
-                                    sectionHeader("STRATEGY WEIGHTS", icon: "scalemass", color: .accentCyan)
-                                    
-                                    settingsRow("HTF Alignment") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.weightHTFAlignment))", value: $viewModel.scalpingConfig.weightHTFAlignment, in: 0...100)
-                                    }
-                                    settingsRow("Momentum Exhaustion") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.weightMomentumExhaustion))", value: $viewModel.scalpingConfig.weightMomentumExhaustion, in: 0...100)
-                                    }
-                                    settingsRow("Volume Surge") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.weightVolumeSurge))", value: $viewModel.scalpingConfig.weightVolumeSurge, in: 0...100)
-                                    }
-                                    settingsRow("EMA Stack") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.weightEMAStack))", value: $viewModel.scalpingConfig.weightEMAStack, in: 0...100)
-                                    }
-                                    settingsRow("Bollinger Reject") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.weightBollingerRejection))", value: $viewModel.scalpingConfig.weightBollingerRejection, in: 0...100)
-                                    }
-                                    settingsRow("CCI Cycle") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.weightCCICycle))", value: $viewModel.scalpingConfig.weightCCICycle, in: 0...100)
-                                    }
-                                    settingsRow("SAR Trend") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.weightSARTrend))", value: $viewModel.scalpingConfig.weightSARTrend, in: 0...100)
-                                    }
-                                    settingsRow("Momentum Surge") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.weightMomentumSurge))", value: $viewModel.scalpingConfig.weightMomentumSurge, in: 0...100)
-                                    }
-                                    settingsRow("Order Flow") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.weightOrderFlow))", value: $viewModel.scalpingConfig.weightOrderFlow, in: 0...100)
-                                    }
-                                    settingsRow("ML Confirmation") {
-                                        Stepper("\(Int(viewModel.scalpingConfig.weightMLConfirmed))", value: $viewModel.scalpingConfig.weightMLConfirmed, in: 0...100)
-                                    }
-                                }
-                                .padding(16)
-                            }
-                        }
-                        
-                        VStack(spacing: 14) {
-                            // MT5 API CONNECTION CARD (Stellas)
-                            GlassCard(borderColor: viewModel.mt5Connected ? Color.accentCyan.opacity(0.4) : Color.borderSubtle) {
-                                VStack(alignment: .leading, spacing: 14) {
-                                    HStack {
-                                        sectionHeader("MT5 CONNECTION", icon: "chart.bar.fill", color: .accentCyan)
-                                        Spacer()
-                                        HStack(spacing: 5) {
-                                            PulsingDot(color: viewModel.mt5Connected ? .accentGreen : .accentRed)
-                                            Text(viewModel.mt5Connected ? "MT5 READY" : "MT5 OFFLINE")
-                                                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                                .foregroundColor(viewModel.mt5Connected ? .accentGreen : .accentRed)
-                                                .tracking(1)
-                                        }
-                                        .padding(.horizontal, 10).padding(.vertical, 5)
-                                        .background((viewModel.mt5Connected ? Color.accentGreen : Color.accentRed).opacity(0.1))
-                                        .cornerRadius(12)
-                                        .overlay(RoundedRectangle(cornerRadius: 12)
-                                            .strokeBorder((viewModel.mt5Connected ? Color.accentGreen : Color.accentRed).opacity(0.3), lineWidth: 1))
-                                    }
-                                    Divider().background(Color.borderSubtle)
-                                    
-                                    settingsRow("Bridge URL") {
-                                        TextField("http://localhost:8890", text: $viewModel.mt5BridgeURL)
-                                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                                            .frame(width: 200)
-                                    }
-
-                                    settingsRow("Auth Token") {
-                                        SecureField("Bearer Token", text: $viewModel.mt5AuthToken)
-                                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                                            .frame(width: 200)
-                                    }
-                                    
-                                    settingsRow("MT5 Login") {
-                                        TextField("Account Number", text: $viewModel.mt5Login)
-                                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                                            .frame(width: 200)
-                                    }
-                                    
-                                    settingsRow("MT5 Password") {
-                                        SecureField("Password", text: $viewModel.mt5Password)
-                                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                                            .frame(width: 200)
-                                    }
-                                    
-                                    settingsRow("MT5 Server") {
-                                        TextField("Server Name", text: $viewModel.mt5Server)
-                                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                                            .frame(width: 200)
-                                    }
-
-                                    settingsRow("Magic Number") {
-                                        TextField("888888", value: $viewModel.mt5MagicNumber, format: .number)
-                                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                                            .frame(width: 100)
-                                    }
-                                    
-                                    HStack(spacing: 10) {
-                                        Button(action: {
-                                            Task {
-                                                await viewModel.connectToMT5()
-                                            }
-                                        }) {
-                                            HStack(spacing: 6) {
-                                                if viewModel.isConnecting {
-                                                    ProgressView()
-                                                        .scaleEffect(0.5)
-                                                        .tint(.bgPrimary)
-                                                } else {
-                                                    Image(systemName: "bolt.fill")
-                                                }
-                                                Text(viewModel.isConnecting ? "CONNECTING..." : (viewModel.mt5Connected ? "RECHECK MT5" : "CONNECT MT5"))
-                                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                            }
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 8)
-                                            .background(viewModel.isConnecting ? Color.accentCyan.opacity(0.5) : Color.accentCyan)
-                                            .foregroundColor(.bgPrimary)
-                                            .cornerRadius(7)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .disabled(viewModel.isConnecting)
-                                    }
-                                }
-                                .padding(16)
-                            }
-                            
-                            // ACTIVE TRADING PAIRS CARD
-                            GlassCard {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    sectionHeader("ACTIVE TRADING PAIRS", icon: "chart.line.uptrend.xyaxis", color: .accentCyan)
-                                    Divider().background(Color.borderSubtle)
-                                    
-                                    let majorPairs = TradingPair.allCases.filter { !$0.isExotic }.map { $0.rawValue }.sorted()
-                                    let exoticPairs = TradingPair.allCases.filter { $0.isExotic }.map { $0.rawValue }.sorted()
-                                    
-                                    ScrollView {
-                                        VStack(alignment: .leading, spacing: 16) {
-                                            if !majorPairs.isEmpty {
-                                                VStack(alignment: .leading, spacing: 8) {
-                                                    Text("MAJOR PAIRS").font(.system(size: 10, weight: .bold)).foregroundColor(.accentGold)
-                                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 8) {
-                                                        ForEach(majorPairs, id: \.self) { symbol in
-                                                            pairToggle(symbol: symbol)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            
-                                            if !exoticPairs.isEmpty {
-                                                VStack(alignment: .leading, spacing: 8) {
-                                                    Text("EXOTIC PAIRS").font(.system(size: 10, weight: .bold)).foregroundColor(.accentPurple)
-                                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 8) {
-                                                        ForEach(exoticPairs, id: \.self) { symbol in
-                                                            pairToggle(symbol: symbol)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .frame(maxHeight: 250)
-                                    
-                                    HStack {
-                                        Button("Select All") { viewModel.activeSymbols = Set(viewModel.availableSymbols) }
-                                            .font(.caption).foregroundColor(.accentCyan).buttonStyle(.plain)
-                                        Text("·").foregroundColor(.textMuted)
-                                        Button("Clear All") { viewModel.activeSymbols.removeAll() }
-                                            .font(.caption).foregroundColor(.accentRed).buttonStyle(.plain)
-                                        Spacer()
-                                        Text("\(viewModel.activeSymbols.count) active").font(.caption2).foregroundColor(.textMuted)
-                                    }
-                                }
-                                .padding(16)
-                            }
-
-                            // NEWS FILTER CARD (NEW)
-                            GlassCard {
-                                VStack(alignment: .leading, spacing: 14) {
-                                    sectionHeader("NEWS FILTER", icon: "globe.americas.fill", color: .accentGold)
-                                    Divider().background(Color.borderSubtle)
-                                    
-                                    Toggle("Enable News Protection", isOn: $viewModel.scalpingConfig.enableNewsFilter)
-                                        .toggleStyle(SwitchToggleStyle(tint: .accentGold))
-                                    
-                                    settingsRow("Pause Before High (min)") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.scalpingConfig.pauseBeforeHighImpactMinutes, in: 0...120, step: 15)
-                                                .frame(width: 100)
-                                            Text("\(Int(viewModel.scalpingConfig.pauseBeforeHighImpactMinutes))m")
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentGold)
-                                                .frame(width: 40, alignment: .trailing)
-                                        }
-                                    }
-                                    
-                                    settingsRow("Pause Before Medium (min)") {
-                                        HStack(spacing: 8) {
-                                            Slider(value: $viewModel.scalpingConfig.pauseBeforeMediumImpactMinutes, in: 0...60, step: 5)
-                                                .frame(width: 100)
-                                            Text("\(Int(viewModel.scalpingConfig.pauseBeforeMediumImpactMinutes))m")
-                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                .foregroundColor(.accentGold)
-                                                .frame(width: 40, alignment: .trailing)
-                                        }
-                                    }
-
-                                    Toggle("Auto-Raise Spread Tolerance", isOn: $viewModel.scalpingConfig.autoRaiseSpreadDuringNews)
-                                        .font(.caption)
-                                    
-                                    if viewModel.scalpingConfig.autoRaiseSpreadDuringNews {
-                                        settingsRow("News Spread Mult") {
-                                            HStack(spacing: 8) {
-                                                Slider(value: $viewModel.scalpingConfig.newsSpreadMultiplier, in: 1.0...10.0, step: 0.5)
-                                                    .frame(width: 100)
-                                                Text("\(String(format: "%.1f", viewModel.scalpingConfig.newsSpreadMultiplier))x")
-                                                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                                    .foregroundColor(.accentGold)
-                                                    .frame(width: 40, alignment: .trailing)
-                                            }
-                                        }
-                                    }
-                                }
-                                .padding(16)
-                            }
-
-                            // NOTIFICATIONS CARD (macOS)
-                            GlassCard {
-                                VStack(alignment: .leading, spacing: 14) {
-                                    sectionHeader("NOTIFICATIONS & SYSTEM", icon: "bell.badge.fill", color: .accentCyan)
-                                    Divider().background(Color.borderSubtle)
-                                    
-                                    Toggle("Signal Alerts", isOn: $viewModel.notifyOnSignal)
-                                        .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
-                                    Toggle("Trade Executions", isOn: $viewModel.notifyOnTrade)
-                                        .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
-                                    Toggle("Trade Closures", isOn: $viewModel.notifyOnClose)
-                                        .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
-                                    
-                                    Divider().background(Color.borderSubtle)
-                                    
-                                    Button(action: {
-                                        NotificationManager.shared.requestAuthorization()
-                                        // Send dummy to force registration
-                                        let content = UNMutableNotificationContent()
-                                        content.title = "Stellas System Check"
-                                        content.body = "Notification pipe is now active and synced."
-                                        content.sound = .default
-                                        let request = UNNotificationRequest(identifier: "test_mac", content: content, trigger: nil)
-                                        UNUserNotificationCenter.current().add(request)
-                                    }) {
-                                        HStack {
-                                            Image(systemName: "exclamationmark.shield.fill")
-                                            Text("FORCE ENABLE NOTIFICATIONS")
-                                        }
-                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 8)
-                                        .background(Color.accentCyan.opacity(0.1))
-                                        .foregroundColor(.accentCyan)
-                                        .cornerRadius(7)
-                                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.accentCyan.opacity(0.3), lineWidth: 1))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                .padding(16)
-                            }
+                        HStack(spacing: 30) {
+                            directionBlock(label: "LONG", trades: viewModel.totalBuyTrades, wins: viewModel.totalBuyWins, pnl: viewModel.totalBuyPnL, color: .accentGreen)
+                            Divider().frame(height: 80).background(Color.borderSubtle)
+                            directionBlock(label: "SHORT", trades: viewModel.totalSellTrades, wins: viewModel.totalSellWins, pnl: viewModel.totalSellPnL, color: .accentRed)
                         }
                     }
                     .padding(20)
                 }
             }
+            .padding(24)
         }
-        #endif
+        .background(Color.bgPrimary)
     }
     
-    @ViewBuilder
-    func pairToggle(symbol: String) -> some View {
-        let isActive = viewModel.activeSymbols.contains(symbol)
-        Button(action: {
-            if isActive { viewModel.activeSymbols.remove(symbol) }
-            else { viewModel.activeSymbols.insert(symbol) }
-        }) {
-            HStack {
-                Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
-                    .foregroundColor(isActive ? .accentGreen : .textMuted)
-                Text(symbol).font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(isActive ? .textPrimary : .textSecondary)
-            }
-            .padding(6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isActive ? Color.accentGreen.opacity(0.1) : Color.bgCardHover)
-            .cornerRadius(6)
+    private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(color)
+            Text(title)
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(.textPrimary)
+                .tracking(1)
         }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    var mt5APISection: some View {
-        #if os(iOS)
-        Section("MT5 Connection") {
-            TextField("Bridge URL", text: $viewModel.mt5BridgeURL)
-            SecureField("Auth Token", text: $viewModel.mt5AuthToken)
-            TextField("Magic Number", value: $viewModel.mt5MagicNumber, format: .number)
-            Button(action: { Task { await viewModel.connectToMT5() } }) {
-                Label(viewModel.mt5Connected ? "Reconnect MT5" : "Connect MT5", systemImage: "bolt.fill")
-            }
-        }
-        #else
-        EmptyView()
-        #endif
     }
     
-    private func settingsRow<V: View>(_ label: String, @ViewBuilder content: () -> V) -> some View {
+    private func directionBlock(label: String, trades: Int, wins: Int, pnl: Double, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(label).font(.system(size: 10, weight: .black)).foregroundColor(color)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                perfRow(label: "Trades", value: "\(trades)", color: .textPrimary)
+                perfRow(label: "Win Rate", value: String(format: "%.0f%%", trades > 0 ? (Double(wins)/Double(trades)*100) : 0), color: .accentGreen)
+                perfRow(label: "P&L", value: String(format: "KES %.2f", pnl), color: pnl >= 0 ? .accentGreen : .accentRed)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    
+    private func perfRow(label: String, value: String, color: Color) -> some View {
         HStack {
-            Text(label)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(.textSecondary)
+            Text(label).font(.system(size: 10)).foregroundColor(.textSecondary)
             Spacer()
-            content()
+            Text(value).font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundColor(color)
         }
-    }
-    
-    private func updateNotificationSettings() {
-        // Update notification settings based on user preferences
-        if !viewModel.notifyOnSignal && !viewModel.notifyOnTrade && !viewModel.notifyOnClose && !viewModel.notifyOnExpiry {
-            // Disable all notifications
-            NotificationManager.shared.removeAllNotifications()
-        }
-    }
-    
-    @ViewBuilder
-    var riskSection: some View {
-        #if os(iOS)
-        Section("Risk Management") {
-            HStack {
-                Text("Account Balance"); Spacer()
-                HStack {
-                    Text("KES \(String(format: "%.2f", viewModel.accountBalance))")
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Button(action: {
-                        Task { await viewModel.refreshAccountInfo() }
-                    }) {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    Image(systemName: "lock.fill").font(.caption).foregroundColor(.gray)
-                }
-            }
-            HStack {
-                Text("Risk per Trade (%)"); Spacer()
-                TextField("Percentage", value: $viewModel.riskPerTrade, format: .number)
-                    .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
-            }
-            HStack {
-                Text("Max Daily Risk (%)"); Spacer()
-                TextField("Percentage", value: $viewModel.maxDailyRisk, format: .number)
-                    .keyboardType(.decimalPad).multilineTextAlignment(.trailing)
-            }
-            Stepper("Max Concurrent Trades: \(viewModel.maxConcurrentTrades)",
-                    value: $viewModel.maxConcurrentTrades, in: 1...10)
-            
-            Toggle("Enable Hourly Limit", isOn: $viewModel.enableHourlyLimit)
-            if viewModel.enableHourlyLimit {
-                HStack {
-                    Text("Max Trades per Hour"); Spacer()
-                    Slider(value: $viewModel.maxHourlyTrades, in: 1...15, step: 1)
-                    Text("\(Int(viewModel.maxHourlyTrades))")
-                }
-            }
-        }
-        #else
-        EmptyView()
-        #endif
-    }
-    
-    @ViewBuilder
-    var scalpingConfigSection: some View {
-        #if os(iOS)
-        Section("Scalping Configuration") {
-            Toggle("Manual Volume/Lot", isOn: $viewModel.scalpingConfig.useManualLot)
-            
-            if viewModel.scalpingConfig.useManualLot {
-                HStack {
-                    Text("Lot Size"); Spacer()
-                    Picker("", selection: $viewModel.scalpingConfig.manualLotSize) {
-                        ForEach([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 1.00], id: \.self) { size in
-                            Text(String(format: "%.2f", size)).tag(size)
-                        }
-                    }
-                    .pickerStyle(MenuPickerStyle())
-                }
-            }
-
-            HStack {
-                Text("Min Confidence %"); Spacer()
-                Slider(value: $viewModel.scalpingConfig.confidenceThreshold, in: 5...98, step: 1)
-                Text("\(Int(viewModel.scalpingConfig.confidenceThreshold))%")
-            }
-            HStack {
-                Text("Trend Confluence"); Spacer()
-                Slider(value: $viewModel.mandatoryConfluenceLevel, in: 0...3, step: 1)
-                let levelText = ["None", "H4", "H4+D1", "Elite"][Int(viewModel.mandatoryConfluenceLevel)]
-                Text(levelText).font(.caption).foregroundColor(.accentGold)
-            }
-            .onChange(of: viewModel.mandatoryConfluenceLevel) { old, newValue in
-                viewModel.scalpingConfig.mandatoryConfluenceLevel = Int(newValue)
-            }
-            HStack {
-                Text("Spread Tolerance (bps)"); Spacer()
-                Slider(value: $viewModel.scalpingConfig.spreadTolerance, in: 1...30, step: 1)
-                Text("\(Int(viewModel.scalpingConfig.spreadTolerance))")
-            }
-            HStack {
-                Text("Min Signal Score"); Spacer()
-                Slider(value: $viewModel.scalpingConfig.minScore, in: 10...50, step: 1)
-                Text("\(Int(viewModel.scalpingConfig.minScore))")
-            }
-            HStack {
-                Text("Volatility ATR %"); Spacer()
-                Slider(value: $viewModel.scalpingConfig.minVolatilityATR, in: 0.005...0.2, step: 0.005)
-                Text(String(format: "%.3f%%", viewModel.scalpingConfig.minVolatilityATR))
-            }
-            HStack {
-                Text("Broker Suffix"); Spacer()
-                TextField("m", text: $viewModel.scalpingConfig.brokerSuffix)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .frame(width: 60)
-                    .multilineTextAlignment(.trailing)
-            }
-        }
-        #else
-        EmptyView()
-        #endif
-    }
-    
-    @ViewBuilder
-    var elitePrecisionSection: some View {
-        #if os(iOS)
-        Section("Elite Precision V10.0") {
-            Toggle("Order Flow Filter", isOn: $viewModel.scalpingConfig.enableOrderFlowFilter)
-            HStack {
-                Text("Delta Threshold"); Spacer()
-                Slider(value: $viewModel.scalpingConfig.orderFlowThreshold, in: 10...500, step: 5)
-                Text("\(Int(viewModel.scalpingConfig.orderFlowThreshold))")
-            }
-            Toggle("Smart Pullback Entry", isOn: $viewModel.scalpingConfig.enablePullbackEntry)
-            Toggle("ML Trend Filter", isOn: $viewModel.scalpingConfig.enableMLTrendFilter)
-            Toggle("Risk/Reward Check", isOn: $viewModel.scalpingConfig.enableRRCheck)
-            if viewModel.scalpingConfig.enableRRCheck {
-                HStack {
-                    Text("Min R:R Ratio"); Spacer()
-                    Slider(value: $viewModel.scalpingConfig.minRRRatio, in: 0.5...5.0, step: 0.1)
-                    Text(String(format: "%.1f", viewModel.scalpingConfig.minRRRatio))
-                }
-            }
-            HStack {
-                Text("Fixed Stop Loss"); Spacer()
-                Slider(value: $viewModel.scalpingConfig.fixedSLPips, in: 5...100, step: 1)
-                Text("\(Int(viewModel.scalpingConfig.fixedSLPips))")
-            }
-            HStack {
-                Text("Volatility Scale Min"); Spacer()
-                Slider(value: $viewModel.scalpingConfig.volatilityMultiplierMin, in: 0.1...1.0, step: 0.1)
-                Text(String(format: "%.1fx", viewModel.scalpingConfig.volatilityMultiplierMin))
-            }
-            
-            Section("Partial Take Profit") {
-                Stepper("TP1: \(Int(viewModel.scalpingConfig.partialTP1_Pips)) pips", value: $viewModel.scalpingConfig.partialTP1_Pips, in: 5...50)
-                Stepper("TP2: \(Int(viewModel.scalpingConfig.partialTP2_Pips)) pips", value: $viewModel.scalpingConfig.partialTP2_Pips, in: 10...100)
-                Stepper("TP3: \(Int(viewModel.scalpingConfig.partialTP3_Pips)) pips", value: $viewModel.scalpingConfig.partialTP3_Pips, in: 15...150)
-            }
-
-            Section("Strategy Weights") {
-                Stepper("HTF Alignment: \(Int(viewModel.scalpingConfig.weightHTFAlignment))", value: $viewModel.scalpingConfig.weightHTFAlignment, in: 0...100)
-                Stepper("Momentum Exhaust: \(Int(viewModel.scalpingConfig.weightMomentumExhaustion))", value: $viewModel.scalpingConfig.weightMomentumExhaustion, in: 0...100)
-                Stepper("Volume Surge: \(Int(viewModel.scalpingConfig.weightVolumeSurge))", value: $viewModel.scalpingConfig.weightVolumeSurge, in: 0...100)
-                Stepper("EMA Stack: \(Int(viewModel.scalpingConfig.weightEMAStack))", value: $viewModel.scalpingConfig.weightEMAStack, in: 0...100)
-                Stepper("Bollinger Reject: \(Int(viewModel.scalpingConfig.weightBollingerRejection))", value: $viewModel.scalpingConfig.weightBollingerRejection, in: 0...100)
-                Stepper("CCI Cycle: \(Int(viewModel.scalpingConfig.weightCCICycle))", value: $viewModel.scalpingConfig.weightCCICycle, in: 0...100)
-                Stepper("SAR Trend: \(Int(viewModel.scalpingConfig.weightSARTrend))", value: $viewModel.scalpingConfig.weightSARTrend, in: 0...100)
-                Stepper("Momentum Surge: \(Int(viewModel.scalpingConfig.weightMomentumSurge))", value: $viewModel.scalpingConfig.weightMomentumSurge, in: 0...100)
-                Stepper("Order Flow: \(Int(viewModel.scalpingConfig.weightOrderFlow))", value: $viewModel.scalpingConfig.weightOrderFlow, in: 0...100)
-                Stepper("ML Prediction: \(Int(viewModel.scalpingConfig.weightMLConfirmed))", value: $viewModel.scalpingConfig.weightMLConfirmed, in: 0...100)
-            }
-        }
-        #else
-        EmptyView()
-        #endif
-    }
-    
-    @ViewBuilder
-    var tradingPairsSection: some View {
-        #if os(iOS)
-        Group {
-            let majorPairs = TradingPair.allCases.filter { !$0.isExotic }.map { $0.rawValue }.sorted()
-            let exoticPairs = TradingPair.allCases.filter { $0.isExotic }.map { $0.rawValue }.sorted()
-            
-            Section("Major Pairs") {
-                ForEach(majorPairs, id: \.self) { symbol in
-                    HStack {
-                        Text(symbol); Spacer()
-                        if viewModel.activeSymbols.contains(symbol) {
-                            Image(systemName: "checkmark").foregroundColor(.green)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if viewModel.activeSymbols.contains(symbol) {
-                            viewModel.activeSymbols.remove(symbol)
-                        } else {
-                            viewModel.activeSymbols.insert(symbol)
-                        }
-                    }
-                }
-            }
-            
-            Section("Exotic Pairs") {
-                ForEach(exoticPairs, id: \.self) { symbol in
-                    HStack {
-                        Text(symbol); Spacer()
-                        if viewModel.activeSymbols.contains(symbol) {
-                            Image(systemName: "checkmark").foregroundColor(.green)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if viewModel.activeSymbols.contains(symbol) {
-                            viewModel.activeSymbols.remove(symbol)
-                        } else {
-                            viewModel.activeSymbols.insert(symbol)
-                        }
-                    }
-                }
-            }
-        }
-        #else
-        EmptyView()
-        #endif
-    }
-    
-    @ViewBuilder
-    var igAPISection: some View {
-        #if os(iOS)
-        Section("IG API Connection") {
-            HStack {
-                Text("API Key"); Spacer()
-                SecureField("Enter API key", text: $viewModel.igAPIKey)
-                    .multilineTextAlignment(.trailing)
-            }
-            HStack {
-                Text("Account ID"); Spacer()
-                TextField("Account ID", text: $viewModel.igAccountID)
-                    .multilineTextAlignment(.trailing)
-            }
-            Picker("Environment", selection: $viewModel.igEnvironment) {
-                Text("Live").tag("live")
-                Text("Demo").tag("demo")
-            }
-            Toggle("Auto-Reconnect", isOn: $viewModel.igAutoReconnect)
-            Button(action: { viewModel.connectToIG() }) {
-                Label(viewModel.igConnected ? "Reconnect" : "Connect", systemImage: "bolt.fill")
-            }
-        }
-        #else
-        EmptyView()
-        #endif
-    }
-    
-    @ViewBuilder
-    var notificationsSection: some View {
-        #if os(iOS)
-        Section("Notifications") {
-            Toggle("Signal Alerts", isOn: $viewModel.notifyOnSignal)
-            Button("FORCE ENABLE NOTIFICATIONS") {
-                NotificationManager.shared.requestAuthorization()
-                // Send dummy to force registration
-                let content = UNMutableNotificationContent()
-                content.title = "Stellas Active"
-                content.body = "Notifications are now synced with macOS."
-                let request = UNNotificationRequest(identifier: "test", content: content, trigger: nil)
-                UNUserNotificationCenter.current().add(request)
-            }
-            .foregroundColor(.accentCyan)
-
-            Toggle("Trade Executed", isOn: $viewModel.notifyOnTrade)
-            Toggle("Trade Closed", isOn: $viewModel.notifyOnClose)
-            Toggle("Expiry Warning", isOn: $viewModel.notifyOnExpiry)
-            HStack {
-                Text("Confidence Threshold"); Spacer()
-                Text("\(Int(viewModel.scalpingConfig.confidenceThreshold))%")
-                    .foregroundColor(.secondary)
-                Stepper("  ", value: $viewModel.scalpingConfig.confidenceThreshold, in: 5...95, step: 5)
-                    .labelsHidden()
-            }
-        }
-        #else
-        EmptyView()
-        #endif
-    }
-    
-    @ViewBuilder
-    var saveButtonSection: some View {
-        #if os(iOS)
-        Section {
-            Button("Save Settings") {
-                viewModel.saveSettings()
-            }.frame(maxWidth: .infinity)
-        }
-        #else
-        EmptyView()
-        #endif
     }
 }
 
-// MARK: - Subviews for Better Compilation
+// MARK: - Supporting Views
 struct NotificationBanner: View {
     let isAuthorized: Bool
     @Binding var isDismissed: Bool
     
     var body: some View {
         if !isAuthorized && !isDismissed {
-            HStack(spacing: 12) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.accentGold)
-                
+            HStack {
+                Image(systemName: "bell.badge.fill")
+                    .foregroundColor(.white)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Notifications are disabled")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.white)
-                    Text("Enable them to receive real-time signals.")
-                        .font(.system(size: 10))
-                        .foregroundColor(.textSecondary)
+                    Text("Notifications Disabled")
+                        .font(.system(size: 12, weight: .bold))
+                    Text("Enable notifications in system settings to receive live trade alerts.")
+                        .font(.system(size: 11))
                 }
-                
+                .foregroundColor(.white)
                 Spacer()
-                
-                Button("Settings") {
+                Button(action: {
                     #if os(macOS)
-                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.notifications")!)
-                    #else
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
+                        NSWorkspace.shared.open(url)
                     }
                     #endif
+                }) {
+                    Text("ENABLE")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Color.white.opacity(0.2))
+                        .cornerRadius(4)
                 }
-                .font(.system(size: 10, weight: .bold))
-                .foregroundColor(.accentCyan)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color.accentCyan.opacity(0.1))
-                .cornerRadius(4)
+                .buttonStyle(.plain)
                 
                 Button(action: { isDismissed = true }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.textMuted)
+                    Image(systemName: "xmark").font(.system(size: 10))
                 }
                 .buttonStyle(.plain)
             }
-            .padding(10)
-            .background(Color.bgCard)
+            .padding(12)
+            .background(Color.accentRed)
             .cornerRadius(8)
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentGold.opacity(0.3), lineWidth: 1))
-            .padding(.bottom, 8)
+            .padding(.horizontal, 20)
         }
     }
 }
@@ -2936,61 +354,39 @@ struct NoSignalsView: View {
     let signals: [Signal]
     
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "antenna.radiowaves.left.and.right.slash")
-                .font(.system(size: 50))
-                .foregroundColor(.textMuted)
-            Text("No Active Signals")
-                .font(.headline)
-                .foregroundColor(.textSecondary)
-            Text("Waiting for market signals...")
-                .font(.subheadline)
-                .foregroundColor(.textMuted)
-            
-            #if DEBUG
-            DebugInfoView(connectionStatus: connectionStatus, signalsCount: signalsCount, signals: signals)
-            #endif
-        }
-        .frame(maxWidth: .infinity, minHeight: 300)
-        .padding(.top, 40)
-    }
-}
-
-struct DebugInfoView: View {
-    let connectionStatus: String
-    let signalsCount: Int
-    let signals: [Signal]
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("DEBUG INFO").font(.caption).bold()
-            Text("Connection: \(connectionStatus)")
-            Text("Total signals in memory: \(signalsCount)")
-            
-            if !signals.isEmpty {
-                Text("Latest signals:")
-                    .font(.caption).bold()
-                    .padding(.top, 4)
-                ForEach(signals.prefix(3)) { signal in
-                    HStack {
-                        Circle()
-                            .fill(signal.type == .buy ? Color.green : Color.red)
-                            .frame(width: 8, height: 8)
-                        Text("\(signal.symbol) \(signal.type == .buy ? "BUY" : "SELL")")
-                            .font(.caption)
-                        Text("Status: \(String(describing: signal.status))")
-                            .font(.caption2)
-                            .foregroundColor(.gray)
-                    }
-                }
-            } else {
-                Text("No signals in coordinator yet")
-                    .font(.caption)
+        VStack(spacing: 24) {
+            Spacer()
+            ZStack {
+                Circle()
+                    .stroke(Color.accentCyan.opacity(0.1), lineWidth: 2)
+                    .frame(width: 80, height: 80)
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 30))
+                    .foregroundColor(.accentCyan.opacity(0.3))
             }
+            
+            VStack(spacing: 8) {
+                Text("SCANNING FOR INSTITUTIONAL FLOW")
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundColor(.textPrimary)
+                
+                Text(connectionStatus == "Connected" 
+                     ? "Active WebSocket stream on Port 8890. Waiting for high-probability confluence."
+                     : "Waiting for MT5 bridge connection...")
+                    .font(.system(size: 11))
+                    .foregroundColor(.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 300)
+            }
+            
+            if signalsCount > 0 {
+                Text("\(signalsCount) historical/expired signals hidden.")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.textMuted)
+            }
+            
+            Spacer()
         }
-        .font(.caption)
-        .padding()
-        .background(Color.bgCardHover)
-        .cornerRadius(8)
+        .frame(minHeight: 400)
     }
 }

@@ -486,6 +486,19 @@ class DashboardViewModel: ObservableObject {
     var totalPnL: Double { tradeHistory.compactMap { $0.pnl }.reduce(0, +) }
     var currencySymbol: String { "KES " }
     
+    // V10.3 Performance Extension
+    var totalDailyPnL: Double { 
+        let today = Calendar.current.startOfDay(for: Date())
+        return tradeHistory.filter { ($0.exitTime ?? Date()) >= today }.compactMap { $0.pnl }.reduce(0, +)
+    }
+    
+    var totalBuyTrades: Int { tradeHistory.filter { $0.type == .buy }.count }
+    var totalSellTrades: Int { tradeHistory.filter { $0.type == .sell }.count }
+    var totalBuyWins: Int { tradeHistory.filter { $0.type == .buy && ($0.pnl ?? 0) > 0 }.count }
+    var totalSellWins: Int { tradeHistory.filter { $0.type == .sell && ($0.pnl ?? 0) > 0 }.count }
+    var totalBuyPnL: Double { tradeHistory.filter { $0.type == .buy }.compactMap { $0.pnl }.reduce(0, +) }
+    var totalSellPnL: Double { tradeHistory.filter { $0.type == .sell }.compactMap { $0.pnl }.reduce(0, +) }
+    
     private func setupNotificationObservers() {
         NotificationCenter.default.publisher(for: .newGodModeInsight)
             .receive(on: DispatchQueue.main)
