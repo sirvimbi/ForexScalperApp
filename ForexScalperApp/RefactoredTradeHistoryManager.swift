@@ -138,49 +138,58 @@ actor RefactoredTradeHistoryManager {
     // MARK: - CSV Export
     
     func generateCSV() async -> String {
-        let sortedTrades = trades.values.sorted { $0.entryTime > $1.entryTime }
-        
-        let header = "Symbol,Type,Signal Generated,Time Filled,Accepted,Volume/Lot,Open Price,Exit Price,T/P,S/L,Swap (KES),P/L (KES),Result\n"
-        
-        let rows = sortedTrades.map { trade -> String in
+        // Run on a background thread to prevent UI freezing
+        return await Task.detached(priority: .userInitiated) {
+            let sortedTrades = self.trades.values.sorted { $0.entryTime > $1.entryTime }
+            
+            let header = "Symbol,Type,Signal Generated,Time Filled,Accepted,Volume/Lot,Open Price,Exit Price,T/P,S/L,Swap (KES),P/L (KES),Result\n"
+            
             let df = DateFormatter()
             df.dateFormat = "yyyy-MM-dd HH:mm:ss"
             
-            let signalTimeStr = df.string(from: trade.signalTime ?? trade.entryTime)
-            let filledTimeStr = df.string(from: trade.entryTime)
+            var csvRows: [String] = []
+            csvRows.reserveCapacity(sortedTrades.count)
             
-            // Result calculation
-            let pnlValue = trade.pnl ?? 0
-            let result: String
-            if trade.status == .active || trade.status == .pending {
-                result = trade.status.rawValue.uppercased()
-            } else {
-                result = pnlValue > 0 ? "WIN" : (pnlValue < 0 ? "LOSS" : "BREAKEVEN")
+            for (index, trade) in sortedTrades.enumerated() {
+                // Yield occasionally to keep system responsive if the list is massive
+                if index % 500 == 0 {
+                    await Task.yield()
+                }
+                
+                let signalTimeStr = df.string(from: trade.signalTime ?? trade.entryTime)
+                let filledTimeStr = df.string(from: trade.entryTime)
+                
+                let pnlValue = trade.pnl ?? 0
+                let result: String
+                if trade.status == .active || trade.status == .pending {
+                    result = trade.status.rawValue.uppercased()
+                } else {
+                    result = pnlValue > 0 ? "WIN" : (pnlValue < 0 ? "LOSS" : "BREAKEVEN")
+                }
+                
+                let volumeStr = String(format: "%.2f", trade.positionSize ?? 0)
+                
+                let row = [
+                    trade.symbol,
+                    trade.type.displayName,
+                    signalTimeStr,
+                    filledTimeStr,
+                    trade.isAccepted ? "YES" : "NO",
+                    volumeStr,
+                    String(format: "%.5f", trade.entryPrice),
+                    String(format: "%.5f", trade.exitPrice ?? 0),
+                    String(format: "%.5f", trade.takeProfit ?? 0),
+                    String(format: "%.5f", trade.stopLoss ?? 0),
+                    String(format: "%.2f", trade.swap ?? 0),
+                    String(format: "%.2f", pnlValue),
+                    result
+                ].joined(separator: ",")
+                
+                csvRows.append(row)
             }
             
-            // Volume formatting (Filled vs Total)
-            // Note: Since we mainly track filled trades, we show filled. 
-            // If we had the original signal volume we'd show both.
-            let volumeStr = String(format: "%.2f", trade.positionSize ?? 0)
-            
-            return [
-                trade.symbol,
-                trade.type.displayName,
-                signalTimeStr,
-                filledTimeStr,
-                trade.isAccepted ? "YES" : "NO",
-                volumeStr,
-                String(format: "%.5f", trade.entryPrice),
-                String(format: "%.5f", trade.exitPrice ?? 0),
-                String(format: "%.5f", trade.takeProfit ?? 0),
-                String(format: "%.5f", trade.stopLoss ?? 0),
-                String(format: "%.2f", trade.swap ?? 0),
-                String(format: "%.2f", pnlValue),
-                result
-            ].joined(separator: ",")
-        }
-        
-        return header + rows.joined(separator: "\n")
+            return header + csvRows.joined(separator: "\n")
+        }.value
     }
     
     // MARK: - Private methods

@@ -47,13 +47,15 @@ struct LiveSignalsView: View {
                         Button(action: {
                             coordinator.switchSignalSource(source)
                         }) {
-                            HStack(spacing: 4) {
+                            HStack(spacing: 3) {
                                 Image(systemName: source.icon)
-                                    .font(.system(size: 10))
+                                    .font(.system(size: 9))
                                 Text(source.displayName)
-                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
                             }
-                            .padding(.horizontal, 10)
+                            .padding(.horizontal, 8)
                             .padding(.vertical, 5)
                             .background(
                                 coordinator.selectedSignalSource == source ?
