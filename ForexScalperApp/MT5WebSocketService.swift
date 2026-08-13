@@ -1,228 +1,229 @@
 import Foundation
 
+/// V10.6 MT5 event transport.
+/// Authority boundary: Swift decides; MT5 executes; MT5 reports.
 actor MT5WebSocketService {
     static let shared = MT5WebSocketService()
 
     private var webSocket: URLSessionWebSocketTask?
+    private var session: URLSession?
     private var symbols: [String] = []
-    private var isConnected = false
-
-    // L2 Data Cache: [Symbol: (buyVol: Double, sellVol: Double, timestamp: Date)]
+    private(set) var isConnected = false
+    private var reconnectTask: Task<Void, Never>?
+    private var reconnectAttempt = 0
+    private var lastEventIDs: [String: Date] = [:]
     private var l2Cache: [String: (buyVol: Double, sellVol: Double, timestamp: Date)] = [:]
+
+    private let maxReconnectDelay: UInt64 = 30
 
     func connect(symbols: [String]) {
         self.symbols = symbols
-        // Connect directly to the EA's WebSocket server
-        let urlString = "ws://127.0.0.1:8890"
-        guard let url = URL(string: urlString) else { return }
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        reconnectAttempt = 0
+        openSocket()
+    }
+
+    func disconnect() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        webSocket?.cancel(with: .normalClosure, reason: nil)
+        webSocket = nil
+        session?.invalidateAndCancel()
+        session = nil
+        isConnected = false
+    }
+
+    private func openSocket() {
+        guard webSocket == nil else { return }
+        guard let url = URL(string: "ws://127.0.0.1:8890") else { return }
 
         let session = URLSession(configuration: .default)
         let task = session.webSocketTask(with: url)
+        self.session = session
         self.webSocket = task
         task.resume()
-        self.isConnected = true
-
         receiveMessage()
-
-        // Request tracking via the REST bridge to ensure EA starts sending updates
-        Task {
-            await startMbookTracking()
-            await startTradeEventTracking()
-        }
-    }
-
-    private func startMbookTracking() async {
-        // Use the REST bridge to enable MBook tracking in the EA
-        let urlString = "http://127.0.0.1:8890/v1/track/mbook"
-        guard let url = URL(string: urlString) else { return }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body = ["symbols": symbols]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-        do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                print("✅ MT5 WS: L2 Tracking enabled for \(symbols.joined(separator: ", "))")
-            }
-        } catch {
-            print("❌ MT5 WS: Failed to enable L2 tracking: \(error)")
-        }
-    }
-
-    private func startTradeEventTracking() async {
-        // Use the REST bridge to enable Trade Event tracking in the EA
-        let urlString = "http://127.0.0.1:8890/v1/track/orders"
-        guard let url = URL(string: urlString) else { return }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body = ["enabled": true]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-        do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
-                print("✅ MT5 WS: Trade Event tracking enabled")
-            }
-        } catch {
-            print("❌ MT5 WS: Failed to enable trade event tracking: \(error)")
-        }
     }
 
     private func receiveMessage() {
         guard let task = webSocket else { return }
-
         task.receive { [weak self] result in
-            guard let self = self else { return }
-
+            guard let self else { return }
             Task {
                 switch result {
                 case .success(let message):
-                    switch message {
-                    case .string(let text):
+                    await self.markConnected()
+                    if case .string(let text) = message {
                         await self.handleMessage(text)
-                    default: break
                     }
-                    // Recursive call within the task to maintain isolation
                     await self.receiveMessage()
                 case .failure(let error):
-                    print("❌ MT5 WS: Error: \(error)")
-                    await self.setDisconnected()
+                    await self.handleSocketFailure(error)
                 }
             }
         }
     }
 
-    private func setDisconnected() {
-        self.isConnected = false
+    private func markConnected() {
+        isConnected = true
+        reconnectAttempt = 0
+    }
+
+    private func handleSocketFailure(_ error: Error) {
+        print("❌ MT5 WS: \(error.localizedDescription)")
+        webSocket = nil
+        isConnected = false
+        scheduleReconnect()
+    }
+
+    private func scheduleReconnect() {
+        guard reconnectTask == nil else { return }
+        reconnectAttempt += 1
+        let exponent = min(reconnectAttempt - 1, 5)
+        let delay = min(maxReconnectDelay, UInt64(1 << exponent))
+        reconnectTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            await self.finishReconnectWait()
+        }
+    }
+
+    private func finishReconnectWait() {
+        reconnectTask = nil
+        openSocket()
     }
 
     private func handleMessage(_ text: String) {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = json["type"] as? String else {
-            return
+              let type = json["type"] as? String else { return }
+
+        if let eventID = json["event_id"] as? String {
+            if lastEventIDs[eventID] != nil { return }
+            lastEventIDs[eventID] = Date()
+            if lastEventIDs.count > 2048 {
+                let cutoff = Date().addingTimeInterval(-300)
+                lastEventIDs = lastEventIDs.filter { $0.value >= cutoff }
+            }
         }
 
         switch type {
-        case "track_mbook":
-            handleMbookUpdate(json)
-        case "price_update":
-            handlePriceUpdate(json)
-        case "ohlc_update":
-            handleOhlcUpdate(json)
-        case "trade_event":
-            handleTradeEvent(json)
-        default:
-            break
+        case "price_update": handlePriceUpdate(json)
+        case "trade_event": handleTradeEvent(json)
+        case "track_mbook": handleMbookUpdate(json)
+        case "ohlc_update": handleOhlcUpdate(json)
+        default: break
         }
     }
 
-    private func handleTradeEvent(_ json: [String: Any]) {
-        guard let ticket = json["ticket"] as? Int64,
-              let symbol = json["symbol"] as? String else {
-            return
+    private func handlePriceUpdate(_ json: [String: Any]) {
+        if let items = json["data"] as? [[String: Any]] {
+            for item in items { publishPrice(item) }
+        } else {
+            publishPrice(json)
         }
+    }
+
+    private func publishPrice(_ json: [String: Any]) {
+        guard let symbol = json["symbol"] as? String,
+              let bid = Self.doubleValue(json["bid"]),
+              let ask = Self.doubleValue(json["ask"]) else { return }
+
+        let timestamp = Self.doubleValue(json["time_msc"])
+            ?? Self.doubleValue(json["time"])
+            ?? Self.doubleValue(json["timestamp"])
+            ?? Date().timeIntervalSince1970
+
+        NotificationCenter.default.post(
+            name: .mt5PriceUpdated,
+            object: nil,
+            userInfo: ["symbol": symbol, "bid": bid, "ask": ask, "timestamp": timestamp]
+        )
+    }
+
+    private func handleTradeEvent(_ json: [String: Any]) {
+        guard let symbol = json["symbol"] as? String else { return }
+        let ticket = Self.int64Value(json["ticket"])
+            ?? Self.int64Value(json["position"])
+            ?? Self.int64Value(json["order"])
+            ?? Self.int64Value(json["deal"])
+        guard let ticket else { return }
 
         let userInfo: [String: Any] = [
             "ticket": String(ticket),
             "symbol": symbol,
-            "profit": json["profit"] as? Double ?? 0.0,
-            "swap": json["swap"] as? Double ?? 0.0,
-            "commission": json["commission"] as? Double ?? 0.0,
-            "reason": json["reason"] as? String ?? "Unknown"
+            "deal": String(Self.int64Value(json["deal"]) ?? 0),
+            "order": String(Self.int64Value(json["order"]) ?? 0),
+            "position": String(Self.int64Value(json["position"]) ?? 0),
+            "position_id": String(Self.int64Value(json["position_id"]) ?? 0),
+            "profit": Self.doubleValue(json["profit"]) ?? 0.0,
+            "swap": Self.doubleValue(json["swap"]) ?? 0.0,
+            "commission": Self.doubleValue(json["commission"]) ?? 0.0,
+            "price": Self.doubleValue(json["price"]) ?? 0.0,
+            "volume": Self.doubleValue(json["volume"]) ?? 0.0,
+            "entry": Self.int64Value(json["entry"]) ?? 0,
+            "deal_type": Self.int64Value(json["deal_type"]) ?? 0,
+            "magic": Self.int64Value(json["magic"]) ?? 0,
+            "comment": json["comment"] as? String ?? "",
+            "event_id": json["event_id"] as? String ?? ""
         ]
-
         NotificationCenter.default.post(name: .mt5TradeClosed, object: nil, userInfo: userInfo)
     }
 
     private func handleMbookUpdate(_ json: [String: Any]) {
         guard let symbol = json["symbol"] as? String,
-              let mbook = json["market_book"] as? [[String: Any]] else {
-            return
-        }
-
+              let mbook = json["market_book"] as? [[String: Any]] else { return }
         var buyVol = 0.0
         var sellVol = 0.0
-
         for entry in mbook {
             let type = entry["type"] as? String ?? ""
-            let vol = entry["volume"] as? Double ?? 0.0
-
-            if type == "BOOK_TYPE_BUY" {
-                buyVol += vol
-            } else if type == "BOOK_TYPE_SELL" {
-                sellVol += vol
-            }
+            let vol = Self.doubleValue(entry["volume"]) ?? 0.0
+            if type == "BOOK_TYPE_BUY" { buyVol += vol }
+            if type == "BOOK_TYPE_SELL" { sellVol += vol }
         }
-
-        l2Cache[symbol] = (buyVol: buyVol, sellVol: sellVol, timestamp: Date())
-    }
-
-    private func handlePriceUpdate(_ json: [String: Any]) {
-        guard let symbol = json["symbol"] as? String,
-              let bid = json["bid"] as? Double,
-              let ask = json["ask"] as? Double else {
-            return
-        }
-
-        let priceData: [String: Any] = [
-            "symbol": symbol,
-            "bid": bid,
-            "ask": ask,
-            "timestamp": json["timestamp"] ?? Date().timeIntervalSince1970
-        ]
-
-        NotificationCenter.default.post(name: .mt5PriceUpdated, object: nil, userInfo: priceData)
+        l2Cache[symbol] = (buyVol, sellVol, Date())
     }
 
     private func handleOhlcUpdate(_ json: [String: Any]) {
         guard let symbol = json["symbol"] as? String,
               let timeframe = json["timeframe"] as? String,
               let bars = json["bars"] as? [[String: Any]],
-              let lastBar = bars.last else {
-            return
-        }
-
-        let open = lastBar["open"] as? Double ?? 0
-        let high = lastBar["high"] as? Double ?? 0
-        let low = lastBar["low"] as? Double ?? 0
-        let close = lastBar["close"] as? Double ?? 0
-        let vol = Double(lastBar["volume"] as? Int ?? 0)
-        let now = Int(Date().timeIntervalSince1970)
-
-        // Convert to Kline model and notify
+              let lastBar = bars.last else { return }
         let kline = Kline(
-            open: open,
-            high: high,
-            low: low,
-            close: close,
-            volume: vol,
-            closeTime: now,
+            open: Self.doubleValue(lastBar["open"]) ?? 0,
+            high: Self.doubleValue(lastBar["high"]) ?? 0,
+            low: Self.doubleValue(lastBar["low"]) ?? 0,
+            close: Self.doubleValue(lastBar["close"]) ?? 0,
+            volume: Self.doubleValue(lastBar["volume"]) ?? 0,
+            closeTime: Int(Self.doubleValue(lastBar["time"]) ?? Date().timeIntervalSince1970),
             spread: 0,
             isClosed: true
         )
-
-        let userInfo: [String: Any] = [
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "kline": kline
-        ]
-
-        NotificationCenter.default.post(name: .mt5OhlcUpdated, object: nil, userInfo: userInfo)
+        NotificationCenter.default.post(name: .mt5OhlcUpdated, object: nil,
+                                        userInfo: ["symbol": symbol, "timeframe": timeframe, "kline": kline])
     }
 
     func getDeltaVolume(for symbol: String) -> Double {
-        guard let cache = l2Cache[symbol],
-              Date().timeIntervalSince(cache.timestamp) < 5.0 else {
-            return 0.0
-        }
+        guard let cache = l2Cache[symbol], Date().timeIntervalSince(cache.timestamp) < 5 else { return 0 }
         return cache.buyVol - cache.sellVol
+    }
+
+    private static func doubleValue(_ value: Any?) -> Double? {
+        if let value = value as? Double { return value }
+        if let value = value as? Int { return Double(value) }
+        if let value = value as? Int64 { return Double(value) }
+        if let value = value as? NSNumber { return value.doubleValue }
+        if let value = value as? String { return Double(value) }
+        return nil
+    }
+
+    private static func int64Value(_ value: Any?) -> Int64? {
+        if let value = value as? Int64 { return value }
+        if let value = value as? Int { return Int64(value) }
+        if let value = value as? NSNumber { return value.int64Value }
+        if let value = value as? String { return Int64(value) }
+        return nil
     }
 }
