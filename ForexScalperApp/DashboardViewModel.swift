@@ -409,9 +409,24 @@ class DashboardViewModel: ObservableObject {
             let savePanel = NSSavePanel()
             savePanel.allowedContentTypes = [.commaSeparatedText]
             savePanel.nameFieldStringValue = fileName
+            savePanel.canCreateDirectories = true
+            savePanel.isExtensionHidden = false
             
-            if savePanel.runModal() == .OK, let url = savePanel.url {
-                try? csvString.write(to: url, atomically: true, encoding: .utf8)
+            // Using begin to prevent app-level modal blocking/freezing
+            savePanel.begin { response in
+                if response == .OK, let url = savePanel.url {
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        do {
+                            try csvString.write(to: url, atomically: true, encoding: .utf8)
+                            godLog("✅ Exported history to \(url.path)", level: .success)
+                        } catch {
+                            godLog("❌ Failed to save history CSV: \(error.localizedDescription)", level: .error)
+                        }
+                    }
+                }
+                
+                // Clear the state to dismiss any lingering UI overlays
+                self.isShowingShareSheet = false
             }
         }
         #endif

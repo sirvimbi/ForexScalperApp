@@ -66,6 +66,7 @@ struct InsightsView: View {
                                             ForEach(insight.affectedPairs, id: \.self) { pair in
                                                 Text(pair)
                                                     .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                                    .foregroundColor(.textPrimary)
                                                     .padding(.horizontal, 6)
                                                     .padding(.vertical, 2)
                                                     .background(Color.white.opacity(0.05))
