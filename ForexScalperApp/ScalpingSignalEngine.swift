@@ -404,7 +404,7 @@ actor ScalpingSignalEngine {
     }
 
     private func generateSignal(symbol: String, indicators: IndicatorSet, candles1m: [Kline]) async -> ScalpingSignal {
-        let (deltaThreshold, mlThreshold, newsMultiplierVal, swingLookback, pullbackEMAPeriod, weights) = await MainActor.run {
+        let (deltaThreshold, mlThreshold, newsMultiplierVal, _, pullbackEMAPeriod, weights) = await MainActor.run {
             let config = ScalpingConfig.shared
             let weights = [
                 "HTF": config.weightHTFAlignment,

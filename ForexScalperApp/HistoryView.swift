@@ -56,7 +56,8 @@ struct HistoryView: View {
     
     @ViewBuilder
     func historyRow(_ trade: TradeRecord) -> some View {
-        let isWin = trade.pnl >= 0
+        let pnl = trade.pnl ?? 0
+        let isWin = pnl >= 0
         let color = isWin ? Color.accentGreen : Color.accentRed
         
         GlassCard(borderColor: color.opacity(0.2)) {
@@ -76,7 +77,7 @@ struct HistoryView: View {
                     Spacer()
                     
                     VStack(alignment: .trailing, spacing: 4) {
-                        Text(String(format: "%@%.2f", trade.pnl >= 0 ? "+" : "", trade.pnl))
+                        Text(String(format: "%@%.2f", pnl >= 0 ? "+" : "", pnl))
                             .font(.system(size: 18, weight: .bold, design: .monospaced))
                             .foregroundColor(color)
                         
@@ -89,12 +90,12 @@ struct HistoryView: View {
                 Divider().background(Color.white.opacity(0.05))
                 
                 HStack(spacing: 15) {
-                    StatLabel(title: "SIZE", value: String(format: "%.2f", trade.volume))
+                    StatLabel(title: "SIZE", value: String(format: "%.2f", trade.positionSize ?? 0))
                     StatLabel(title: "ENTRY", value: String(format: "%.5f", trade.entryPrice))
-                    StatLabel(title: "EXIT", value: String(format: "%.5f", trade.exitPrice))
+                    StatLabel(title: "EXIT", value: String(format: "%.5f", trade.exitPrice ?? 0))
                     Spacer()
-                    if let duration = trade.duration {
-                        StatLabel(title: "DUR", value: formatDuration(duration))
+                    if let entry = Optional(trade.entryTime), let exit = trade.exitTime {
+                        StatLabel(title: "DUR", value: formatDuration(exit.timeIntervalSince(entry)))
                     }
                 }
             }
