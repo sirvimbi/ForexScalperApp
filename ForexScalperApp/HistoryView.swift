@@ -15,8 +15,12 @@ struct HistoryView: View {
                     .tracking(2)
                 Spacer()
                 Button(action: {
-                    viewModel.prepareCSVExport()
-                    viewModel.isShowingShareSheet = true
+                    Task {
+                        await viewModel.prepareCSVExport()
+                        await MainActor.run {
+                            viewModel.isShowingShareSheet = true
+                        }
+                    }
                 }) {
                     Label("EXPORT", systemImage: "square.and.arrow.up")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))

@@ -175,14 +175,14 @@ struct MT5TradeResult: Codable, Sendable {
 
     nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.retcode = try container.decode(Int.self, forKey: .retcode)
-        self.order = try container.decodeIfPresent(Int64.self, forKey: .order)
-        self.deal = try container.decodeIfPresent(Int64.self, forKey: .deal)
-        self.volume = try container.decode(Double.self, forKey: .volume)
-        self.price = try container.decode(Double.self, forKey: .price)
-        self.bid = try container.decode(Double.self, forKey: .bid)
-        self.ask = try container.decode(Double.self, forKey: .ask)
-        self.comment = try container.decodeIfPresent(String.self, forKey: .comment)
+        self.retcode = (try? container.decode(Int.self, forKey: .retcode)) ?? 0
+        self.order = try? container.decodeIfPresent(Int64.self, forKey: .order)
+        self.deal = try? container.decodeIfPresent(Int64.self, forKey: .deal)
+        self.volume = (try? container.decode(Double.self, forKey: .volume)) ?? 0
+        self.price = (try? container.decode(Double.self, forKey: .price)) ?? 0
+        self.bid = (try? container.decode(Double.self, forKey: .bid)) ?? 0
+        self.ask = (try? container.decode(Double.self, forKey: .ask)) ?? 0
+        self.comment = try? container.decodeIfPresent(String.self, forKey: .comment)
     }
 
     nonisolated func encode(to encoder: Encoder) throws {
