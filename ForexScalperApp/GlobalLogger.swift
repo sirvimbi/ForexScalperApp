@@ -27,7 +27,7 @@ nonisolated func godLog(_ message: String, level: LogLevel = .info, file: String
     let fullMessage = "[\(timestamp)] \(level.rawValue) \(fileName):\(line) - \(message)"
     
     // Original print for console (stdout is thread-safe)
-    // print(fullMessage)
+    print(fullMessage)
     
     // Route to in-app console via notification
     // We use NotificationCenter.default.post which is thread-safe.

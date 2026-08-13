@@ -101,6 +101,7 @@ struct HistoryView: View {
                         HStack {
                             Text(trade.symbol)
                                 .font(.system(size: 16, weight: .bold, design: .monospaced))
+                                .foregroundColor(.textPrimary)
                             TagBadge(text: trade.type.rawValue.uppercased(), color: trade.type == .buy ? .accentGreen : .accentRed)
                         }
                         Text(formatDate(trade.entryTime))
