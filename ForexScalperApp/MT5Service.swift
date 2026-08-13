@@ -504,7 +504,20 @@ actor MT5Service {
 
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 200 {
-                        let tradeResult = try decoder.decode(MT5TradeResult.self, from: data)
+                        if data.isEmpty {
+                            godLog("❌ MT5: Received empty response body on successful status code", level: .error)
+                            throw TradingError.apiError("Empty response from MT5 Bridge")
+                        }
+                        
+                        let tradeResult: MT5TradeResult
+                        do {
+                            tradeResult = try decoder.decode(MT5TradeResult.self, from: data)
+                        } catch {
+                            let raw = String(data: data, encoding: .utf8) ?? "binary data"
+                            godLog("❌ MT5: Failed to decode trade result. Raw: \(raw)", level: .error)
+                            throw error
+                        }
+
                         if tradeResult.retcode != 10009 && tradeResult.retcode != 10008 {
                             godLog("❌ MT5: Execution failed: \(tradeResult.comment ?? "No comment")", level: .error)
                             throw TradingError.apiError("MT5 Error: \(tradeResult.comment ?? "Execution failed")")
