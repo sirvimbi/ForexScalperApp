@@ -1,4 +1,6 @@
 import SwiftUI
+import UserNotifications
+import UserNotifications
 
 struct SettingsView: View {
     @ObservedObject var viewModel: DashboardViewModel
@@ -271,10 +273,10 @@ struct SettingsView: View {
                                         HStack(spacing: 8) {
                                             Slider(value: Binding(
                                                 get: { Double(viewModel.scalpingConfig.minConfluencePillars) },
-                                                set: { viewModel.scalpingConfig.minConfluencePillars = Int($0) }
+                                                set: { viewModel.scalpingConfig.minConfluencePillars = $0 }
                                             ), in: 1...7, step: 1)
                                             .frame(width: 120)
-                                            Text("\(viewModel.scalpingConfig.minConfluencePillars)/7")
+                                            Text("\(Int(viewModel.scalpingConfig.minConfluencePillars))/7")
                                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                                                 .foregroundColor(.accentGold)
                                                 .frame(width: 36, alignment: .trailing)
@@ -410,7 +412,7 @@ struct SettingsView: View {
                                     settingsRow("HTF Alignment") { Stepper("\(Int(viewModel.scalpingConfig.weightHTFAlignment))", value: $viewModel.scalpingConfig.weightHTFAlignment, in: 0...100).labelsHidden() }
                                     settingsRow("Momentum Exhaustion") { Stepper("\(Int(viewModel.scalpingConfig.weightMomentumExhaustion))", value: $viewModel.scalpingConfig.weightMomentumExhaustion, in: 0...100).labelsHidden() }
                                     settingsRow("Volume Surge") { Stepper("\(Int(viewModel.scalpingConfig.weightVolumeSurge))", value: $viewModel.scalpingConfig.weightVolumeSurge, in: 0...100).labelsHidden() }
-                                    settingsRow("EMA Stack") { Stepper("\(Int(viewModel.scalpingConfig.weightEMASpan))", value: $viewModel.scalpingConfig.weightEMASpan, in: 0...100).labelsHidden() }
+                                    settingsRow("EMA Stack") { Stepper("\(Int(viewModel.scalpingConfig.weightEMAStack))", value: $viewModel.scalpingConfig.weightEMAStack, in: 0...100).labelsHidden() }
                                     settingsRow("Bollinger Reject") { Stepper("\(Int(viewModel.scalpingConfig.weightBollingerRejection))", value: $viewModel.scalpingConfig.weightBollingerRejection, in: 0...100).labelsHidden() }
                                     settingsRow("CCI Cycle") { Stepper("\(Int(viewModel.scalpingConfig.weightCCICycle))", value: $viewModel.scalpingConfig.weightCCICycle, in: 0...100).labelsHidden() }
                                     settingsRow("SAR Trend") { Stepper("\(Int(viewModel.scalpingConfig.weightSARTrend))", value: $viewModel.scalpingConfig.weightSARTrend, in: 0...100).labelsHidden() }
@@ -692,7 +694,7 @@ struct SettingsView: View {
         ScalpingConfig.shared.weightHTFAlignment = viewModel.scalpingConfig.weightHTFAlignment
         ScalpingConfig.shared.weightMomentumExhaustion = viewModel.scalpingConfig.weightMomentumExhaustion
         ScalpingConfig.shared.weightVolumeSurge = viewModel.scalpingConfig.weightVolumeSurge
-        ScalpingConfig.shared.weightEMASpan = viewModel.scalpingConfig.weightEMASpan
+        ScalpingConfig.shared.weightEMAStack = viewModel.scalpingConfig.weightEMAStack
         ScalpingConfig.shared.weightBollingerRejection = viewModel.scalpingConfig.weightBollingerRejection
         ScalpingConfig.shared.weightCCICycle = viewModel.scalpingConfig.weightCCICycle
         ScalpingConfig.shared.weightSARTrend = viewModel.scalpingConfig.weightSARTrend
