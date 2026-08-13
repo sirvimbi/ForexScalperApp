@@ -96,7 +96,7 @@ actor ScalpingSignalEngine {
         if enabledNews {
             let (impact, _) = await NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: Int(max(highMin, medMin)))
             if impact == .high {
-                godLog("⚠️ \(symbol) skipped: High-impact news detected", level: .diagnostic)
+                godLog("⚠️ \(symbol) skipped: High-impact news detected", level: .info)
                 return nil
             }
         }
@@ -120,7 +120,7 @@ actor ScalpingSignalEngine {
 
         // DATA VALIDATION CHECK
         guard validateData(candlesByTimeframe, symbol: symbol) else {
-            godLog("⚠️ \(symbol) skipped: Insufficient history (need 100 1m candles)", level: .diagnostic)
+            godLog("⚠️ \(symbol) skipped: Insufficient history (need 100 1m candles)", level: .info)
             return nil
         }
 
@@ -136,14 +136,14 @@ actor ScalpingSignalEngine {
         }
 
         if actualSpread > spreadTol {
-            godLog("⚠️ \(symbol) skipped: Spread too high (\(String(format: "%.1f", actualSpread)) > \(spreadTol))", level: .diagnostic)
+            godLog("⚠️ \(symbol) skipped: Spread too high (\(String(format: "%.1f", actualSpread)) > \(spreadTol))", level: .info)
             return nil
         }
 
         // VOLATILITY CHECK
         let atrPercentage = indicators.atr / indicators.currentPrice * 100
         guard await validateVolatility(symbol, indicators: indicators) else {
-            godLog("⚠️ \(symbol) skipped: Volatility outside bounds (\(String(format: "%.3f", atrPercentage))%)", level: .diagnostic)
+            godLog("⚠️ \(symbol) skipped: Volatility outside bounds (\(String(format: "%.3f", atrPercentage))%)", level: .info)
             return nil
         }
 
@@ -183,7 +183,7 @@ actor ScalpingSignalEngine {
 
         // RISK/REWARD CHECK
         guard await RRLock.validate(signal: adjustedSignal) else {
-            godLog("⚠️ \(symbol) skipped: Risk/Reward check failed", level: .diagnostic)
+            godLog("⚠️ \(symbol) skipped: Risk/Reward check failed", level: .info)
             return nil
         }
 
