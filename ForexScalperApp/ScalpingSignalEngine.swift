@@ -166,9 +166,9 @@ actor ScalpingSignalEngine {
         let failedString = failedPillars.map { "❌ \($0)" }.joined(separator: ", ")
 
         let logMsg = "📊 EVAL: \(symbol) \(finalSignal.type) | Conf: \(Int(finalSignal.confidence))% (Need \(Int(threshold))%) | MET: [\(metString)] | FAILED: [\(failedString)]"
+        godLog(logMsg, level: .info)
 
         if finalSignal.type == .none || finalSignal.confidence < threshold {
-            godLog(logMsg, level: .diagnostic)
             return nil
         }
 
