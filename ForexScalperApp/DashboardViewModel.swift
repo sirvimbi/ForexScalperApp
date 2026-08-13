@@ -523,6 +523,7 @@ class DashboardViewModel: ObservableObject {
         NotificationCenter.default.publisher(for: .showLearningInsight)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] note in
+                guard let self = self else { return }
                 if let signal = note.object as? Signal {
                     let insight = GodModeInsight(
                         id: UUID(),
