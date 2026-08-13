@@ -25,7 +25,7 @@ struct HistoryView: View {
             #endif
             
             ScrollView {
-                VStack(spacing: 12) {
+                LazyVStack(spacing: 12) {
                     if viewModel.tradeHistory.isEmpty {
                         VStack(spacing: 20) {
                             Image(systemName: "clock.arrow.circlepath")
@@ -37,7 +37,8 @@ struct HistoryView: View {
                         }
                         .padding(.top, 100)
                     } else {
-                        ForEach(viewModel.tradeHistory) { trade in
+                        // Limiting to last 500 trades for performance, use Clear All for cleanup
+                        ForEach(viewModel.tradeHistory.prefix(500)) { trade in
                             Button(action: {
                                 selectedTrade = trade
                                 showTradeSheet = true
@@ -45,6 +46,13 @@ struct HistoryView: View {
                                 historyRow(trade)
                             }
                             .buttonStyle(.plain)
+                        }
+                        
+                        if viewModel.tradeHistory.count > 500 {
+                            Text("Showing last 500 of \(viewModel.tradeHistory.count) trades.")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.textMuted)
+                                .padding(.top, 10)
                         }
                     }
                 }
