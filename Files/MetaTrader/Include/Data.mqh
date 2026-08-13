@@ -180,7 +180,13 @@ private:
 
       while(sent < totalLength)
       {
-         int result = send(socket, frame, totalLength - sent, 0);
+         char chunk[];
+         int remaining = totalLength - sent;
+         ArrayResize(chunk, remaining);
+         for(int i = 0; i < remaining; i++)
+            chunk[i] = frame[sent + i];
+
+         int result = send(socket, chunk, remaining, 0);
          if(result <= 0)
             break;
          sent += result;
