@@ -519,8 +519,8 @@ actor MT5Service {
                         }
 
                         if tradeResult.retcode != 10009 && tradeResult.retcode != 10008 {
-                            godLog("❌ MT5: Execution failed: \(tradeResult.comment ?? "No comment")", level: .error)
-                            throw TradingError.apiError("MT5 Error: \(tradeResult.comment ?? "Execution failed")")
+                            godLog("❌ MT5: Execution failed (Code: \(tradeResult.retcode)): \(tradeResult.comment ?? "No comment")", level: .error)
+                            throw TradingError.apiError("MT5 Error (\(tradeResult.retcode)): \(tradeResult.comment ?? "Execution failed")")
                         }
                         return tradeResult
                     } else if httpResponse.statusCode == 503 {

@@ -114,12 +114,6 @@ class RefactoredAppCoordinator: ObservableObject {
                 await self?.handleTradeClosed(trade)
             }
         }
-
-        Task {
-            await connectToDataSources()
-            await start()
-            await startMetricsUpdates()
-        }
     }
 
     private func normalizeSymbol(_ symbol: String) -> String {
@@ -962,9 +956,11 @@ class RefactoredAppCoordinator: ObservableObject {
 
         if !isLive { return }
 
-        let klineTime = Date(timeIntervalSince1970: TimeInterval(kline.closeTime))
+        // Handle potential millisecond timestamps from Binance
+        let timestamp = kline.closeTime > 10_000_000_000 ? Double(kline.closeTime) / 1000.0 : Double(kline.closeTime)
+        let klineTime = Date(timeIntervalSince1970: timestamp)
         let age = abs(Date().timeIntervalSince(klineTime))
-        let maxAge: TimeInterval = allowedScalpingSymbols.contains(normalizedSymbol) && !normalizedSymbol.contains("USDT") ? 3600 * 4 : 120
+        let maxAge: TimeInterval = allowedScalpingSymbols.contains(normalizedSymbol) && !normalizedSymbol.contains("USDT") ? 3600 * 4 : 180
 
         guard age < maxAge else { return }
 

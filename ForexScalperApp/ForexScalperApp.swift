@@ -17,6 +17,14 @@ struct ForexScalperApp: App {
         
         // Request notification permissions via the manager
         NotificationManager.shared.requestAuthorization()
+        
+        Task {
+            await coord.connectToDataSources()
+            await coord.start()
+            await MainActor.run {
+                vm.refreshData()
+            }
+        }
     }
     
     var body: some Scene {
