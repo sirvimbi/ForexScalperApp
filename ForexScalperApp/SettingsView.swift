@@ -629,12 +629,14 @@ struct SettingsView: View {
                                     
                                     Button(action: {
                                         NotificationManager.shared.requestAuthorization()
-                                        let content = UNMutableNotificationContent()
-                                        content.title = "Stellas System Check"
-                                        content.body = "Notification pipe is now active and synced."
-                                        content.sound = .default
-                                        let request = UNNotificationRequest(identifier: "test_mac", content: content, trigger: nil)
-                                        UNUserNotificationCenter.current().add(request)
+                                        Task { @MainActor in
+                                            let content = UNMutableNotificationContent()
+                                            content.title = "Stellas System Check"
+                                            content.body = "Notification pipe is now active and synced."
+                                            content.sound = .default
+                                            let request = UNNotificationRequest(identifier: "test_mac", content: content, trigger: nil)
+                                            try? await UNUserNotificationCenter.current().add(request)
+                                        }
                                     }) {
                                         HStack {
                                             Image(systemName: "exclamationmark.shield.fill")

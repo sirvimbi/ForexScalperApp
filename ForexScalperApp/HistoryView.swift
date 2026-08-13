@@ -14,12 +14,34 @@ struct HistoryView: View {
                     .foregroundColor(.accentCyan)
                     .tracking(2)
                 Spacer()
+                Button(action: {
+                    viewModel.prepareCSVExport()
+                    viewModel.isShowingShareSheet = true
+                }) {
+                    Label("EXPORT", systemImage: "square.and.arrow.up")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Color.accentCyan.opacity(0.1))
+                .foregroundColor(.accentCyan)
+                .cornerRadius(4)
+                
                 Button(action: { viewModel.tradeHistory.removeAll() }) {
                     Text("CLEAR ALL").font(.system(size: 10, weight: .bold)).foregroundColor(.accentRed)
                 }.buttonStyle(.plain)
             }
             .padding(20)
             .background(Color.bgSecondary)
+            .sheet(isPresented: $viewModel.isShowingShareSheet) {
+                if let url = viewModel.exportURL {
+                    #if os(macOS)
+                    Text("CSV exported to \(url.path)").padding()
+                    #else
+                    ShareSheet(activityItems: [url])
+                    #endif
+                }
+            }
             
             Divider().background(Color.borderSubtle)
             #endif

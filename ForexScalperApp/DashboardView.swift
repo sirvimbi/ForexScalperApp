@@ -135,10 +135,10 @@ struct DashboardView: View {
                 headerStat(label: "DAILY", value: String(format: "%@%.2f", dailyPnL >= 0 ? "+" : "", dailyPnL), color: dailyPnL >= 0 ? .accentGreen : .accentRed)
                 
                 HStack(spacing: 8) {
-                    PulsingDot(color: coordinator.connectionStatus == "Connected" ? .accentGreen : .accentRed)
-                    Text(coordinator.connectionStatus.uppercased())
+                    PulsingDot(color: viewModel.mt5Connected ? .accentGreen : .accentRed)
+                    Text(viewModel.mt5Connected ? "CONNECTED" : coordinator.connectionStatus.uppercased())
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(coordinator.connectionStatus == "Connected" ? .accentGreen : .accentRed)
+                        .foregroundColor(viewModel.mt5Connected ? .accentGreen : .accentRed)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(Color.white.opacity(0.05))
@@ -178,8 +178,10 @@ struct DashboardView: View {
                     .frame(width: 24)
                 
                 Text(tabs[index].uppercased())
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .tracking(1)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(0.5)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 
                 Spacer()
                 

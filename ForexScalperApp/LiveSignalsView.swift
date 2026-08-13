@@ -194,7 +194,7 @@ struct LiveSignalsView: View {
                     let pendingSignals = allSignals.filter { $0.status == .pending }
                     
                     if pendingSignals.isEmpty {
-                        NoSignalsView(connectionStatus: coordinator.connectionStatus, signalsCount: allSignals.count, signals: allSignals)
+                        NoSignalsView(connectionStatus: viewModel.mt5Connected ? "Connected" : coordinator.connectionStatus, signalsCount: allSignals.count, signals: allSignals)
                     } else {
                         ForEach(pendingSignals.sorted(by: { $0.timestamp > $1.timestamp })) { signal in
                             signalCard(signal)
