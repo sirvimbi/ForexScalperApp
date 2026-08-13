@@ -138,9 +138,12 @@ actor RefactoredTradeHistoryManager {
     // MARK: - CSV Export
     
     func generateCSV() async -> String {
+        // Capture trades locally inside the actor before detaching
+        let tradesToExport = Array(self.trades.values)
+        
         // Run on a background thread to prevent UI freezing
         return await Task.detached(priority: .userInitiated) {
-            let sortedTrades = self.trades.values.sorted { $0.entryTime > $1.entryTime }
+            let sortedTrades = tradesToExport.sorted { $0.entryTime > $1.entryTime }
             
             let header = "Symbol,Type,Signal Generated,Time Filled,Accepted,Volume/Lot,Open Price,Exit Price,T/P,S/L,Swap (KES),P/L (KES),Result\n"
             
