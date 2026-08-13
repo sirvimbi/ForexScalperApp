@@ -127,7 +127,7 @@ class RefactoredAppCoordinator: ObservableObject {
         return normalized
     }
 
-    private func connectToDataSources() async {
+    func connectToDataSources() async {
         await MainActor.run {
             status = "Connecting to Data Sources..."
             connectionStatus = "Connecting..."
