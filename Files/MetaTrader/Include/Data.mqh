@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //| Data.mqh                                                         |
-//| GOD MODE V10.4 SWIFT BROADCAST ENGINE                            |
+//| GOD MODE V10.6 SWIFT BROADCAST ENGINE                            |
 //+------------------------------------------------------------------+
 #ifndef DATA_MQH
 #define DATA_MQH
@@ -10,26 +10,17 @@
 #include <socketlib.mqh>
 #include <JAson.mqh>
 
-//--------------------------------------------------------------------
-// Socket compatibility
-//
-// The supplied socket library does not expose SOCKET64 to the
-// compiler.  MT5 socket handles are safely carried here as ulong.
-//--------------------------------------------------------------------
 #define DATA_INVALID_SOCKET ((ulong)-1)
+#define DATA_PROTOCOL_VERSION "10.6"
 
 class CData
 {
 public:
-
    bool isTrackingPrice;
    bool isTrackingOhlc;
    bool isTrackingMbook;
    bool isTrackingOrderEvent;
 
-   //+---------------------------------------------------------------+
-   //| Constructor                                                   |
-   //+---------------------------------------------------------------+
    CData()
    {
       isTrackingPrice      = true;
@@ -38,9 +29,6 @@ public:
       isTrackingOrderEvent = true;
    }
 
-   //+---------------------------------------------------------------+
-   //| Live prices                                                   |
-   //+---------------------------------------------------------------+
    void SendCurrentPrices(ulong socket)
    {
       if(socket == DATA_INVALID_SOCKET)
@@ -48,63 +36,48 @@ public:
 
       CJAVal root;
       root["type"] = "price_update";
+      root["version"] = DATA_PROTOCOL_VERSION;
+      root["event_id"] = IntegerToString((long)GetTickCount64());
+      root["timestamp"] = (long)TimeCurrent();
 
       CJAVal prices;
       prices.Clear(jtARRAY);
 
       int total = SymbolsTotal(true);
-
       for(int i = 0; i < total; i++)
       {
          string symbol = SymbolName(i, true);
-
          if(symbol == "")
             continue;
 
          MqlTick tick;
-
          if(!SymbolInfoTick(symbol, tick))
             continue;
 
          CJAVal item;
-
          item["symbol"] = symbol;
-         item["bid"]    = tick.bid;
-         item["ask"]    = tick.ask;
-         item["last"]   = tick.last;
-         item["time"]   = (long)tick.time;
-
+         item["bid"] = tick.bid;
+         item["ask"] = tick.ask;
+         item["last"] = tick.last;
+         item["time"] = (long)tick.time;
+         item["time_msc"] = (long)tick.time_msc;
          prices.Add(item);
       }
 
       root["data"] = prices;
-
-      SendWebSocketMessage(
-         socket,
-         root.Serialize()
-      );
+      SendWebSocketMessage(socket, root.Serialize());
    }
 
-   //+---------------------------------------------------------------+
-   //| Live OHLC                                                     |
-   //+---------------------------------------------------------------+
    void SendCurrentOhlcs(ulong socket)
    {
       // Reserved for future live OHLC broadcasting.
-      // Historical OHLC is handled by CommandHandler.
    }
 
-   //+---------------------------------------------------------------+
-   //| Live market book                                              |
-   //+---------------------------------------------------------------+
    void SendCurrentMbook(ulong socket)
    {
       // Reserved for future market-depth broadcasting.
    }
 
-   //+---------------------------------------------------------------+
-   //| Trade transaction broadcast                                   |
-   //+---------------------------------------------------------------+
    void HandleTradeTransaction(
       const MqlTradeTransaction &trans,
       const MqlTradeRequest &request,
@@ -112,277 +85,105 @@ public:
       ulong socket
    )
    {
-      // Avoid unused-parameter warnings in some compiler builds.
       request;
       result;
 
-      if(!isTrackingOrderEvent)
-         return;
-
-      if(socket == DATA_INVALID_SOCKET)
+      if(!isTrackingOrderEvent || socket == DATA_INVALID_SOCKET)
          return;
 
       CJAVal json;
-
-      json["type"]       = "trade_event";
+      json["type"] = "trade_event";
+      json["version"] = DATA_PROTOCOL_VERSION;
+      json["event_id"] = IntegerToString((long)GetTickCount64());
+      json["timestamp"] = (long)TimeCurrent();
       json["trans_type"] = (long)trans.type;
-      json["symbol"]     = trans.symbol;
-      json["deal"]       = (long)trans.deal;
-      json["order"]      = (long)trans.order;
-      json["position"]   = (long)trans.position;
+      json["symbol"] = trans.symbol;
+      json["deal"] = (long)trans.deal;
+      json["order"] = (long)trans.order;
+      json["position"] = (long)trans.position;
 
-      if(
-         trans.type == TRADE_TRANSACTION_DEAL_ADD &&
+      if(trans.type == TRADE_TRANSACTION_DEAL_ADD &&
          trans.deal > 0 &&
-         HistoryDealSelect(trans.deal)
-      )
+         HistoryDealSelect(trans.deal))
       {
-         json["profit"] =
-            HistoryDealGetDouble(
-               trans.deal,
-               DEAL_PROFIT
-            );
+         long positionId = (long)HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID);
 
-         json["volume"] =
-            HistoryDealGetDouble(
-               trans.deal,
-               DEAL_VOLUME
-            );
-
-         json["price"] =
-            HistoryDealGetDouble(
-               trans.deal,
-               DEAL_PRICE
-            );
-
-         json["entry"] =
-            (long)HistoryDealGetInteger(
-               trans.deal,
-               DEAL_ENTRY
-            );
-
-         json["deal_type"] =
-            (long)HistoryDealGetInteger(
-               trans.deal,
-               DEAL_TYPE
-            );
-
-         json["commission"] =
-            HistoryDealGetDouble(
-               trans.deal,
-               DEAL_COMMISSION
-            );
-
-         json["swap"] =
-            HistoryDealGetDouble(
-               trans.deal,
-               DEAL_SWAP
-            );
-
-         json["magic"] =
-            (long)HistoryDealGetInteger(
-               trans.deal,
-               DEAL_MAGIC
-            );
-
-         json["comment"] =
-            HistoryDealGetString(
-               trans.deal,
-               DEAL_COMMENT
-            );
-
-         json["time"] =
-            (long)HistoryDealGetInteger(
-               trans.deal,
-               DEAL_TIME
-            );
-
-         json["position_id"] =
-            (long)HistoryDealGetInteger(
-               trans.deal,
-               DEAL_POSITION_ID
-            );
+         json["ticket"] = positionId > 0 ? positionId : (long)trans.position;
+         json["position_id"] = positionId;
+         json["profit"] = HistoryDealGetDouble(trans.deal, DEAL_PROFIT);
+         json["volume"] = HistoryDealGetDouble(trans.deal, DEAL_VOLUME);
+         json["price"] = HistoryDealGetDouble(trans.deal, DEAL_PRICE);
+         json["entry"] = (long)HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+         json["deal_type"] = (long)HistoryDealGetInteger(trans.deal, DEAL_TYPE);
+         json["commission"] = HistoryDealGetDouble(trans.deal, DEAL_COMMISSION);
+         json["swap"] = HistoryDealGetDouble(trans.deal, DEAL_SWAP);
+         json["magic"] = (long)HistoryDealGetInteger(trans.deal, DEAL_MAGIC);
+         json["comment"] = HistoryDealGetString(trans.deal, DEAL_COMMENT);
+         json["time"] = (long)HistoryDealGetInteger(trans.deal, DEAL_TIME);
+      }
+      else
+      {
+         json["ticket"] = (long)trans.position;
       }
 
-      SendWebSocketMessage(
-         socket,
-         json.Serialize()
-      );
+      SendWebSocketMessage(socket, json.Serialize());
    }
 
 private:
-
-   //+---------------------------------------------------------------+
-   //| Send RFC6455 server text frame                                |
-   //+---------------------------------------------------------------+
-   void SendWebSocketMessage(
-      ulong socket,
-      string message
-   )
+   void SendWebSocketMessage(ulong socket, string message)
    {
       if(socket == DATA_INVALID_SOCKET)
          return;
 
       uchar payload[];
-
-      int payloadLength =
-         StringToCharArray(
-            message,
-            payload,
-            0,
-            StringLen(message)
-         );
-
+      int payloadLength = StringToCharArray(message, payload, 0, StringLen(message));
       if(payloadLength <= 0)
          return;
 
       char frame[];
-
       int headerLength = 2;
 
-      // ------------------------------------------------------------
-      // Small payload
-      // ------------------------------------------------------------
       if(payloadLength <= 125)
       {
-         ArrayResize(
-            frame,
-            2 + payloadLength
-         );
-
+         ArrayResize(frame, 2 + payloadLength);
          frame[0] = (char)0x81;
          frame[1] = (char)payloadLength;
-
-         headerLength = 2;
       }
-      // ------------------------------------------------------------
-      // Extended 16-bit payload
-      // ------------------------------------------------------------
-      else
-      if(payloadLength <= 65535)
+      else if(payloadLength <= 65535)
       {
-         ArrayResize(
-            frame,
-            4 + payloadLength
-         );
-
+         ArrayResize(frame, 4 + payloadLength);
          frame[0] = (char)0x81;
          frame[1] = (char)126;
-
-         frame[2] =
-            (char)(
-               (payloadLength >> 8) & 0xFF
-            );
-
-         frame[3] =
-            (char)(
-               payloadLength & 0xFF
-            );
-
+         frame[2] = (char)((payloadLength >> 8) & 0xFF);
+         frame[3] = (char)(payloadLength & 0xFF);
          headerLength = 4;
       }
-      // ------------------------------------------------------------
-      // Extended 64-bit payload
-      // ------------------------------------------------------------
       else
       {
-         ArrayResize(
-            frame,
-            10 + payloadLength
-         );
-
+         ArrayResize(frame, 10 + payloadLength);
          frame[0] = (char)0x81;
          frame[1] = (char)127;
-
          ulong length = (ulong)payloadLength;
-
          for(int i = 0; i < 8; i++)
          {
             int shift = 56 - (i * 8);
-
-            frame[2 + i] =
-               (char)(
-                  (length >> shift) & 0xFF
-               );
+            frame[2 + i] = (char)((length >> shift) & 0xFF);
          }
-
          headerLength = 10;
       }
 
-      // ------------------------------------------------------------
-      // Copy payload into frame
-      // ------------------------------------------------------------
       for(int i = 0; i < payloadLength; i++)
-      {
-         frame[headerLength + i] =
-            (char)payload[i];
-      }
+         frame[headerLength + i] = (char)payload[i];
 
-      // ------------------------------------------------------------
-      // Send entire frame
-      // ------------------------------------------------------------
-      int totalLength =
-         ArraySize(frame);
-
+      int totalLength = ArraySize(frame);
       int sent = 0;
 
       while(sent < totalLength)
       {
-         int result =
-            send(
-               socket,
-               frame,
-               totalLength - sent,
-               0
-            );
-
+         int result = send(socket, frame, totalLength - sent, 0);
          if(result <= 0)
             break;
-
          sent += result;
-
-         if(sent < totalLength)
-         {
-            int remainingLength =
-               totalLength - sent;
-
-            char remaining[];
-
-            ArrayResize(
-               remaining,
-               remainingLength
-            );
-
-            for(
-               int j = 0;
-               j < remainingLength;
-               j++
-            )
-            {
-               remaining[j] =
-                  frame[sent + j];
-            }
-
-            ArrayResize(
-               frame,
-               remainingLength
-            );
-
-            for(
-               int j = 0;
-               j < remainingLength;
-               j++
-            )
-            {
-               frame[j] =
-                  remaining[j];
-            }
-
-            totalLength =
-               remainingLength;
-
-            sent = 0;
-         }
       }
    }
 };
