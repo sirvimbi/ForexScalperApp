@@ -1,1 +1,245 @@
-業灯牴⁓睩晴啉੩浰潲琠啮楦潲浔祰敉摥湴楦楥牳ਊ獴牵捴⁉湳楧桴獖楥眺⁖楥眠笊††䁏扳敲癥摏扪散琠癡爠癩敷䵯摥氺⁄慳桢潡牤噩敷䵯摥氊††ਠ†⁶慲⁢潤示⁳潭攠噩敷⁻ਠ†††⁖却慣欨獰慣楮机‰⤠笊††††††⍩映潳⡭慣体⤊††††††䡓瑡捫⁻ਠ†††††††⁳散瑩潮䡥慤敲⠢䝏䐠䵏䑅⁉乓䥇䡔匢Ⱐ楣潮㨠≢牡楮⹨敡搮灲潦楬攢Ⱐ捯汯爺‮慣捥湴䍹慮⤊††††††††印慣敲⠩ਠ†††††††⁂畴瑯渨慣瑩潮㨠笠癩敷䵯摥氮慬汉湳楧桴献牥浯癥䅬氨⤠紩⁻ਠ†††††††††⁔數琨≃䱅䅒⁁䱌∩⹦潮琨⹳祳瑥洨獩穥㨠㄰Ⱐ睥楧桴㨠⹢潬搩⤮景牥杲潵湤䍯汯爨⹡捣敮瑒敤⤊††††††††紮扵瑴潮却祬攨⹰污楮⤊††††††紊††††††⹰慤摩湧⠲〩ਠ†††††‮扡捫杲潵湤⡃潬潲⹢杓散潮摡特⤊††††††⍥湤楦ਠ††††† ††††††卣牯汬噩敷⁻ਠ†††††††⁖却慣欨獰慣楮机‱㈩⁻ਠ†††††††††⁩映癩敷䵯摥氮慬汉湳楧桴献楳䕭灴礠笊††††††††††††噓瑡捫⡳灡捩湧㨠㈰⤠笊††††††††††††††䥭慧攨獹獴敭乡浥㨠≢牡楮⹨敡搮灲潦楬攢⤊††††††††††††††††⹦潮琨⹳祳瑥洨獩穥㨠㐰⤩ਠ†††††††††††††††‮景牥杲潵湤䍯汯爨⹴數瑍畴敤⤊††††††††††††††呥硴⠢乯⁰敲景牭慮捥⁯爠湥睳⁷慲湩湧猠祥琮∩ਠ†††††††††††††††‮景牥杲潵湤䍯汯爨⹴數瑍畴敤⤊††††††††††††††††⹦潮琨⹳畢桥慤汩湥⤊††††††††††††紊††††††††††††⹰慤摩湧⠮瑯瀬‱〰⤊††††††††††素敬獥⁻ਠ†††††††††††⁆潲䕡捨⡶楥睍潤敬⹡汬䥮獩杨瑳⤠笠楮獩杨琠楮ਠ†††††††††††††⁬整⁣潬潲㨠䍯汯爠㴠笊††††††††††††††††獷楴捨⁩湳楧桴⹴祰攠笊††††††††††††††††捡獥‮湥睳䉲潡摣慳琺⁲整畲渠⹡捣敮瑇潬搊††††††††††††††††捡獥‮獩杮慬䡩獴潲示⁲整畲渠⹡捣敮瑇牥敮ਠ†††††††††††††††⁤敦慵汴㨠牥瑵牮‮慣捥湴䍹慮ਠ†††††††††††††††⁽ਠ†††††††††††††⁽⠩ਠ†††††††††††††⁇污獳䍡牤⡢潲摥牃潬潲㨠捯汯爮潰慣楴礨〮㌩⤠笊††††††††††††††††噓瑡捫⡡汩杮浥湴㨠⹬敡摩湧Ⱐ獰慣楮机‱〩⁻ਠ†††††††††††††††††⁈却慣欠笊††††††††††††††††††††呡杂慤来⡴數琺⁩湳楧桴⹴祰攮牡睖慬略Ⱐ捯汯爺⁣潬潲⤊††††††††††††††††††††呥硴⡩湳楧桴⹴楴汥⤊††††††††††††††††††††††⹦潮琨⹳祳瑥洨獩穥㨠ㄴⰠ睥楧桴㨠⹢污捫Ⱐ摥獩杮㨠⹭潮潳灡捥搩⤊††††††††††††††††††††††⹦潲敧牯畮摃潬潲⠮瑥硴偲業慲礩ਠ†††††††††††††††††††⁓灡捥爨⤊††††††††††††††††††††呥硴⡦潲浡瑌潧呩浥⡩湳楧桴⹴業敳瑡浰⤩ਠ†††††††††††††††††††††‮景湴⠮獹獴敭⡳楺攺‱〬⁤敳楧渺‮浯湯獰慣敤⤩ਠ†††††††††††††††††††††‮景牥杲潵湤䍯汯爨⹴數瑍畴敤⤊††††††††††††††††††紊††††††††††††††††††ਠ†††††††††††††††††⁔數琨楮獩杨琮浥獳慧攩ਠ†††††††††††††††††††‮景湴⠮獹獴敭⡳楺攺‱㈩⤊††††††††††††††††††††⹦潲敧牯畮摃潬潲⠮瑥硴卥捯湤慲礩ਠ†††††††††††††††††††‮汩湥䱩浩琨㌩ਠ††††††††††††††††† ††††††††††††††††††楦‡楮獩杨琮慦晥捴敤偡楲献楳䕭灴礠笊††††††††††††††††††††䡓瑡捫⡳灡捩湧㨠㘩⁻ਠ†††††††††††††††††††††⁔數琨≁䙆䕃呅䐺∩ਠ†††††††††††††††††††††††‮景湴⠮獹獴敭⡳楺攺‹Ⱐ睥楧桴㨠⹢潬搩⤊††††††††††††††††††††††††⹦潲敧牯畮摃潬潲⠮瑥硴䵵瑥搩ਠ††††††††††††††††††††† ††††††††††††††††††††††䙯牅慣栨楮獩杨琮慦晥捴敤偡楲猬⁩携⁜⹳敬昩⁻⁰慩爠楮ਠ†††††††††††††††††††††††⁔數琨灡楲⤊††††††††††††††††††††††††††⹦潮琨⹳祳瑥洨獩穥㨠㤬⁷敩杨琺‮扯汤Ⱐ摥獩杮㨠⹭潮潳灡捥搩⤊††††††††††††††††††††††††††⹰慤摩湧⠮桯物穯湴慬Ⱐ㘩ਠ†††††††††††††††††††††††††‮灡摤楮木⹶敲瑩捡氬′⤊††††††††††††††††††††††††††⹢慣歧牯畮搨䍯汯爮睨楴攮潰慣楴礨〮〵⤩ਠ†††††††††††††††††††††††††‮捯牮敲剡摩畳⠳⤊††††††††††††††††††††††紊††††††††††††††††††††††ਠ†††††††††††††††††††††⁓灡捥爨⤊††††††††††††††††††††††ਠ†††††††††††††††††††††⁩映楮獩杨琮獥湴業敮琠ℽ‮湯湥⁻ਠ†††††††††††††††††††††††⁈却慣欨獰慣楮机‴⤠笊††††††††††††††††††††††††††䥭慧攨獹獴敭乡浥㨠楮獩杨琮獥湴業敮琠㴽‮扵礠㼠≣桡牴⹬楮攮異瑲敮搮硹慸楳∠㨠≣桡牴⹬楮攮摯睮瑲敮搮硹慸楳∩ਠ†††††††††††††††††††††††††⁔數琨楮獩杨琮獥湴業敮琠㴽‮扵礠㼠≂啌䱉午∠㨠≂䕁剉午∩ਠ†††††††††††††††††††††††⁽ਠ†††††††††††††††††††††††‮景湴⠮獹獴敭⡳楺攺‹Ⱐ睥楧桴㨠⹢污捫⤩ਠ†††††††††††††††††††††††‮景牥杲潵湤䍯汯爨楮獩杨琮獥湴業敮琠㴽‮扵礠㼠⹡捣敮瑇牥敮›‮慣捥湴剥搩ਠ†††††††††††††††††††††⁽ਠ†††††††††††††††††††⁽ਠ†††††††††††††††††††‮灡摤楮木⹴潰Ⱐ㐩ਠ†††††††††††††††††⁽ਠ†††††††††††††††⁽ਠ†††††††††††††††‮灡摤楮木ㄴ⤊††††††††††††††紊††††††††††††紊††††††††††紊††††††††紊††††††††⹰慤摩湧⠲〩ਠ†††††⁽ਠ†††⁽ਠ†††‮扡捫杲潵湤⡃潬潲⹢材物浡特⤊††紊ਠ†⁰物癡瑥⁦畮挠獥捴楯湈敡摥爨张瑩瑬攺⁓瑲楮本⁩捯渺⁓瑲楮本⁣潬潲㨠䍯汯爩‭㸠獯浥⁖楥眠笊††††䡓瑡捫⡳灡捩湧㨠㠩⁻ਠ†††††⁉浡来⡳祳瑥济慭攺⁩捯温ਠ†††††††‮景湴⠮獹獴敭⡳楺攺‱㈬⁷敩杨琺‮扯汤⤩ਠ†††††††‮景牥杲潵湤䍯汯爨捯汯爩ਠ†††††⁔數琨瑩瑬攩ਠ†††††††‮景湴⠮獹獴敭⡳楺攺‱㈬⁷敩杨琺‮扯汤Ⱐ摥獩杮㨠⹭潮潳灡捥搩⤊††††††††⹦潲敧牯畮摃潬潲⠮瑥硴偲業慲礩ਠ†††††††‮瑲慣歩湧⠱⤊††††紊††紊ਠ†⁰物癡瑥⁦畮挠景牭慴䱯杔業攨张摡瑥㨠䑡瑥⤠ⴾ⁓瑲楮朠笊††††汥琠景牭慴瑥爠㴠䑡瑥䙯牭慴瑥爨⤊††††景牭慴瑥爮摡瑥䙯牭慴‽•䡈㩭洺獳∊††††牥瑵牮⁦潲浡瑴敲⹳瑲楮木晲潭㨠摡瑥⤊††紊紊ੳ瑲畣琠卹獴敭䱯杳噩敷㨠噩敷⁻ਠ†⁀佢獥牶敤佢橥捴⁶慲⁣潮獯汥䱯杧敲‽⁃潮獯汥䱯杧敲⹳桡牥搊††䁏扳敲癥摏扪散琠癡爠癩敷䵯摥氺⁄慳桢潡牤噩敷䵯摥氊††䁓瑡瑥⁰物癡瑥⁶慲⁩獅硰潲瑩湧䱯杳‽⁦慬獥ਠ† ††癡爠扯摹㨠獯浥⁖楥眠笊††††噓瑡捫⡳灡捩湧㨠〩⁻ਠ†††††‣楦⁯猨浡捏匩ਠ†††††⁈却慣欠笊††††††††呥硴⠢卙協䕍⁌佇匠☠䑉䅇乏協䥃匢⤊††††††††††⹦潮琨⹳祳瑥洨獩穥㨠ㄴⰠ睥楧桴㨠⹢潬搬⁤敳楧渺‮浯湯獰慣敤⤩ਠ†††††††††‮景牥杲潵湤䍯汯爨⹡捣敮瑃祡温ਠ†††††††††‮瑲慣歩湧⠲⤊††††††††印慣敲⠩ਠ††††††† ††††††††䉵瑴潮⡡捴楯渺⁻ਠ†††††††††⁃潮獯汥䱯杧敲⹳桡牥搮捬敡牌潧猨⤊††††††††紩⁻ਠ†††††††††⁌慢敬⠢䍌䕁刢Ⱐ獹獴敭䥭慧攺•瑲慳栮晩汬∩ਠ†††††††††††‮景湴⠮獹獴敭⡳楺攺‱〬⁷敩杨琺‮扯汤Ⱐ摥獩杮㨠⹭潮潳灡捥搩⤊††††††††††††⹦潲敧牯畮摃潬潲⠮慣捥湴剥搩ਠ†††††††⁽ਠ†††††††‮扵瑴潮却祬攨⹰污楮⤊††††††††⹰慤摩湧⠮桯物穯湴慬Ⱐ㄰⤮灡摤楮木⹶敲瑩捡氬‵⤊††††††††⹢慣歧牯畮搨䍯汯爮慣捥湴剥搮潰慣楴礨〮ㄩ⤊††††††††⹣潲湥牒慤極猨㐩ਠ††††††† ††††††††䉵瑴潮⡡捴楯渺⁻ਠ†††††††††⁥硰潲瑌潧猨⤊††††††††紩⁻ਠ†††††††††⁌慢敬⠢䕘偏剔 ⹔塔⤢Ⱐ獹獴敭䥭慧攺•獱畡牥⹡湤⹡牲潷⹤潷渮晩汬∩ਠ†††††††††††‮景湴⠮獹獴敭⡳楺攺‱〬⁷敩杨琺‮扯汤Ⱐ摥獩杮㨠⹭潮潳灡捥搩⤊††††††††††††⹦潲敧牯畮摃潬潲⠮执偲業慲礩ਠ†††††††⁽ਠ†††††††‮扵瑴潮却祬攨⹰污楮⤊††††††††⹰慤摩湧⠮桯物穯湴慬Ⱐㄲ⤮灡摤楮木⹶敲瑩捡氬‶⤊††††††††⹢慣歧牯畮搨䍯汯爮慣捥湴䍹慮⤊††††††††⹣潲湥牒慤極猨㐩ਠ†††††⁽ਠ†††††‮灡摤楮木⹨潲楺潮瑡氬′〩ਠ†††††‮灡摤楮木⹶敲瑩捡氬‱㐩ਠ††††† ††††††䑩癩摥爨⤮扡捫杲潵湤⡃潬潲⹢潲摥牓畢瑬攩ਠ†††††‣敮摩昊††††††ਠ†††††⁓捲潬汖楥睒敡摥爠笠灲潸礠楮ਠ†††††††⁓捲潬汖楥眠笊††††††††††噓瑡捫⡡汩杮浥湴㨠⹬敡摩湧Ⱐ獰慣楮机‶⤠笊††††††††††††䙯牅慣栨捯湳潬敌潧来爮汯杳⹲敶敲獥搨⤩⁻⁥湴特⁩渊††††††††††††††䡓瑡捫⡡汩杮浥湴㨠⹴潰Ⱐ獰慣楮机‱〩⁻ਠ†††††††††††††††⁔數琨景牭慴䱯杔業攨敮瑲礮瑩浥獴慭瀩⤊††††††††††††††††††⹦潮琨⹳祳瑥洨獩穥㨠㄰Ⱐ摥獩杮㨠⹭潮潳灡捥搩⤊††††††††††††††††††⹦潲敧牯畮摃潬潲⠮瑥硴䵵瑥搩ਠ†††††††††††††††††‮晲慭攨睩摴栺‸〬⁡汩杮浥湴㨠⹬敡摩湧⤊††††††††††††††††ਠ†††††††††††††††⁔數琨敮瑲礮汥癥氮楣潮⤊††††††††††††††††††⹦潮琨⹳祳瑥洨獩穥㨠ㄱ⤩ਠ††††††††††††††† ††††††††††††††††呥硴⡥湴特⹭敳獡来⤊††††††††††††††††††⹦潮琨⹳祳瑥洨獩穥㨠ㄱⰠ摥獩杮㨠⹭潮潳灡捥搩⤊††††††††††††††††††⹦潲敧牯畮摃潬潲⡥湴特⹬敶敬⹣潬潲⤊††††††††††††††††††⹴數瑓敬散瑩潮⠮敮慢汥搩ਠ††††††††††††††† ††††††††††††††††印慣敲⠩ਠ†††††††††††††⁽ਠ†††††††††††††‮灡摤楮木⹨潲楺潮瑡氬′〩ਠ†††††††††††††‮楤⡥湴特⹩搩ਠ†††††††††††⁽ਠ†††††††††⁽ਠ†††††††††‮灡摤楮木⹶敲瑩捡氬‱㐩ਠ†††††††⁽ਠ†††††††‮潮䍨慮来⡯昺⁣潮獯汥䱯杧敲⹬潧献捯畮琩⁻⁯汤Ⱐ湥睖慬略⁩渊††††††††††楦⁬整⁦楲獴‽⁃潮獯汥䱯杧敲⹳桡牥搮汯杳⹬慳琠笊††††††††††††睩瑨䅮業慴楯渠笊††††††††††††††灲潸礮獣牯汬呯⡦楲獴⹩搬⁡湣桯爺‮瑯瀩ਠ†††††††††††⁽ਠ†††††††††⁽ਠ†††††††⁽ਠ†††††⁽ਠ†††††‮扡捫杲潵湤⡃潬潲⹢污捫⹯灡捩瑹⠰⸳⤩ਠ†††⁽ਠ†††‣楦‡潳⡭慣体⤊††††⹦楬故硰潲瑥爨ਠ†††††⁩獐牥獥湴敤㨠⑩獅硰潲瑩湧䱯杳Ⰺ††††††摯捵浥湴㨠䱯杄潣畭敮琨瑥硴㨠䍯湳潬敌潧来爮獨慲敤⹥硰潲瑌潧猨⤩Ⰺ††††††捯湴敮瑔祰攺‮灬慩湔數琬ਠ†††††⁤敦慵汴䙩汥湡浥㨠≇潤䵯摥彌潧獟尨䥮琨䑡瑥⠩⹴業敉湴敲癡汓楮捥ㄹ㜰⤩⹴硴∊††††⤠笠牥獵汴⁩渊††††††楦⁣慳攠⹳畣捥獳⡬整⁵牬⤠㴠牥獵汴⁻ਠ†††††††⁰物湴⠢蔠䱯杳⁥硰潲瑥搠瑯㨠尨畲氮灡瑨⤢⤊††††††紊††††紊††††⍥湤楦ਠ†⁽ਠ† ††灲楶慴攠晵湣⁥硰潲瑌潧猨⤠笊††††汥琠汯杳呥硴‽⁃潮獯汥䱯杧敲⹳桡牥搮數灯牴䱯杳⠩ਠ†††⁬整⁦楬敎慭攠㴠≇潤䵯摥彌潧獟尨䥮琨䑡瑥⠩⹴業敉湴敲癡汓楮捥ㄹ㜰⤩⹴硴∊††††ਠ†††‣楦⁯猨浡捏匩ਠ†††⁬整⁳慶敐慮敬‽⁎卓慶敐慮敬⠩ਠ†††⁳慶敐慮敬⹡汬潷敤䍯湴敮瑔祰敳‽⁛⹰污楮呥硴崊††††獡癥偡湥氮湡浥䙩敬摓瑲楮杖慬略‽⁦楬敎慭攊††††獡癥偡湥氮浥獳慧攠㴠≃桯潳攠睨敲攠瑯⁳慶攠祯畲⁓祳瑥洠䱯杳∊††††ਠ†††⁩映獡癥偡湥氮牵湍潤慬⠩‽㴠⹏䬬⁬整⁵牬‽⁳慶敐慮敬⹵牬⁻ਠ†††††⁤漠笊††††††††瑲礠汯杳呥硴⹷物瑥⡴漺⁵牬Ⱐ慴潭楣慬汹㨠瑲略Ⱐ敮捯摩湧㨠⹵瑦㠩ਠ†††††††⁧潤䱯木⋰龓脠䱯杳⁅硰潲瑥携⁜⡵牬⹰慴栩∬⁬敶敬㨠⹳畣捥獳⤊††††††††癩敷䵯摥氮獨潷乯瑩晩捡瑩潮⡴楴汥㨠≅硰潲琠卵捣敳獦畬∬⁭敳獡来㨠≌潧猠獡癥搠獵捣敳獦畬汹⸢⤊††††††素捡瑣栠笊††††††††杯摌潧⠢谠䕸灯牴⁆慩汥携⁜⡥牲潲⹬潣慬楺敤䑥獣物灴楯温∬⁬敶敬㨠⹥牲潲⤊††††††††癩敷䵯摥氮獨潷乯瑩晩捡瑩潮⡴楴汥㨠≅硰潲琠䙡楬敤∬⁭敳獡来㨠敲牯爮汯捡汩穥摄敳捲楰瑩潮⤊††††††紊††††紊††††⍥汳攊††††楳䕸灯牴楮杌潧猠㴠瑲略ਠ†††‣敮摩昊††紊††ਠ†⁰物癡瑥⁦畮挠景牭慴䱯杔業攨张摡瑥㨠䑡瑥⤠ⴾ⁓瑲楮朠笊††††汥琠景牭慴瑥爠㴠䑡瑥䙯牭慴瑥爨⤊††††景牭慴瑥爮摡瑥䙯牭慴‽•䡈㩭洺獳⹓卓∊††††牥瑵牮⁦潲浡瑴敲⹳瑲楮木晲潭㨠摡瑥⤊††紊紊
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct InsightsView: View {
+    @ObservedObject var viewModel: DashboardViewModel
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            #if os(macOS)
+            HStack {
+                sectionHeader("GOD MODE INSIGHTS", icon: "brain.head.profile", color: .accentCyan)
+                Spacer()
+                Button(action: { viewModel.allInsights.removeAll() }) {
+                    Text("CLEAR ALL").font(.system(size: 10, weight: .bold)).foregroundColor(.accentRed)
+                }.buttonStyle(.plain)
+            }
+            .padding(20)
+            .background(Color.bgSecondary)
+            #endif
+            
+            ScrollView {
+                VStack(spacing: 12) {
+                    if viewModel.allInsights.isEmpty {
+                        VStack(spacing: 20) {
+                            Image(systemName: "brain.head.profile")
+                                .font(.system(size: 40))
+                                .foregroundColor(.textMuted)
+                            Text("No performance or news warnings yet.")
+                                .foregroundColor(.textMuted)
+                                .font(.subheadline)
+                        }
+                        .padding(.top, 100)
+                    } else {
+                        ForEach(viewModel.allInsights) { insight in
+                            let color: Color = {
+                                switch insight.type {
+                                case .newsBroadcast: return .accentGold
+                                case .signalHistory: return .accentGreen
+                                default: return .accentCyan
+                                }
+                            }()
+                            GlassCard(borderColor: color.opacity(0.3)) {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack {
+                                        TagBadge(text: insight.type.rawValue, color: color)
+                                        Text(insight.title)
+                                            .font(.system(size: 14, weight: .black, design: .monospaced))
+                                            .foregroundColor(.textPrimary)
+                                        Spacer()
+                                        Text(formatLogTime(insight.timestamp))
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundColor(.textMuted)
+                                    }
+                                    
+                                    Text(insight.message)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.textSecondary)
+                                        .lineLimit(3)
+                                    
+                                    if !insight.affectedPairs.isEmpty {
+                                        HStack(spacing: 6) {
+                                            Text("AFFECTED:")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundColor(.textMuted)
+                                            
+                                            ForEach(insight.affectedPairs, id: \.self) { pair in
+                                                Text(pair)
+                                                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(Color.white.opacity(0.05))
+                                                    .cornerRadius(3)
+                                            }
+                                            
+                                            Spacer()
+                                            
+                                            if insight.sentiment != .none {
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: insight.sentiment == .buy ? "chart.line.uptrend.xyaxis" : "chart.line.downtrend.xyaxis")
+                                                    Text(insight.sentiment == .buy ? "BULLISH" : "BEARISH")
+                                                }
+                                                .font(.system(size: 9, weight: .black))
+                                                .foregroundColor(insight.sentiment == .buy ? .accentGreen : .accentRed)
+                                            }
+                                        }
+                                        .padding(.top, 4)
+                                    }
+                                }
+                                .padding(14)
+                            }
+                        }
+                    }
+                }
+                .padding(20)
+            }
+        }
+        .background(Color.bgPrimary)
+    }
+    
+    private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(color)
+            Text(title)
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(.textPrimary)
+                .tracking(1)
+        }
+    }
+    
+    private func formatLogTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
+    }
+}
+
+struct SystemLogsView: View {
+    @ObservedObject var consoleLogger = ConsoleLogger.shared
+    @ObservedObject var viewModel: DashboardViewModel
+    @State private var isExportingLogs = false
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            #if os(macOS)
+            HStack {
+                Text("SYSTEM LOGS & DIAGNOSTICS")
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .foregroundColor(.accentCyan)
+                    .tracking(2)
+                Spacer()
+                
+                Button(action: {
+                    ConsoleLogger.shared.clearLogs()
+                }) {
+                    Label("CLEAR", systemImage: "trash.fill")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.accentRed)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Color.accentRed.opacity(0.1))
+                .cornerRadius(4)
+                
+                Button(action: {
+                    exportLogs()
+                }) {
+                    Label("EXPORT (.TXT)", systemImage: "square.and.arrow.down.fill")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.bgPrimary)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.accentCyan)
+                .cornerRadius(4)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            
+            Divider().background(Color.borderSubtle)
+            #endif
+            
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(consoleLogger.logs.reversed()) { entry in
+                            HStack(alignment: .top, spacing: 10) {
+                                Text(formatLogTime(entry.timestamp))
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.textMuted)
+                                    .frame(width: 80, alignment: .leading)
+                                
+                                Text(entry.level.icon)
+                                    .font(.system(size: 11))
+                                
+                                Text(entry.message)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(entry.level.color)
+                                    .textSelection(.enabled)
+                                
+                                Spacer()
+                            }
+                            .padding(.horizontal, 20)
+                            .id(entry.id)
+                        }
+                    }
+                    .padding(.vertical, 14)
+                }
+                .onChange(of: consoleLogger.logs.count) { old, newValue in
+                    if let first = ConsoleLogger.shared.logs.last {
+                        withAnimation {
+                            proxy.scrollTo(first.id, anchor: .top)
+                        }
+                    }
+                }
+            }
+        }
+        .background(Color.black.opacity(0.3))
+        
+        #if !os(macOS)
+        .fileExporter(
+            isPresented: $isExportingLogs,
+            document: LogDocument(text: ConsoleLogger.shared.exportLogs()),
+            contentType: .plainText,
+            defaultFilename: "GodMode_Logs_\(Int(Date().timeIntervalSince1970)).txt"
+        ) { result in
+            if case .success(let url) = result {
+                print("✅ Logs exported to: \(url.path)")
+            }
+        }
+        #endif
+    }
+    
+    private func exportLogs() {
+        let logsText = ConsoleLogger.shared.exportLogs()
+        let filename = "GodMode_Logs_\(Int(Date().timeIntervalSince1970)).txt"
+        
+        #if os(macOS)
+        let savePanel = NSSavePanel()
+        savePanel.allowedContentTypes = [.plainText]
+        savePanel.nameFieldStringValue = filename
+        savePanel.message = "Choose where to save your System Logs"
+        
+        if savePanel.runModal() == .OK, let url = savePanel.url {
+            do {
+                try logsText.write(to: url, atomically: true, encoding: .utf8)
+                godLog("📂 Logs Exported: \(url.path)", level: .success)
+                viewModel.showNotification(title: "Export Successful", message: "Logs saved successfully.")
+            } catch {
+                godLog("❌ Export Failed: \(error.localizedDescription)", level: .error)
+                viewModel.showNotification(title: "Export Failed", message: error.localizedDescription)
+            }
+        }
+        #else
+        isExportingLogs = true
+        #endif
+    }
+    
+    private func formatLogTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        return formatter.string(from: date)
+    }
+}
