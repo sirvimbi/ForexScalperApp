@@ -1,0 +1,20 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const orderRoutes_1 = __importDefault(require("./order/orderRoutes"));
+const accountRoutes_1 = __importDefault(require("./account/accountRoutes"));
+const historyRoutes_1 = __importDefault(require("./history/historyRoutes"));
+const trackRoutes_1 = __importDefault(require("./track/trackRoutes"));
+const symbolRoutes_1 = __importDefault(require("./symbol/symbolRoutes"));
+const Others_1 = __importDefault(require("./Others"));
+const router = (0, express_1.Router)();
+router.use(orderRoutes_1.default);
+router.use(accountRoutes_1.default);
+router.use(historyRoutes_1.default);
+router.use(trackRoutes_1.default);
+router.use(symbolRoutes_1.default);
+router.use(Others_1.default);
+exports.default = router;

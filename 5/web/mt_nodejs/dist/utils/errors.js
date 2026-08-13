@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SeriviceUnavailable = exports.Unauthorized = exports.BadRequest = exports.NotFound = void 0;
+const HttpError_1 = require("./HttpError");
+const NotFound = (msg = 'Not Found') => new HttpError_1.HttpError(404, msg);
+exports.NotFound = NotFound;
+const BadRequest = (msg = 'Bad Request') => new HttpError_1.HttpError(400, msg);
+exports.BadRequest = BadRequest;
+const Unauthorized = (msg = 'Unauthorized') => new HttpError_1.HttpError(401, msg);
+exports.Unauthorized = Unauthorized;
+const SeriviceUnavailable = (msg = 'Service Unavailable') => new HttpError_1.HttpError(503, msg);
+exports.SeriviceUnavailable = SeriviceUnavailable;
