@@ -535,7 +535,7 @@ class DashboardViewModel: ObservableObject {
                         timestamp: Date()
                     )
                     
-                    if let self = self, !self.allInsights.contains(where: {
+                    if !self.allInsights.contains(where: {
                         $0.type == insight.type && 
                         $0.title == insight.title && 
                         $0.message == insight.message

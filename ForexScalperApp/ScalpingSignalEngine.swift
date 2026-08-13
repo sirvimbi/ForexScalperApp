@@ -156,17 +156,7 @@ actor ScalpingSignalEngine {
         let threshold = await MainActor.run { ScalpingConfig.shared.getConfidenceThreshold(for: symbol) }
 
         // Detailed Logging
-        let metPillars = finalSignal.confidenceFactors.keys.sorted()
-        let allPillars = ["HTF Power Alignment", "Elite Dip Buy", "Elite Rally Sell", "Smart Money Volume", "Structural Support", "Structural Resistance", "BB Lower Sweep", "BB Upper Sweep", "Cyclical Strength", "SAR Support", "SAR Resistance", "Momentum Surge", "ML Confirmed", "Order Flow Buy", "Order Flow Sell"]
-        let failedPillars = allPillars.filter { pillar in
-            !metPillars.contains { $0 == pillar }
-        }
-
-        let metString = metPillars.map { "✅ \($0)" }.joined(separator: ", ")
-        let failedString = failedPillars.map { "❌ \($0)" }.joined(separator: ", ")
-
-        let logMsg = "📊 EVAL: \(symbol) \(finalSignal.type) | Conf: \(Int(finalSignal.confidence))% (Need \(Int(threshold))%) | MET: [\(metString)] | FAILED: [\(failedString)]"
-        godLog(logMsg, level: .info)
+        logEvaluation(symbol: symbol, signal: finalSignal, threshold: threshold)
 
         if finalSignal.type == .none || finalSignal.confidence < threshold {
             return nil
@@ -193,6 +183,18 @@ actor ScalpingSignalEngine {
         lastSignalTime[symbol] = Date()
         godLog("🚀 HYBRID SIGNAL: \(symbol) | Confidence: \(Int(adjustedSignal.confidence))%", level: .success)
         return adjustedSignal
+    }
+    
+    /// Internal method to log detailed evaluation factors for transparency
+    private func logEvaluation(symbol: String, signal: ScalpingSignal, threshold: Double) {
+        let metPillars = signal.confidenceFactors.keys.sorted()
+        let allPillars = ["HTF Power Alignment", "Elite Dip Buy", "Elite Rally Sell", "Smart Money Volume", "Structural Support", "Structural Resistance", "BB Lower Sweep", "BB Upper Sweep", "Cyclical Strength", "SAR Support", "SAR Resistance", "Momentum Surge", "ML Confirmed", "Order Flow Buy", "Order Flow Sell"]
+        
+        let metString = metPillars.map { "✅ \($0)" }.joined(separator: ", ")
+        let failedString = allPillars.filter { !metPillars.contains($0) }.map { "❌ \($0)" }.joined(separator: ", ")
+        
+        let logMsg = "📊 EVAL: \(symbol) \(signal.type) | Conf: \(Int(signal.confidence))% (Need \(Int(threshold))%) | MET: [\(metString)] | FAILED: [\(failedString)]"
+        godLog(logMsg, level: .info)
     }
 
     // --- FAST EVALUATION (V10.0 Early Entry) ---
