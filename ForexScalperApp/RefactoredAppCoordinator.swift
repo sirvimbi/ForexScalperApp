@@ -763,19 +763,8 @@ class RefactoredAppCoordinator: ObservableObject {
             )
 
             await MainActor.run {
-                if let index = signals.firstIndex(where: { $0.id == normalizedSignal.id }) {
-                    var updatedSignal = normalizedSignal
-                    updatedSignal.status = .accepted
-                    updatedSignal.acceptedAt = Date()
-                    updatedSignal.acceptedPrice = normalizedSignal.price
-                    updatedSignal.positionSize = finalVolume
-                    updatedSignal.stopLoss = finalSL
-                    updatedSignal.takeProfit = finalTP
-                    updatedSignal.tradeId = trade.id
-                    updatedSignal.externalDealId = externalDealId
-                    signals[index] = updatedSignal
-                    objectWillChange.send()
-                }
+                self.signals.removeAll { $0.id == normalizedSignal.id }
+                self.objectWillChange.send()
             }
 
             await currentRiskManager.registerTrade(trade)
@@ -791,11 +780,6 @@ class RefactoredAppCoordinator: ObservableObject {
             }
 
             await tradeHistory.addTrade(trade)
-
-            await MainActor.run {
-                self.signals.removeAll { $0.id == normalizedSignal.id }
-                self.objectWillChange.send()
-            }
 
             godLog("✅ Trade opened: \(normalizedSymbol) - Risk: KES \(String(format: "%.2f", positionSize.riskAmount))", level: .success)
         }
