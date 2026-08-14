@@ -1,23 +1,56 @@
 import Foundation
 import SwiftUI
+import Combine
 
-/// Keeps broker-derived UI state fresh while the application remains open.
-/// This is deliberately separate from the signal engine so refreshing account/history
-/// never blocks signal calculation.
+extension Notification.Name {
+    static let dismissSignalOverlay = Notification.Name("StellasDismissSignalOverlay")
+}
+
 @MainActor
 final class AppRuntimeMaintenance: ObservableObject {
     private weak var coordinator: RefactoredAppCoordinator?
     private weak var viewModel: DashboardViewModel?
     private var task: Task<Void, Never>?
+    private var signalCancellable: AnyCancellable?
+    private var previousSignalStates: [UUID: Signal.Status] = [:]
 
     init(coordinator: RefactoredAppCoordinator, viewModel: DashboardViewModel) {
         self.coordinator = coordinator
         self.viewModel = viewModel
+        self.previousSignalStates = Dictionary(uniqueKeysWithValues: coordinator.signals.map { ($0.id, $0.status) })
+        observeSignalLifecycle(coordinator)
         start()
     }
 
     deinit {
         task?.cancel()
+        signalCancellable?.cancel()
+    }
+
+    private func observeSignalLifecycle(_ coordinator: RefactoredAppCoordinator) {
+        signalCancellable = coordinator.$signals
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] signals in
+                guard let self else { return }
+                let current = Dictionary(uniqueKeysWithValues: signals.map { ($0.id, $0.status) })
+                var shouldDismiss = false
+
+                for (id, oldStatus) in previousSignalStates where oldStatus == .pending {
+                    if let newStatus = current[id], newStatus != .pending {
+                        shouldDismiss = true
+                        break
+                    }
+                    if current[id] == nil {
+                        shouldDismiss = true
+                        break
+                    }
+                }
+
+                previousSignalStates = current
+                if shouldDismiss {
+                    NotificationCenter.default.post(name: .dismissSignalOverlay, object: nil)
+                }
+            }
     }
 
     func start() {
@@ -34,8 +67,6 @@ final class AppRuntimeMaintenance: ObservableObject {
                     viewModel.refreshData()
                 }
 
-                // A full history/position reconciliation is more expensive than an
-                // account refresh, so run it every three minutes instead of every minute.
                 if cycle % 3 == 0, let coordinator = self.coordinator {
                     await coordinator.syncMT5Trades()
                     self.viewModel?.refreshData()
@@ -45,8 +76,6 @@ final class AppRuntimeMaintenance: ObservableObject {
     }
 }
 
-/// Re-fetches broker history on demand. This is used by the History tab after a
-/// local clear so the user can immediately repopulate it without restarting the app.
 enum MT5HistoryRefreshService {
     @MainActor
     static func refresh() async {
@@ -97,9 +126,6 @@ enum MT5HistoryRefreshService {
     }
 }
 
-/// App-side MT5 disconnect control. The bridge remains running, but the Swift app
-/// stops its event stream immediately and marks the UI disconnected. The normal
-/// connection/reconciliation flow can reconnect later through the existing Connect button.
 struct MT5DisconnectControl: View {
     @ObservedObject var viewModel: DashboardViewModel
     @ObservedObject var coordinator: RefactoredAppCoordinator
