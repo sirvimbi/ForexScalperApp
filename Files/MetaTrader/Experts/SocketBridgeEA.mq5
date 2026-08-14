@@ -30,6 +30,16 @@ CTrade tradeControl;
 datetime lastServerInitAttempt = 0;
 datetime lastHeartbeat = 0;
 
+string EscapeJsonString(const string value)
+{
+   string result = value;
+   StringReplace(result, "\\", "\\\\");
+   StringReplace(result, "\"", "\\\"");
+   StringReplace(result, "\r", "\\r");
+   StringReplace(result, "\n", "\\n");
+   return result;
+}
+
 double StopDistancePrice(const string symbol)
 {
    const double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
@@ -165,17 +175,15 @@ string HandleValidatedModifyRequest(const string body)
    bool changedSL = false;
    bool changedTP = false;
 
-   m_trade_prepare:
    BuildSafeStops(symbol, positionType, targetSL, targetTP, safeSL, safeTP, changedSL, changedTP);
 
    string validationReason = "";
    if(!StopsAreValid(symbol, positionType, safeSL, safeTP, validationReason))
    {
-      Print("[EA V21.1] MODIFY validation failed ticket=", ticket,
-            " symbol=", symbol, " reason=", validationReason);
+      Print("[EA V21.1] MODIFY validation failed ticket=", ticket, " symbol=", symbol, " reason=", validationReason);
       return StringFormat(
          "{\"success\":false,\"retryable\":true,\"error\":\"Invalid stops\",\"reason\":\"%s\",\"ticket\":%I64d,\"symbol\":\"%s\",\"requested_sl\":%s,\"requested_tp\":%s,\"adjusted_sl\":%s,\"adjusted_tp\":%s}",
-         JsonEscape(validationReason), (long)ticket, JsonEscape(symbol),
+         EscapeJsonString(validationReason), (long)ticket, EscapeJsonString(symbol),
          DoubleToString(targetSL, 10), DoubleToString(targetTP, 10),
          DoubleToString(safeSL, 10), DoubleToString(safeTP, 10));
    }
@@ -214,22 +222,18 @@ string HandleValidatedModifyRequest(const string body)
 
       if(modified && (retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_DONE_PARTIAL))
       {
-         Print("[EA V21.1] MODIFY accepted ticket=", ticket,
-               " symbol=", symbol,
+         Print("[EA V21.1] MODIFY accepted ticket=", ticket, " symbol=", symbol,
                " SL=", DoubleToString(safeSL, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS)),
                " TP=", DoubleToString(safeTP, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS)));
          break;
       }
 
-      Print("[EA V21.1] MODIFY rejected attempt=", attempt + 1,
-            " ticket=", ticket,
-            " retcode=", retcode,
-            " comment=", tradeControl.ResultComment());
+      Print("[EA V21.1] MODIFY rejected attempt=", attempt + 1, " ticket=", ticket,
+            " retcode=", retcode, " comment=", tradeControl.ResultComment());
       Sleep(50);
    }
 
-   const bool success = modified &&
-      (retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_DONE_PARTIAL);
+   const bool success = modified && (retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_DONE_PARTIAL);
 
    CJAVal result;
    result["success"] = success;
@@ -262,7 +266,6 @@ int OnInit()
       Print("[EA V21.1] CRITICAL: DLL imports must be enabled.");
       return INIT_FAILED;
    }
-
    char wsaData[];
    ArrayResize(wsaData, 400);
    if(WSAStartup(0x0202, wsaData) != 0)
@@ -270,18 +273,15 @@ int OnInit()
       Print("[EA V21.1] CRITICAL: WSAStartup failed.");
       return INIT_FAILED;
    }
-
    tradeControl.SetExpertMagicNumber(MAGIC_NUMBER);
    tradeControl.SetDeviationInPoints(DEFAULT_DEVIATION);
    tradeControl.SetAsyncMode(false);
-
    if(!InitializeWebSocketServer())
    {
       Print("[EA V21.1] CRITICAL: bridge initialization failed on port ", HTTP_PORT);
       WSACleanup();
       return INIT_FAILED;
    }
-
    EventSetMillisecondTimer(TIMER_INTERVAL_MS);
    Print("==================================================");
    Print(" FOREXSCALPERAPP MT5 EXECUTION BRIDGE V21.1");
@@ -387,7 +387,6 @@ void ProcessHttpClients()
          ArrayRemove(httpClientSockets, i);
          continue;
       }
-
       char buffer[SOCKET_BUFFER_SIZE];
       int received = recv(socket, buffer, ArraySize(buffer), 0);
       if(received > 0)
@@ -412,25 +411,21 @@ void ProcessHttpClients()
             continue;
          }
 
-         string path = request.path;
-         if(path == "/v1/order/modify" || path == "/api/mt5/modify" || path == "/modify")
+         if(request.path == "/v1/order/modify" || request.path == "/api/mt5/modify" || request.path == "/modify")
          {
-            SendHttpResponse(socket, HttpResponse(200, HandleValidatedModifyRequest(request.body)));
-         }
-         else if(commandHandler != NULL)
-         {
-            commandHandler.HandleCommand(socket, request);
-            // CommandHandler owns the normal response path. It also closes the socket
-            // through the legacy processing flow, so skip the generic response below.
+            string response = HandleValidatedModifyRequest(request.body);
+            SendHttpResponse(socket, HttpResponse(200, response));
+            closesocket(socket);
             ArrayRemove(httpClientSockets, i);
             continue;
          }
 
+         if(commandHandler != NULL)
+            commandHandler.HandleCommand(socket, request);
          closesocket(socket);
          ArrayRemove(httpClientSockets, i);
          continue;
       }
-
       if(received == 0 || (received < 0 && WSAGetLastError() != 10035))
       {
          closesocket(socket);
