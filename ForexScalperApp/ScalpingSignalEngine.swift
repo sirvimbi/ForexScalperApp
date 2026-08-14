@@ -170,8 +170,6 @@ actor ScalpingSignalEngine {
 
         // CONFIDENCE THRESHOLD CHECK
         let threshold = await MainActor.run { ScalpingConfig.shared.getConfidenceThreshold(for: symbol) }
-
-        // Detailed Logging
         logEvaluation(symbol: symbol, signal: finalSignal, threshold: threshold)
 
         if finalSignal.type == .none || finalSignal.confidence < threshold {
@@ -306,7 +304,7 @@ actor ScalpingSignalEngine {
         let atr = AdvancedIndicators.atr(candles1m, period: 14).last ?? 0
         let stoch = AdvancedIndicators.stochastic(candles1m, periodK: 14, periodD: 3)
         let bb = Indicators.bollingerBands(closes, period: 20, stdDev: 2.0)
-        let bbPos = (currentPrice - (bb.lower.last ?? 0)) / max((bb.upper.last ?? 0) - (bb.lower.last ?? 0), 0.0001)
+        let bbPos = (currentPrice - (bb.lower.last ?? 0)) / max((bb.upper.last ?? 1) - (bb.lower.last ?? 0), 0.0001)
 
         let ema9 = Indicators.ema(closes, period: 9).last ?? 0
         let ema21 = Indicators.ema(closes, period: 21).last ?? 0
@@ -631,6 +629,7 @@ actor ScalpingSignalEngine {
         let tpPips = max(8.0, min(25.0, (atrPips * 2.5) * newsMultiplier))
         let tp = type == .buy ? indicators.currentPrice + (tpPips * pipSize) : indicators.currentPrice - (tpPips * pipSize)
 
+        // V10.0: Find Optimal Entry (Pullback Logic)
         let optimalEntry = findOptimalEntry(symbol: symbol, type: type, basePrice: indicators.currentPrice, candles: candles1m, atr: indicators.atr, fvgGaps: indicators.fvgGaps, emaPeriod: pullbackEMAPeriod)
 
         godLog("🧮 SIGNAL OUTPUT | \(symbol) | type=\(type) confidence=\(String(format: "%.1f", confidence))% SL=\(String(format: "%.5f", sl)) TP=\(String(format: "%.5f", tp)) entry=\(optimalEntry.map { String(format: "%.5f", $0) } ?? "market")", level: .diagnostic)
