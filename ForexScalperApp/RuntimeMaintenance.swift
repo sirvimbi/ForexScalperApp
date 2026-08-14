@@ -17,6 +17,7 @@ final class AppRuntimeMaintenance: ObservableObject {
     init(coordinator: RefactoredAppCoordinator, viewModel: DashboardViewModel) {
         self.coordinator = coordinator
         self.viewModel = viewModel
+        _ = SettingsRuntimeBridge.shared
         self.previousSignalStates = Dictionary(uniqueKeysWithValues: coordinator.signals.map { ($0.id, $0.status) })
         observeSignalLifecycle(coordinator)
         start()
@@ -72,21 +73,16 @@ enum MT5HistoryRefreshService {
                 guard !existingIDs.contains(ticket) else { continue }
                 let normalizedSymbol = normalizeSymbol(position.symbol)
                 let record = TradeRecord(
-                    id: UUID(),
-                    signalId: UUID(),
-                    symbol: normalizedSymbol,
+                    id: UUID(), signalId: UUID(), symbol: normalizedSymbol,
                     type: position.type.lowercased() == "buy" ? .buy : .sell,
                     entryPrice: position.open_price,
                     entryTime: Date(timeIntervalSince1970: TimeInterval(position.open_time)),
                     exitPrice: position.close_price,
                     exitTime: Date(timeIntervalSince1970: TimeInterval(position.close_time)),
-                    confidence: 100.0,
-                    positionSize: position.volume,
+                    confidence: 100.0, positionSize: position.volume,
                     pnl: position.profit + position.commission + position.swap,
-                    status: .completed,
-                    externalDealId: ticket,
-                    swap: position.swap,
-                    commission: position.commission
+                    status: .completed, externalDealId: ticket,
+                    swap: position.swap, commission: position.commission
                 )
                 await manager.addTrade(record)
             }
