@@ -7,7 +7,7 @@
 #property description "ForexScalperApp Swift/MT5 Execution Bridge V22.0"
 #property strict
 
-#include <CommandHandler.mqh>
+#include <CommandHandlerV22.mqh>
 #include <Data.mqh>
 #include <WebSocketLib.mqh>
 #include <SocketManager.mqh>
@@ -23,7 +23,7 @@
 CSocketManager httpServer;
 ulong httpClientSockets[];
 ulong WebSocketClients[];
-CCommandHandler *commandHandler = NULL;
+CCommandHandlerV22 *commandHandler = NULL;
 CData *dataManager = NULL;
 CTrade tradeControl;
 datetime lastServerInitAttempt = 0;
@@ -57,7 +57,7 @@ int OnInit()
    Print(" FOREXSCALPERAPP MT5 EXECUTION BRIDGE V22.0");
    Print(" Strategy authority: SWIFT | Protection authority: EA V22");
    Print(" Partial TP: 50% @ 1R | 30% @ 2R | remainder runner");
-   Print(" Trailing: activates at 5 pips; profit-adaptive distance");
+   Print(" Trailing: configurable activation + volatility-aware curve");
    Print(" Runner: unlimited hold; no fixed TP/time exit");
    Print(" Hard SL: mandatory emergency protection");
    Print(" Bridge port: ", HTTP_PORT, " | Magic: ", MAGIC_NUMBER);
@@ -127,7 +127,7 @@ bool InitializeWebSocketServer()
       return false;
    }
    CleanupHandlers();
-   commandHandler = new CCommandHandler();
+   commandHandler = new CCommandHandlerV22();
    dataManager = new CData();
    if(commandHandler == NULL || dataManager == NULL)
    {
