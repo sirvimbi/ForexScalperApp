@@ -1,10 +1,6 @@
 //+------------------------------------------------------------------+
 //| SocketBridgeEA_V21.mq5                                           |
 //| ForexScalperApp MT5 Execution Bridge V21.0                      |
-//|                                                                  |
-//| Swift remains strategy authority. V21 adds broker-side           |
-//| protection so partial TP and trailing survive transient Swift    |
-//| disconnects and remain coordinated with the same magic number.  |
 //+------------------------------------------------------------------+
 #property copyright "God Mode Scalper"
 #property version   "21.0"
@@ -86,12 +82,16 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
-   // Protection must run even when Swift/WebSocket is temporarily offline.
-   if(dataManager != NULL)
-      dataManager.SendCurrentPrices(EA_INVALID_SOCKET);
+   if(dataManager == NULL)
+      return;
 
+   // With a live Swift socket, SendUpdateToClients() runs the protection.
+   // When Swift is disconnected, run the same protection path without
+   // attempting to broadcast a socket frame.
    if(ArraySize(WebSocketClients) > 0)
       SendUpdateToClients();
+   else
+      dataManager.SendCurrentPrices(EA_INVALID_SOCKET);
 }
 
 void OnTradeTransaction(
@@ -153,7 +153,6 @@ bool InitializeWebSocketServer()
    }
 
    CleanupHandlers();
-
    commandHandler = new CCommandHandler();
    dataManager = new CData();
 
