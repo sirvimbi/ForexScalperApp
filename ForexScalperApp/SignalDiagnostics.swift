@@ -100,8 +100,8 @@ enum SignalDiagnostics {
             lock.lock()
             var evaluation = pending[parsed.symbol] ?? PendingEvaluation()
             evaluation.decision = parsed.decision
-            if parsed.finalConfidence != nil {
-                evaluation.finalConfidence = parsed.finalConfidence!
+            if let finalConfidence = parsed.finalConfidence {
+                evaluation.finalConfidence = finalConfidence
             }
             evaluation.lastUpdate = Date()
             pending[parsed.symbol] = evaluation
@@ -168,12 +168,13 @@ enum SignalDiagnostics {
         guard let range = message.range(of: "🔎 SIGNAL PILLAR | ") else { return nil }
         let tail = String(message[range.upperBound...])
         let parts = tail.components(separatedBy: " | ")
-        guard parts.count >= 4 else { return nil }
+        guard parts.count >= 5 else { return nil }
         let symbol = parts[0]
         let passed = parts[1].contains("PASS")
         let name = parts[2]
-        let contribution = parts.last.flatMap { extractSignedDouble($0) } ?? 0
-        return (symbol, passed, name, contribution, parts.dropFirst(3).dropLast().joined(separator: " | "))
+        let contribution = extractSignedDouble(parts[parts.count - 2]) ?? 0
+        let reason = parts.dropFirst(3).dropLast(2).joined(separator: " | ")
+        return (symbol, passed, name, contribution, reason)
     }
 
     private static func parseScore(_ message: String) -> (symbol: String, direction: String, confidence: Double, threshold: Double)? {
