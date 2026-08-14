@@ -3,14 +3,14 @@ import Foundation
 
 actor ScalpingRiskManager: RiskManagerProtocol {
     static let shared = ScalpingRiskManager()
-    
+
     private var parameters = RiskParameters(
         accountBalance: 10000,
         riskPerTrade: 0.008,  // 0.8% per trade
         maxDailyRisk: 0.02,   // 2% max daily loss
         maxConcurrentTrades: 2
     )
-    
+
     private var dailyPnL: [Date: Double] = [:]
     private var activeTrades: Set<String> = []
     private var tradeOpenTime: [String: Date] = [:]
@@ -22,82 +22,150 @@ actor ScalpingRiskManager: RiskManagerProtocol {
     private let atrCacheDuration: TimeInterval = 60
     private var averageATRCache: [String: [Double]] = [:]
     private let maxAvgATRCount = 50
-    
+
     func updateParameters(_ params: RiskParameters) {
         self.parameters = params
-        godLog("🛡 Risk Manager: Updated balance to KES \(String(format: "%.2f", params.accountBalance))", level: .info)
+        godLog("🛡 RISK CONFIG | balance=KES \(String(format: "%.2f", params.accountBalance)) | risk/trade=\(String(format: "%.2f", params.riskPerTrade * 100))% | maxDailyRisk=\(String(format: "%.2f", params.maxDailyRisk * 100))% | maxConcurrent=\(params.maxConcurrentTrades)", level: .diagnostic)
     }
-    
-    func canOpenTrade(for symbol: String) async -> Bool {
+
+    /// Full, non-mutating explanation of every scalping risk gate.
+    /// Spread returned by MT5 is broker points; the strategy tolerance is expressed in pips.
+    func riskGateDetails(for symbol: String) async -> (allowed: Bool, checks: [String]) {
         let now = Date()
         let calendar = Calendar.current
-        
+
         if !calendar.isDate(lastResetDate, inSameDayAs: now) {
             dailyTradeCount = 0
             dailyPnL.removeAll()
+            hourlyTradeCount.removeAll()
+            consecutiveLosses.removeAll()
             lastResetDate = now
+            godLog("🔄 RISK RESET | new trading day", level: .diagnostic)
         }
-        
-        let (maxDaily, hourlyEnabled, maxHourly, cooldown, maxSpread) = await MainActor.run {
+
+        let (maxDaily, hourlyEnabled, maxHourly, cooldown, maxSpreadPips) = await MainActor.run {
             let config = ScalpingConfig.shared
-            return (config.maxDailyTrades, 
-                    config.enableHourlyLimit, 
-                    config.maxHourlyTrades, 
-                    config.cooldownSeconds,
-                    config.spreadTolerance)
+            return (
+                config.maxDailyTrades,
+                config.enableHourlyLimit,
+                config.maxHourlyTrades,
+                config.cooldownSeconds,
+                config.spreadTolerance
+            )
         }
-        
-        guard dailyTradeCount < maxDaily else { return false }
-        
+
         let today = calendar.startOfDay(for: now)
         let todayPnL = dailyPnL[today] ?? 0
         let maxLoss = parameters.accountBalance * parameters.maxDailyRisk
-        if todayPnL <= -maxLoss { return false }
-        
-        if hourlyEnabled {
-            let currentHour = calendar.date(bySettingHour: calendar.component(.hour, from: now), minute: 0, second: 0, of: now) ?? now
-            let hourlyTrades = hourlyTradeCount[currentHour] ?? 0
-            if hourlyTrades >= maxHourly { return false }
-        }
-        
-        if activeTrades.count >= parameters.maxConcurrentTrades { return false }
-        if activeTrades.contains(symbol) { return false }
-        
+        let dailyTradeOK = dailyTradeCount < maxDaily
+        let dailyLossOK = todayPnL > -maxLoss
+
+        let currentHour = calendar.date(
+            bySettingHour: calendar.component(.hour, from: now),
+            minute: 0,
+            second: 0,
+            of: now
+        ) ?? now
+        let hourlyTrades = hourlyTradeCount[currentHour] ?? 0
+        let hourlyOK = !hourlyEnabled || hourlyTrades < maxHourly
+
+        let concurrentOK = activeTrades.count < parameters.maxConcurrentTrades
+        let activeSymbolOK = !activeTrades.contains(symbol)
+
         let losses = consecutiveLosses[symbol] ?? 0
-        if losses >= 3 { return false }
-        
-        if let lastTrade = tradeOpenTime[symbol], now.timeIntervalSince(lastTrade) < cooldown { return false }
-        
-        // SPREAD CHECK
-        if let spread = try? await MT5Service.shared.getCurrentSpread(symbol: symbol) {
-            if spread > maxSpread { return false }
+        let consecutiveLossOK = losses < 3
+
+        let cooldownRemaining: Int
+        if let lastTrade = tradeOpenTime[symbol] {
+            cooldownRemaining = max(0, Int(ceil(cooldown - now.timeIntervalSince(lastTrade))))
+        } else {
+            cooldownRemaining = 0
         }
-        
-        return true
+        let cooldownOK = cooldownRemaining == 0
+
+        var spreadOK = true
+        var rawSpreadPoints: Double?
+        var spreadPips: Double?
+        var spreadError: String?
+
+        do {
+            let raw = try await MT5Service.shared.getCurrentSpread(symbol: symbol)
+            rawSpreadPoints = raw
+            // MT5 FX symbols normally expose spread in points. For 5/3 digit pricing,
+            // ten points = one pip. Keep the comparison in the same units as spreadTolerance.
+            spreadPips = raw / 10.0
+            spreadOK = spreadPips! <= maxSpreadPips
+        } catch {
+            // A missing spread must not silently become a false risk rejection.
+            // Other execution checks still run and MT5 execution performs its own validation.
+            spreadError = error.localizedDescription
+            spreadOK = true
+        }
+
+        var checks: [String] = []
+        checks.append("DailyTrade \(dailyTradeOK ? "PASS" : "FAIL") | trades=\(dailyTradeCount)/\(maxDaily)")
+        checks.append("DailyLoss \(dailyLossOK ? "PASS" : "FAIL") | PnL=\(String(format: "%.2f", todayPnL)) | limit=-\(String(format: "%.2f", maxLoss))")
+        checks.append("HourlyLimit \(hourlyOK ? "PASS" : "FAIL") | trades=\(hourlyTrades)/\(maxHourly) | enabled=\(hourlyEnabled)")
+        checks.append("ConcurrentTrades \(concurrentOK ? "PASS" : "FAIL") | active=\(activeTrades.count)/\(parameters.maxConcurrentTrades)")
+        checks.append("ActiveSymbol \(activeSymbolOK ? "PASS" : "FAIL") | active=\(activeTrades.contains(symbol))")
+        checks.append("ConsecutiveLosses \(consecutiveLossOK ? "PASS" : "FAIL") | losses=\(losses)/3")
+        checks.append("SymbolCooldown \(cooldownOK ? "PASS" : "FAIL") | remaining=\(cooldownRemaining)s | configured=\(Int(cooldown))s")
+
+        if let rawSpreadPoints, let spreadPips {
+            checks.append("Spread \(spreadOK ? "PASS" : "FAIL") | raw=\(String(format: "%.1f", rawSpreadPoints)) points | normalized=\(String(format: "%.2f", spreadPips)) pips | limit=\(String(format: "%.2f", maxSpreadPips)) pips")
+        } else {
+            checks.append("Spread PASS | unavailable (\(spreadError ?? "no error")) | fail-open for diagnostics/execution recheck")
+        }
+
+        let allowed = dailyTradeOK && dailyLossOK && hourlyOK && concurrentOK && activeSymbolOK && consecutiveLossOK && cooldownOK && spreadOK
+
+        godLog("🛡️ RISK CHECK | \(symbol) | \(allowed ? "ALLOW" : "BLOCK") | balance=KES \(String(format: "%.2f", parameters.accountBalance)) | dailyPnL=\(String(format: "%.2f", todayPnL)) | trades=\(dailyTradeCount)/\(maxDaily)", level: allowed ? .success : .warning)
+
+        for check in checks {
+            let passed = check.contains(" PASS")
+            godLog("   ├─ \(passed ? "✅" : "❌") \(check)", level: passed ? .diagnostic : .warning)
+        }
+
+        if !allowed {
+            let failures = checks.filter { $0.contains(" FAIL") }
+            godLog("🛑 RISK BLOCK REASONS | \(symbol) | \(failures.joined(separator: " || "))", level: .warning)
+        }
+
+        return (allowed, checks)
     }
-    
+
+    func canOpenTrade(for symbol: String) async -> Bool {
+        return (await riskGateDetails(for: symbol)).allowed
+    }
+
     func calculatePositionSize(for signal: Signal) async -> PositionSize? {
+        // Keep execution protected even though signal analysis is diagnostic/observational.
+        let riskGate = await riskGateDetails(for: signal.symbol)
+        guard riskGate.allowed else {
+            godLog("🛑 POSITION SIZE BLOCKED | \(signal.symbol) | execution risk gate failed", level: .warning)
+            return nil
+        }
+
         let (useManual, manualSize, minMult, maxMult, fixedSL, useFixed) = await MainActor.run {
             let config = ScalpingConfig.shared
-            return (config.useManualLot, 
-                    config.manualLotSize, 
-                    config.volatilityMultiplierMin, 
+            return (config.useManualLot,
+                    config.manualLotSize,
+                    config.volatilityMultiplierMin,
                     config.volatilityMultiplierMax,
                     config.fixedSLPips,
                     config.useFixedSL)
         }
-        
+
         let balance = parameters.accountBalance
         let baseRiskAmount = balance * parameters.riskPerTrade
-        
+
         let atr = await getATR(symbol: signal.symbol)
         let pipSize = signal.symbol.contains("JPY") ? 0.01 : 0.0001
         let atrPips = atr / pipSize
-        
-        // V10.0: Volatility-Weighted Position Sizing
+
         let volatilityMultiplier = getATRMultiplier(symbol: signal.symbol, currentATR: atr, minMult: minMult, maxMult: maxMult)
         let adjustedRiskAmount = baseRiskAmount * volatilityMultiplier
-        
+
         let slPips: Double
         if useFixed {
             slPips = fixedSL
@@ -105,12 +173,12 @@ actor ScalpingRiskManager: RiskManagerProtocol {
             slPips = max(6.0, min(15.0, atrPips * 1.5))
         }
         let slDistance = slPips * pipSize
-        
+
         let tpPips = max(8.0, min(25.0, atrPips * 2.5))
         let tpDistance = tpPips * pipSize
-        
+
         var lotSize: Double
-        
+
         if useManual {
             lotSize = manualSize
             godLog("🛡 Risk Manager: Using manual lot size: \(lotSize)", level: .info)
@@ -118,24 +186,21 @@ actor ScalpingRiskManager: RiskManagerProtocol {
             let kesToUsdRate = 130.0
             let riskInUsd = adjustedRiskAmount / kesToUsdRate
             lotSize = riskInUsd / (slDistance * 100000)
-            
-            // 1. Hard cap before broker limits
-            lotSize = min(lotSize, 0.1) // Increased cap to 0.1 for more flexibility
-            
-            // 2. Reduce risk based on performance
+
+            lotSize = min(lotSize, 0.1)
+
             let losses = consecutiveLosses[signal.symbol] ?? 0
             if losses >= 2 { lotSize *= 0.5 }
             if losses >= 3 { lotSize *= 0.5 }
         }
-        
-        // 3. Apply broker limits (Final step ensures validity)
+
         let limits = await MT5Service.shared.getVolumeLimits(for: signal.symbol)
         let steps = round(lotSize / limits.step)
         lotSize = max(limits.min, min(steps * limits.step, limits.max))
-        
+
         let stopLoss = signal.type == .buy ? signal.price - slDistance : signal.price + slDistance
         let takeProfit = signal.type == .buy ? signal.price + tpDistance : signal.price - tpDistance
-        
+
         return PositionSize(
             units: lotSize,
             stopLoss: stopLoss,
@@ -150,7 +215,7 @@ actor ScalpingRiskManager: RiskManagerProtocol {
         history.append(currentATR)
         if history.count > maxAvgATRCount { history.removeFirst() }
         averageATRCache[symbol] = history
-        
+
         let sum = history.reduce(0, +)
         return history.isEmpty ? currentATR : sum / Double(history.count)
     }
@@ -159,10 +224,9 @@ actor ScalpingRiskManager: RiskManagerProtocol {
         let avgATR = getAverageATR(symbol: symbol, currentATR: currentATR)
         guard avgATR > 0 else { return 1.0 }
         let ratio = currentATR / avgATR
-        
-        return min(max(ratio, minMult), maxMult) // Volatility-Weighted Position Sizing
+        return min(max(ratio, minMult), maxMult)
     }
-    
+
     private func getATR(symbol: String) async -> Double {
         if let cached = symbolATRCache[symbol],
            Date().timeIntervalSince(cached.timestamp) < atrCacheDuration {
@@ -176,7 +240,7 @@ actor ScalpingRiskManager: RiskManagerProtocol {
             return symbol.contains("JPY") ? 0.15 : 0.0015
         }
     }
-    
+
     func registerTrade(_ trade: TradeRecord) async {
         activeTrades.insert(trade.symbol)
         tradeOpenTime[trade.symbol] = Date()
@@ -187,7 +251,7 @@ actor ScalpingRiskManager: RiskManagerProtocol {
         hourlyTradeCount[currentHour] = (hourlyTradeCount[currentHour] ?? 0) + 1
         godLog("📊 MT5 Trade Registered: \(trade.symbol) \(trade.type) @ \(String(format: "%.5f", trade.entryPrice))", level: .trade)
     }
-    
+
     func closeTrade(_ trade: TradeRecord) async {
         activeTrades.remove(trade.symbol)
         if let pnl = trade.pnl {
@@ -197,9 +261,12 @@ actor ScalpingRiskManager: RiskManagerProtocol {
             else { consecutiveLosses[trade.symbol] = 0 }
         }
     }
-    
-    func syncActiveTrades(_ symbols: Set<String>) { self.activeTrades = symbols }
-    
+
+    func syncActiveTrades(_ symbols: Set<String>) {
+        self.activeTrades = symbols
+        godLog("🛡️ RISK SYNC | activeTrades=\(symbols.sorted().joined(separator: ", ")) | count=\(symbols.count)", level: .diagnostic)
+    }
+
     func getCurrentRiskMetrics() async -> RiskMetrics {
         let now = Date()
         let today = Calendar.current.startOfDay(for: now)
