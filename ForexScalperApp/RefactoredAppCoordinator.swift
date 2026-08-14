@@ -878,8 +878,17 @@ class RefactoredAppCoordinator: ObservableObject {
         }
     }
 
+    // RefactoredAppCoordinator.swift - Fix for line 882
+
+    // RefactoredAppCoordinator.swift - FIXED methods
+
     private func shouldWaitForPullback(symbol: String, signal: Signal, atr: Double) async -> Bool {
-        guard await MainActor.run({ ScalpingConfig.shared.enablePullbackEntry }) else { return false }
+        // FIXED: Correct MainActor.run syntax
+        let pullbackEnabled = await MainActor.run(resultType: Bool.self) {
+            ScalpingConfig.shared.enablePullbackEntry
+        }
+        guard pullbackEnabled else { return false }
+
         guard let actor = marketData as? RefactoredMarketDataActor else { return false }
         let candles = await actor.getCandles(symbol: symbol, timeframe: "1m")
         guard candles.count >= 25, let current = candles.last?.close else { return false }

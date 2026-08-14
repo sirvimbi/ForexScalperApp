@@ -1,7 +1,8 @@
+// TradeNotificationExtensions.swift - FIXED
 import Foundation
 
 extension Notification.Name {
-    static let tradePartiallyClosed = Notification.Name("tradePartiallyClosed")
+    nonisolated static let tradePartiallyClosed = Notification.Name("tradePartiallyClosed")
 }
 
 @MainActor

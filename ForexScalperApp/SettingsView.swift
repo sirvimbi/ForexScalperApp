@@ -1,10 +1,12 @@
+// SettingsView.swift - FIXED (removed extra closing brace)
+
 import SwiftUI
 import UserNotifications
 
 struct SettingsView: View {
     @ObservedObject var viewModel: DashboardViewModel
     @ObservedObject var coordinator: RefactoredAppCoordinator
-    
+
     var body: some View {
         #if os(iOS)
         NavigationView {
@@ -48,9 +50,9 @@ struct SettingsView: View {
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 14)
-                    
+
                     Divider().background(Color.borderSubtle)
-                    
+
                     HStack(alignment: .top, spacing: 24) {
                         VStack(spacing: 20) {
                             // RISK MANAGEMENT CARD
@@ -58,7 +60,7 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 16) {
                                     sectionHeader("RISK MANAGEMENT", icon: "shield.fill", color: .accentRed)
                                     Divider().background(Color.borderSubtle)
-                                    
+
                                     settingsRow("Account Balance") {
                                         HStack(spacing: 6) {
                                             Text(viewModel.currencySymbol).foregroundColor(.textMuted).font(.caption)
@@ -75,7 +77,7 @@ struct SettingsView: View {
                                                         .foregroundColor(.accentCyan)
                                                 }
                                                 .buttonStyle(.plain)
-                                                
+
                                                 Image(systemName: "lock.fill")
                                                     .font(.caption)
                                                     .foregroundColor(.textMuted)
@@ -86,7 +88,7 @@ struct SettingsView: View {
                                         }
                                         .frame(width: 160)
                                     }
-                                    
+
                                     settingsRow("Risk per Trade") {
                                         HStack(spacing: 10) {
                                             Slider(value: $viewModel.riskPerTrade, in: 0.005...0.10, step: 0.005)
@@ -97,7 +99,7 @@ struct SettingsView: View {
                                                 .frame(width: 50, alignment: .trailing)
                                         }
                                     }
-                                    
+
                                     settingsRow("Max Daily Risk") {
                                         HStack(spacing: 10) {
                                             Slider(value: $viewModel.maxDailyRisk, in: 0.01...0.20, step: 0.005)
@@ -108,7 +110,7 @@ struct SettingsView: View {
                                                 .frame(width: 50, alignment: .trailing)
                                         }
                                     }
-                                    
+
                                     settingsRow("Max Concurrent Trades") {
                                         HStack(spacing: 12) {
                                             Text("\(viewModel.maxConcurrentTrades)")
@@ -153,20 +155,20 @@ struct SettingsView: View {
                                 }
                                 .padding(16)
                             }
-                            
+
                             // SCALPING CONFIGURATION CARD
                             GlassCard {
                                 VStack(alignment: .leading, spacing: 16) {
                                     sectionHeader("SCALPING CONFIGURATION", icon: "gauge.high", color: .accentGold)
                                     Divider().background(Color.borderSubtle)
-                                    
+
                                     settingsRow("Manual Volume/Lot") {
                                         HStack(spacing: 10) {
                                             Toggle("", isOn: $viewModel.scalpingConfig.useManualLot)
                                                 .toggleStyle(SwitchToggleStyle(tint: .accentGreen))
                                                 .scaleEffect(0.8)
                                                 .labelsHidden()
-                                            
+
                                             if viewModel.scalpingConfig.useManualLot {
                                                 Picker("", selection: $viewModel.scalpingConfig.manualLotSize) {
                                                     ForEach([0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 1.00], id: \.self) { size in
@@ -192,7 +194,7 @@ struct SettingsView: View {
                                                 .frame(width: 45, alignment: .trailing)
                                         }
                                     }
-                                    
+
                                     settingsRow("Spread Tolerance") {
                                         HStack(spacing: 10) {
                                             Slider(value: $viewModel.scalpingConfig.spreadTolerance, in: 1...30, step: 1)
@@ -214,7 +216,7 @@ struct SettingsView: View {
                                                 .frame(width: 40, alignment: .trailing)
                                         }
                                     }
-                                    
+
                                     settingsRow("Volatility Threshold") {
                                         HStack(spacing: 10) {
                                             Slider(value: $viewModel.scalpingConfig.minVolatilityATR, in: 0.0005...0.02, step: 0.0005)
@@ -225,7 +227,7 @@ struct SettingsView: View {
                                                 .frame(width: 65, alignment: .trailing)
                                         }
                                     }
-                                    
+
                                     settingsRow("Volume Ratio") {
                                         HStack(spacing: 10) {
                                             Slider(value: $viewModel.scalpingConfig.minVolumeRatio, in: 0.0...3.0, step: 0.1)
@@ -269,14 +271,14 @@ struct SettingsView: View {
                                                 .frame(width: 60, alignment: .trailing)
                                         }
                                     }
-                                    
+
                                     settingsRow("Strategy Pillars") {
                                         HStack(spacing: 10) {
                                             Slider(value: Binding(
                                                 get: { Double(viewModel.scalpingConfig.minConfluencePillars) },
                                                 set: { viewModel.scalpingConfig.minConfluencePillars = $0 }
                                             ), in: 1...7, step: 1)
-                                            .frame(width: 140)
+                                                .frame(width: 140)
                                             Text("\(Int(viewModel.scalpingConfig.minConfluencePillars))/7")
                                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                                                 .foregroundColor(.accentGold)
@@ -287,20 +289,20 @@ struct SettingsView: View {
                                 .padding(16)
                             }
                         }
-                        
+
                         VStack(spacing: 20) {
                             // ELITE PRECISION V10.0 CARD
                             GlassCard {
                                 VStack(alignment: .leading, spacing: 16) {
                                     sectionHeader("ELITE PRECISION V10.0", icon: "target", color: .accentCyan)
                                     Divider().background(Color.borderSubtle)
-                                    
+
                                     settingsRow("Order Flow Filter") {
                                         Toggle("", isOn: $viewModel.scalpingConfig.enableOrderFlowFilter)
                                             .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
                                             .labelsHidden()
                                     }
-                                    
+
                                     settingsRow("Delta Threshold") {
                                         HStack(spacing: 10) {
                                             Slider(value: $viewModel.scalpingConfig.orderFlowThreshold, in: 10...500, step: 5)
@@ -311,13 +313,13 @@ struct SettingsView: View {
                                                 .frame(width: 50, alignment: .trailing)
                                         }
                                     }
-                                    
+
                                     settingsRow("Smart Pullback") {
                                         Toggle("", isOn: $viewModel.scalpingConfig.enablePullbackEntry)
                                             .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
                                             .labelsHidden()
                                     }
-                                    
+
                                     if viewModel.scalpingConfig.enablePullbackEntry {
                                         settingsRow("Pullback EMA") {
                                             HStack(spacing: 12) {
@@ -330,7 +332,7 @@ struct SettingsView: View {
                                             }
                                         }
                                     }
-                                    
+
                                     settingsRow("ROC Period") {
                                         HStack(spacing: 12) {
                                             Text("\(Int(viewModel.scalpingConfig.rocPeriod))")
@@ -341,13 +343,13 @@ struct SettingsView: View {
                                                 .labelsHidden()
                                         }
                                     }
-                                    
+
                                     settingsRow("ML Trend Filter") {
                                         Toggle("", isOn: $viewModel.scalpingConfig.enableMLTrendFilter)
                                             .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
                                             .labelsHidden()
                                     }
-                                    
+
                                     if viewModel.scalpingConfig.enableMLTrendFilter {
                                         settingsRow("ML Threshold") {
                                             HStack(spacing: 10) {
@@ -360,13 +362,13 @@ struct SettingsView: View {
                                             }
                                         }
                                     }
-                                    
+
                                     settingsRow("Risk/Reward Check") {
                                         Toggle("", isOn: $viewModel.scalpingConfig.enableRRCheck)
                                             .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
                                             .labelsHidden()
                                     }
-                                    
+
                                     if viewModel.scalpingConfig.enableRRCheck {
                                         settingsRow("Min R/R Ratio") {
                                             HStack(spacing: 10) {
@@ -379,7 +381,7 @@ struct SettingsView: View {
                                             }
                                         }
                                     }
-                                    
+
                                     settingsRow("Fixed Stop Loss (Pips)") {
                                         HStack(spacing: 10) {
                                             Slider(value: $viewModel.scalpingConfig.fixedSLPips, in: 5...100, step: 1)
@@ -390,7 +392,7 @@ struct SettingsView: View {
                                                 .frame(width: 50, alignment: .trailing)
                                         }
                                     }
-                                    
+
                                     settingsRow("Volatility Scale Min") {
                                         HStack(spacing: 10) {
                                             Slider(value: $viewModel.scalpingConfig.volatilityMultiplierMin, in: 0.1...1.0, step: 0.1)
@@ -401,11 +403,11 @@ struct SettingsView: View {
                                                 .frame(width: 50, alignment: .trailing)
                                         }
                                     }
-                                    
+
                                     Divider().background(Color.borderSubtle)
-                                    
+
                                     sectionHeader("PARTIAL TP (50/30/20)", icon: "chart.pie.fill", color: .accentGold)
-                                    
+
                                     settingsRow("Level 1 Pips") {
                                         HStack(spacing: 12) {
                                             Text("\(Int(viewModel.scalpingConfig.partialTP1_Pips))")
@@ -435,9 +437,9 @@ struct SettingsView: View {
                                     }
 
                                     Divider().background(Color.borderSubtle)
-                                    
+
                                     sectionHeader("STRATEGY WEIGHTS", icon: "scalemass", color: .accentCyan)
-                                    
+
                                     Group {
                                         settingsRow("HTF Alignment") { weightStepper($viewModel.scalpingConfig.weightHTFAlignment) }
                                         settingsRow("Momentum Exhaustion") { weightStepper($viewModel.scalpingConfig.weightMomentumExhaustion) }
@@ -454,7 +456,7 @@ struct SettingsView: View {
                                 .padding(16)
                             }
                         }
-                        
+
                         VStack(spacing: 20) {
                             // MT5 API CONNECTION CARD
                             GlassCard(borderColor: viewModel.mt5Connected ? Color.accentCyan.opacity(0.4) : Color.borderSubtle) {
@@ -473,10 +475,10 @@ struct SettingsView: View {
                                         .background((viewModel.mt5Connected ? Color.accentGreen : Color.accentRed).opacity(0.1))
                                         .cornerRadius(12)
                                         .overlay(RoundedRectangle(cornerRadius: 12)
-                                            .strokeBorder((viewModel.mt5Connected ? Color.accentGreen : Color.accentRed).opacity(0.3), lineWidth: 1))
+                                                     .strokeBorder((viewModel.mt5Connected ? Color.accentGreen : Color.accentRed).opacity(0.3), lineWidth: 1))
                                     }
                                     Divider().background(Color.borderSubtle)
-                                    
+
                                     settingsRow("Bridge URL") {
                                         TextField("http://localhost:8890", text: $viewModel.mt5BridgeURL)
                                             .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -488,19 +490,19 @@ struct SettingsView: View {
                                             .textFieldStyle(RoundedBorderTextFieldStyle())
                                             .frame(width: 220)
                                     }
-                                    
+
                                     settingsRow("MT5 Login") {
                                         TextField("Account Number", text: $viewModel.mt5Login)
                                             .textFieldStyle(RoundedBorderTextFieldStyle())
                                             .frame(width: 220)
                                     }
-                                    
+
                                     settingsRow("MT5 Password") {
                                         SecureField("Password", text: $viewModel.mt5Password)
                                             .textFieldStyle(RoundedBorderTextFieldStyle())
                                             .frame(width: 220)
                                     }
-                                    
+
                                     settingsRow("MT5 Server") {
                                         TextField("Server Name", text: $viewModel.mt5Server)
                                             .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -512,36 +514,36 @@ struct SettingsView: View {
                                             .textFieldStyle(RoundedBorderTextFieldStyle())
                                             .frame(width: 100)
                                     }
-                                    
+
                                     HStack(spacing: 10) {
                                         Button(action: { Task { await viewModel.connectToMT5() } }) {
                                             HStack(spacing: 6) { Image(systemName: "bolt.fill"); Text(viewModel.mt5Connected ? "RECHECK MT5" : "CONNECT MT5") }
-                                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                                .frame(maxWidth: .infinity).padding(.vertical, 10)
-                                                .background(Color.accentCyan).foregroundColor(.bgPrimary).cornerRadius(7)
+                                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                            .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                            .background(Color.accentCyan).foregroundColor(.bgPrimary).cornerRadius(7)
                                         }.buttonStyle(.plain).disabled(viewModel.isConnecting)
+
                                         Button(action: { Task { await viewModel.disconnectFromMT5() } }) {
                                             HStack(spacing: 6) { Image(systemName: "bolt.slash.fill"); Text("DISCONNECT") }
-                                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                                .frame(maxWidth: .infinity).padding(.vertical, 10)
-                                                .background(viewModel.mt5Connected ? Color.accentRed.opacity(0.18) : Color.bgSecondary)
-                                                .foregroundColor(viewModel.mt5Connected ? .accentRed : .textMuted).cornerRadius(7)
+                                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                            .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                            .background(viewModel.mt5Connected ? Color.accentRed.opacity(0.18) : Color.bgSecondary)
+                                            .foregroundColor(viewModel.mt5Connected ? .accentRed : .textMuted).cornerRadius(7)
                                         }.buttonStyle(.plain).disabled(viewModel.isConnecting || !viewModel.mt5Connected)
-                                    }
                                     }
                                 }
                                 .padding(16)
                             }
-                            
+
                             // ACTIVE TRADING PAIRS CARD
                             GlassCard {
                                 VStack(alignment: .leading, spacing: 14) {
                                     sectionHeader("ACTIVE TRADING PAIRS", icon: "chart.line.uptrend.xyaxis", color: .accentCyan)
                                     Divider().background(Color.borderSubtle)
-                                    
+
                                     let majorPairs = TradingPair.allCases.filter { !$0.isExotic }.map { $0.rawValue }.sorted()
                                     let exoticPairs = TradingPair.allCases.filter { $0.isExotic }.map { $0.rawValue }.sorted()
-                                    
+
                                     ScrollView {
                                         VStack(alignment: .leading, spacing: 16) {
                                             if !majorPairs.isEmpty {
@@ -554,7 +556,7 @@ struct SettingsView: View {
                                                     }
                                                 }
                                             }
-                                            
+
                                             if !exoticPairs.isEmpty {
                                                 VStack(alignment: .leading, spacing: 8) {
                                                     Text("EXOTIC PAIRS").font(.system(size: 10, weight: .bold)).foregroundColor(.accentPurple)
@@ -568,30 +570,30 @@ struct SettingsView: View {
                                         }
                                     }
                                     .frame(maxHeight: 250)
-                                    
+
                                     HStack {
                                         Button("Select All") { viewModel.activeSymbols = Set(viewModel.availableSymbols) }
-                                            .font(.caption).foregroundColor(.accentCyan).buttonStyle(.plain)
+                                        .font(.caption).foregroundColor(.accentCyan).buttonStyle(.plain)
                                         Text("|").foregroundColor(.textMuted)
                                         Button("Clear All") { viewModel.activeSymbols.removeAll() }
-                                            .font(.caption).foregroundColor(.accentRed).buttonStyle(.plain)
+                                        .font(.caption).foregroundColor(.accentRed).buttonStyle(.plain)
                                         Spacer()
                                         Text("\(viewModel.activeSymbols.count) active").font(.caption2).foregroundColor(.textMuted)
                                     }
                                 }
                                 .padding(16)
                             }
-                            
+
                             // NEWS FILTER CARD
                             GlassCard {
                                 VStack(alignment: .leading, spacing: 14) {
                                     sectionHeader("NEWS FILTER", icon: "globe.americas.fill", color: .accentGold)
                                     Divider().background(Color.borderSubtle)
-                                    
+
                                     Toggle("Enable News Protection", isOn: $viewModel.scalpingConfig.enableNewsFilter)
                                         .toggleStyle(SwitchToggleStyle(tint: .accentGold))
                                         .labelsHidden()
-                                    
+
                                     settingsRow("Pause Before High (min)") {
                                         HStack(spacing: 10) {
                                             Slider(value: $viewModel.scalpingConfig.pauseBeforeHighImpactMinutes, in: 0...120, step: 15)
@@ -602,7 +604,7 @@ struct SettingsView: View {
                                                 .frame(width: 45, alignment: .trailing)
                                         }
                                     }
-                                    
+
                                     settingsRow("Pause Before Medium (min)") {
                                         HStack(spacing: 10) {
                                             Slider(value: $viewModel.scalpingConfig.pauseBeforeMediumImpactMinutes, in: 0...60, step: 5)
@@ -613,11 +615,11 @@ struct SettingsView: View {
                                                 .frame(width: 45, alignment: .trailing)
                                         }
                                     }
-                                    
+
                                     Toggle("Auto-Raise Spread Tolerance", isOn: $viewModel.scalpingConfig.autoRaiseSpreadDuringNews)
                                         .font(.caption)
                                         .foregroundColor(.textSecondary)
-                                    
+
                                     if viewModel.scalpingConfig.autoRaiseSpreadDuringNews {
                                         settingsRow("News Spread Mult") {
                                             HStack(spacing: 10) {
@@ -633,13 +635,13 @@ struct SettingsView: View {
                                 }
                                 .padding(16)
                             }
-                            
+
                             // NOTIFICATION CARD
                             GlassCard {
                                 VStack(alignment: .leading, spacing: 16) {
                                     sectionHeader("NOTIFICATIONS & SYSTEM", icon: "bell.badge.fill", color: .accentCyan)
                                     Divider().background(Color.borderSubtle)
-                                    
+
                                     Toggle("Signal Alerts", isOn: $viewModel.notifyOnSignal)
                                         .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
                                         .foregroundColor(.textSecondary)
@@ -649,9 +651,9 @@ struct SettingsView: View {
                                     Toggle("Trade Closures", isOn: $viewModel.notifyOnClose)
                                         .toggleStyle(SwitchToggleStyle(tint: .accentCyan))
                                         .foregroundColor(.textSecondary)
-                                    
+
                                     Divider().background(Color.borderSubtle)
-                                    
+
                                     Button(action: {
                                         NotificationManager.shared.requestAuthorization()
                                         Task { @MainActor in
@@ -687,7 +689,7 @@ struct SettingsView: View {
         }
         #endif
     }
-    
+
     @ViewBuilder
     private func weightStepper(_ binding: Binding<Double>) -> some View {
         HStack(spacing: 12) {
@@ -699,7 +701,7 @@ struct SettingsView: View {
                 .labelsHidden()
         }
     }
-    
+
     private func saveAllSettings() {
         // Ensure ScalpingConfig is updated before saving
         ScalpingConfig.shared.confidenceThreshold = viewModel.scalpingConfig.confidenceThreshold
@@ -712,7 +714,7 @@ struct SettingsView: View {
         ScalpingConfig.shared.enableHourlyLimit = viewModel.enableHourlyLimit
         ScalpingConfig.shared.maxDailyTrades = viewModel.dailyTradeLimit
         ScalpingConfig.shared.maxHourlyTrades = Int(viewModel.maxHourlyTrades)
-        
+
         // V10.0 Save Sync
         ScalpingConfig.shared.enableOrderFlowFilter = viewModel.scalpingConfig.enableOrderFlowFilter
         ScalpingConfig.shared.orderFlowThreshold = viewModel.scalpingConfig.orderFlowThreshold
@@ -724,12 +726,12 @@ struct SettingsView: View {
         ScalpingConfig.shared.enableSwingSL = viewModel.scalpingConfig.enableSwingSL
         ScalpingConfig.shared.swingLookback = viewModel.scalpingConfig.swingLookback
         ScalpingConfig.shared.volatilityMultiplierMin = viewModel.scalpingConfig.volatilityMultiplierMin
-        
+
         // V10.0 Partial TP Sync
         ScalpingConfig.shared.partialTP1_Pips = viewModel.scalpingConfig.partialTP1_Pips
         ScalpingConfig.shared.partialTP2_Pips = viewModel.scalpingConfig.partialTP2_Pips
         ScalpingConfig.shared.partialTP3_Pips = viewModel.scalpingConfig.partialTP3_Pips
-        
+
         // Strategy Weights Sync
         ScalpingConfig.shared.weightHTFAlignment = viewModel.scalpingConfig.weightHTFAlignment
         ScalpingConfig.shared.weightMomentumExhaustion = viewModel.scalpingConfig.weightMomentumExhaustion
@@ -744,10 +746,10 @@ struct SettingsView: View {
         ScalpingConfig.shared.fixedSLPips = viewModel.scalpingConfig.fixedSLPips
         ScalpingConfig.shared.enableRRCheck = viewModel.scalpingConfig.enableRRCheck
         ScalpingConfig.shared.minRRRatio = viewModel.scalpingConfig.minRRRatio
-        
+
         viewModel.saveSettings()
     }
-    
+
     @ViewBuilder
     func pairToggle(symbol: String) -> some View {
         let isActive = viewModel.activeSymbols.contains(symbol)
@@ -780,7 +782,7 @@ struct SettingsView: View {
                 .tracking(1)
         }
     }
-    
+
     private func settingsRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         HStack {
             Text(label)

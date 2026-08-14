@@ -1,6 +1,8 @@
 // ScalpingTradeMonitor.swift - V10.6 coordinated EA/app trade management
 import Foundation
 
+// NOTE: Notification.Name.tradePartiallyClosed is declared in TradeNotificationExtensions.swift
+
 actor ScalpingTradeMonitor {
     private var activeTrades: [UUID: TradeRecord] = [:]
     private var tradeEntryIndicators: [UUID: IndicatorSet] = [:]
@@ -33,18 +35,18 @@ actor ScalpingTradeMonitor {
             // Profitable runners are never time-expired or indicator-exited.
             if profitable { continue }
 
-            if await checkTimeExit(trade) {
+            if await checkTimeExit(trade: trade) {
                 await closeTrade(trade, reason: "Time Expiry (unprofitable)")
                 continue
             }
 
             if let indicators,
-               await shouldExitViaIndicatorReversal(trade, indicators: indicators) {
+               await shouldExitViaIndicatorReversal(trade: trade, indicators: indicators) {
                 await closeTrade(trade, reason: "Indicator Reversal (unprofitable)")
                 continue
             }
 
-            if await emergency(trade, price) {
+            if await emergency(trade: trade, price: price) {
                 await closeTrade(trade, reason: "Emergency Fallback")
             }
         }
@@ -130,6 +132,7 @@ actor ScalpingTradeMonitor {
         do {
             if try await MT5Service.shared.closePosition(ticket: ticket, volume: roundedVolume) {
                 godLog("💰 PARTIAL TP\(stage) | \(symbol) | closed=\(String(format: "%.2f", roundedVolume)) lots", level: .success)
+                // Post notification using the static constant - now accessible via nonisolated
                 NotificationCenter.default.post(name: .tradePartiallyClosed, object: symbol)
                 return true
             }
@@ -158,26 +161,27 @@ actor ScalpingTradeMonitor {
         return trade.type == .buy ? (price - trade.entryPrice) / pip : (trade.entryPrice - price) / pip
     }
 
-    private func emergency(_ trade: TradeRecord, _ price: Double) async -> Bool {
+    private func emergency(trade: TradeRecord, price: Double) async -> Bool {
         guard let sl = trade.stopLoss else { return false }
         let pip = trade.symbol.contains("JPY") ? 0.01 : 0.0001
         return trade.type == .buy ? price <= sl - 5 * pip : price >= sl + 5 * pip
     }
 
     private func shouldExitViaIndicatorReversal(trade: TradeRecord, indicators: IndicatorSet) async -> Bool {
-        let values = await MainActor.run {
-            (ScalpingConfig.shared.enableIndicatorExit, tradeEntryIndicators[trade.id])
-        }
-        guard values.0, let entry = values.1 else { return false }
+        let enableExit = await MainActor.run { ScalpingConfig.shared.enableIndicatorExit }
+        guard enableExit else { return false }
+
+        guard let entry = tradeEntryIndicators[trade.id] else { return false }
+
         if trade.type == .buy {
             return (indicators.rsi > 70 && indicators.rsi < entry.rsi - 3) ||
-                   (indicators.bbPosition > 1 && indicators.stochasticK > 80)
+                (indicators.bbPosition > 1 && indicators.stochasticK > 80)
         }
         return (indicators.rsi < 30 && indicators.rsi > entry.rsi + 3) ||
-               (indicators.bbPosition < 0 && indicators.stochasticK < 20)
+            (indicators.bbPosition < 0 && indicators.stochasticK < 20)
     }
 
-    private func checkTimeExit(_ trade: TradeRecord) async -> Bool {
+    private func checkTimeExit(trade: TradeRecord) async -> Bool {
         let maxMinutes = await MainActor.run { ScalpingConfig.shared.maxHoldMinutes }
         return Date().timeIntervalSince(trade.entryTime) > maxMinutes * 60
     }
