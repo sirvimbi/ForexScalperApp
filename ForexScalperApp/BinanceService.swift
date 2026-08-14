@@ -1,4 +1,4 @@
-// BinanceService.swift - REFACTORED FOR RELIABILITY
+// BinanceService.swift - FIXED with single stream approach
 import Foundation
 
 actor BinanceService: MarketDataProvider {
@@ -7,77 +7,74 @@ actor BinanceService: MarketDataProvider {
     private var webSocketTask: URLSessionWebSocketTask?
     private var onKlineReceived: (@Sendable (String, String, Kline, Bool) -> Void)?
     private var pingTimer: Task<Void, Never>?
-    
+    private var reconnectTask: Task<Void, Never>?
+    private var isReconnecting = false
+
     private let baseURL = "https://api.binance.com/api/v3"
-    private let wsURL = "wss://stream.binance.com:9443/stream?streams="
-    
+    private let wsBaseURL = "wss://stream.binance.com:9443/ws" // Use /ws instead of /stream
+
     func connect(symbols: [String], timeframes: [String], onKline: @escaping @Sendable (String, String, Kline, Bool) -> Void) {
         self.symbols = symbols
         self.timeframes = timeframes
         self.onKlineReceived = onKline
-        
+
         Task {
-            // First fetch historical data
             await fetchHistoricalData()
-            // Then connect to WebSocket for real-time updates
             connectWebSocket()
-            // Start ping timer to keep connection alive
             startPingTimer()
         }
     }
-    
+
     func disconnect() {
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         pingTimer?.cancel()
+        reconnectTask?.cancel()
         onKlineReceived = nil
+        isReconnecting = false
         print("🔌 Binance: Disconnected")
     }
-    
+
     func getCandles(symbol: String, timeframe: String) async -> [Kline] {
-        // This is handled via the RefactoredMarketDataActor
         return []
     }
-    
+
     func getLatestPrice(symbol: String) async -> Double? {
         return nil
     }
-    
+
     // MARK: - Private Methods
-    
+
     private func fetchHistoricalData() async {
         print("📥 Fetching historical data for \(symbols.count) symbols...")
-        
+
         for symbol in symbols {
             let binanceSymbol = convertToBinanceSymbol(symbol)
             if binanceSymbol.isEmpty { continue }
-            
-            // Collect all timeframes first before firing any "recent" callbacks
+
             for timeframe in timeframes {
-                // ELITE DEPTH: 1000 bars for better trend analysis
                 await fetchKlines(symbol: symbol, interval: convertToBinanceInterval(timeframe), limit: 1000)
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
         }
-        
+
         print("✅ Historical data fetch complete")
     }
-    
+
     private func fetchKlines(symbol: String, interval: String, limit: Int) async {
         let binanceSymbol = convertToBinanceSymbol(symbol)
         guard !binanceSymbol.isEmpty else { return }
-        
+
         let urlString = "\(baseURL)/klines?symbol=\(binanceSymbol)&interval=\(interval)&limit=\(limit)"
-        
+
         guard let url = URL(string: urlString) else { return }
-        
+
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
-            
+
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                 if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[Any]] {
                     print("📥 Received \(jsonArray.count) historical \(interval) candles for \(symbol)")
-                    
-                    // Compact map to process valid klines only
+
                     let klines = jsonArray.compactMap { item -> Kline? in
                         guard item.count >= 11,
                               let closeTime = item[6] as? Int64,
@@ -99,10 +96,9 @@ actor BinanceService: MarketDataProvider {
                             isClosed: true
                         )
                     }
-                    
-                    // Call the handler for each kline
+
                     for kline in klines {
-                        onKlineReceived?(symbol, interval, kline, false) // Mark as NOT live
+                        onKlineReceived?(symbol, interval, kline, false)
                     }
                 }
             } else {
@@ -112,78 +108,128 @@ actor BinanceService: MarketDataProvider {
             print("❌ Error fetching historical data for \(symbol) \(interval): \(error)")
         }
     }
-    
+
+    // FIXED: Use single WebSocket connection with the most important streams only
     private func connectWebSocket() {
-        // Binance requires lowercase symbols and specific stream naming
-        let streams = symbols.compactMap { symbol -> [String]? in
-            let binanceSymbol = convertToBinanceSymbol(symbol).lowercased()
-            if binanceSymbol.isEmpty { return nil }
-            
-            return timeframes.map { timeframe in
-                let binanceInterval = convertToBinanceInterval(timeframe)
-                return "\(binanceSymbol)@kline_\(binanceInterval)"
-            }
-        }.flatMap { $0 }.joined(separator: "/")
-        
+        reconnectTask?.cancel()
+        reconnectTask = nil
+
+        // Build streams - only subscribe to 1m and 5m for real-time updates
+        // Other timeframes can be fetched via REST API
+        let streams = buildStreams()
+
         if streams.isEmpty {
             print("ℹ️ No symbols available for Binance WebSocket")
             return
         }
-        
-        guard let url = URL(string: wsURL + streams) else { return }
-        
-        print("🌐 Connecting to Binance WebSocket: \(url.absoluteString)")
+
+        // Only use 1m and 5m for WebSocket - subscribe to fewer streams
+        let filteredStreams = streams.filter { stream in
+            // Only include 1m and 5m streams
+            stream.contains("@kline_1m") || stream.contains("@kline_5m")
+        }
+
+        print("📊 Subscribing to \(filteredStreams.count) streams (1m & 5m only)")
+
+        if filteredStreams.isEmpty {
+            print("ℹ️ No 1m or 5m streams available for Binance WebSocket")
+            return
+        }
+
+        // Use a single connection with all filtered streams
+        // Binance can handle up to 1024 streams per connection with /ws endpoint
+        let streamString = filteredStreams.joined(separator: "/")
+        let urlString = "\(wsBaseURL)?streams=\(streamString)"
+
+        guard let url = URL(string: urlString) else {
+            print("❌ Failed to create WebSocket URL")
+            return
+        }
+
+        print("🌐 Connecting to Binance WebSocket: \(url.absoluteString.prefix(200))...")
         webSocketTask = URLSession.shared.webSocketTask(with: url)
         webSocketTask?.resume()
-        
+
         receiveMessage()
-        print("✅ WebSocket connected for real-time updates")
+        print("✅ WebSocket connected for real-time updates (1m & 5m)")
     }
-    
+
+    private func buildStreams() -> [String] {
+        var streams: [String] = []
+
+        for symbol in symbols {
+            let binanceSymbol = convertToBinanceSymbol(symbol).lowercased()
+            if binanceSymbol.isEmpty { continue }
+
+            for timeframe in timeframes {
+                let binanceInterval = convertToBinanceInterval(timeframe)
+                streams.append("\(binanceSymbol)@kline_\(binanceInterval)")
+            }
+        }
+
+        return streams
+    }
+
     private func receiveMessage() {
-        webSocketTask?.receive { [weak self] result in
-            guard let self = self else { return }
-            
-            switch result {
-            case .success(let message):
+        guard let task = webSocketTask else { return }
+
+        Task {
+            await receiveMessages(task: task)
+        }
+    }
+
+    private func receiveMessages(task: URLSessionWebSocketTask) async {
+        while !Task.isCancelled {
+            do {
+                let message = try await task.receive()
+
                 switch message {
                 case .string(let text):
-                    Task { await self.parseKlineMessage(text) }
+                    await parseKlineMessage(text)
                 case .data(let data):
                     if let text = String(data: data, encoding: .utf8) {
-                        Task { await self.parseKlineMessage(text) }
+                        await parseKlineMessage(text)
                     }
                 @unknown default:
                     break
                 }
-                Task { [weak self] in
-                    await self?.receiveMessage()
-                }
-                
-            case .failure(let error):
+            } catch {
                 print("❌ WebSocket Error: \(error.localizedDescription)")
-                // Reconnect after delay
-                Task {
-                    try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
-                    await self.connectWebSocket()
-                }
+                await scheduleReconnect()
+                break
             }
         }
     }
-    
+
+    private func scheduleReconnect() async {
+        guard !isReconnecting else { return }
+        isReconnecting = true
+
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+            if !Task.isCancelled, let self = self {
+                await self.connectWebSocket()
+                await self.setReconnecting(false)
+            }
+        }
+    }
+
+    private func setReconnecting(_ value: Bool) {
+        isReconnecting = value
+    }
+
     private func parseKlineMessage(_ text: String) async {
         guard let data = text.data(using: .utf8) else { return }
-        
-        // Use non-isolated decoding for performance and race prevention
+
         let decoder = JSONDecoder()
         guard let json = try? decoder.decode(BinanceStreamResponse.self, from: data) else {
             return
         }
-        
+
         let detail = json.data.k
         let symbol = findOriginalSymbol(for: json.data.s)
         let timeframe = convertFromBinanceInterval(detail.i)
-        
+
         let kline = Kline(
             open: Double(detail.o) ?? 0,
             high: Double(detail.h) ?? 0,
@@ -194,32 +240,34 @@ actor BinanceService: MarketDataProvider {
             spread: nil,
             isClosed: detail.x
         )
-        
-        onKlineReceived?(symbol, timeframe, kline, true) // Mark as live
+
+        onKlineReceived?(symbol, timeframe, kline, true)
     }
-    
+
     private func startPingTimer() {
         pingTimer?.cancel()
-        pingTimer = Task {
+        pingTimer = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
-                webSocketTask?.sendPing { error in
-                    if let error = error {
-                        print("❌ WebSocket Ping Error: \(error.localizedDescription)")
-                    } else {
-                        print("🏓 Received pong")
-                    }
-                }
+                guard let self = self else { break }
+                await self.sendPing()
             }
         }
     }
-    
+
+    private func sendPing() {
+        webSocketTask?.sendPing { error in
+            if let error = error {
+                print("❌ WebSocket Ping Error: \(error.localizedDescription)")
+            } else {
+                print("🏓 Received pong")
+            }
+        }
+    }
+
     // MARK: - Helpers
-    
+
     private func convertToBinanceSymbol(_ symbol: String) -> String {
-        // PRODUCTION WHITELIST: Only return symbols verified to exist on Binance Spot API
-        // This prevents 400 errors for Forex pairs that Binance doesn't support as Spot.
-        
         let whitelist = [
             "EURUSD": "EURUSDT",
             "GBPUSD": "GBPUSDT",
@@ -231,23 +279,19 @@ actor BinanceService: MarketDataProvider {
             "ADAUSDT": "ADAUSDT",
             "SOLUSDT": "SOLUSDT"
         ]
-        
+
         if let mapped = whitelist[symbol] {
             return mapped
         }
-        
-        // If it's a crypto symbol already ending in USDT, allow it
+
         if symbol.hasSuffix("USDT") {
             return symbol
         }
-        
-        // For all other symbols (Exotic Forex, specialized crosses), return empty
-        // to force the app to use MT5 for historical data and real-time updates.
+
         return ""
     }
-    
+
     private func findOriginalSymbol(for binanceSymbol: String) -> String {
-        // Search in our symbols list to see if we have a match
         for sym in symbols {
             if convertToBinanceSymbol(sym) == binanceSymbol {
                 return sym
@@ -255,7 +299,7 @@ actor BinanceService: MarketDataProvider {
         }
         return binanceSymbol
     }
-    
+
     private func convertToBinanceInterval(_ timeframe: String) -> String {
         switch timeframe.uppercased() {
         case "1M": return "1m"
@@ -269,8 +313,8 @@ actor BinanceService: MarketDataProvider {
         default: return "1m"
         }
     }
-    
+
     private func convertFromBinanceInterval(_ interval: String) -> String {
-        return interval // They are usually the same in this app's logic
+        return interval
     }
 }

@@ -1,3 +1,4 @@
+// NetworkDiagnostics.swift - FIXED
 import Foundation
 
 /// Runtime HTTP diagnostics for development builds.
@@ -46,27 +47,54 @@ private final class DiagnosticsURLProtocol: URLProtocol {
         let bodyBytes = request.httpBody?.count ?? 0
         NetworkDiagnostics.logTask("→ \(method) \(url) body=\(bodyBytes)b")
 
-        guard let forwarded = request.mutableCopy() as? NSMutableURLRequest else {
-            let error = NSError(domain: "NetworkDiagnostics", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Unable to create mutable URL request for diagnostics"
-            ])
-            NetworkDiagnostics.logTask("✖ \(method) \(url) FAILED: \(error.localizedDescription)", level: .error)
-            client?.urlProtocol(self, didFailWithError: error)
+        // Create a mutable copy manually instead of using mutableCopy()
+        var forwarded = request
+
+        // Check if this is a file upload or large body that we shouldn't intercept
+        if let body = request.httpBody, body.count > 1024 * 1024 {
+            NetworkDiagnostics.logTask("⚠️ \(method) \(url) large body (\(body.count) bytes) - skipping diagnostics", level: .warning)
+            // Forward the original request without diagnostics for large bodies
+            let originalRequest = request
+            let task = URLSession.shared.dataTask(with: originalRequest) { [weak self] data, response, error in
+                guard let self = self else { return }
+                let elapsed = Int(Date().timeIntervalSince(self.startTime) * 1000)
+
+                if let error = error {
+                    NetworkDiagnostics.logTask("✖ \(method) \(url) FAILED after \(elapsed)ms: \(error.localizedDescription)", level: .error)
+                    self.client?.urlProtocol(self, didFailWithError: error)
+                    return
+                }
+
+                if let http = response as? HTTPURLResponse {
+                    let level: LogLevel = (200..<400).contains(http.statusCode) ? .diagnostic : .warning
+                    NetworkDiagnostics.logTask("← \(http.statusCode) \(method) \(url) \(elapsed)ms", level: level)
+                }
+
+                if let response = response {
+                    self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                }
+                if let data = data {
+                    self.client?.urlProtocol(self, didLoad: data)
+                }
+                self.client?.urlProtocolDidFinishLoading(self)
+            }
+            task.resume()
             return
         }
 
-        URLProtocol.setProperty(true, forKey: Self.handledKey, in: forwarded)
+        URLProtocol.setProperty(true, forKey: Self.handledKey, in: &forwarded)
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = []
         let session = URLSession(configuration: configuration)
         self.session = session
-        dataTask = session.dataTask(with: forwarded as URLRequest) { [weak self] data, response, error in
+
+        dataTask = session.dataTask(with: forwarded) { [weak self] data, response, error in
             guard let self else { return }
             let elapsed = Int(Date().timeIntervalSince(self.startTime) * 1000)
             let bytes = data?.count ?? 0
 
-            if let error {
+            if let error = error {
                 NetworkDiagnostics.logTask("✖ \(method) \(url) FAILED after \(elapsed)ms: \(error.localizedDescription)", level: .error)
                 self.client?.urlProtocol(self, didFailWithError: error)
                 return
@@ -79,10 +107,10 @@ private final class DiagnosticsURLProtocol: URLProtocol {
                 NetworkDiagnostics.logTask("← response \(method) \(url) \(elapsed)ms bytes=\(bytes)")
             }
 
-            if let response {
+            if let response = response {
                 self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             }
-            if let data {
+            if let data = data {
                 self.client?.urlProtocol(self, didLoad: data)
             }
             self.client?.urlProtocolDidFinishLoading(self)
@@ -95,5 +123,16 @@ private final class DiagnosticsURLProtocol: URLProtocol {
         dataTask = nil
         session?.invalidateAndCancel()
         session = nil
+    }
+}
+
+// Extension to allow setting property on URLRequest
+extension URLProtocol {
+    static func setProperty(_ value: Any, forKey key: String, in request: inout URLRequest) {
+        // Create a mutable copy of the request using NSMutableURLRequest
+        if let mutableRequest = (request as NSURLRequest).mutableCopy() as? NSMutableURLRequest {
+            URLProtocol.setProperty(value, forKey: key, in: mutableRequest)
+            request = mutableRequest as URLRequest
+        }
     }
 }

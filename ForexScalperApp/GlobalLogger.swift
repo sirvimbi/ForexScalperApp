@@ -1,4 +1,4 @@
-// GlobalLogger.swift - THREAD-SAFE LOGGING
+// GlobalLogger.swift - THREAD-SAFE LOGGING WITH PROPER ACTOR ISOLATION
 import Foundation
 
 enum LogLevel: String, Sendable {
@@ -15,13 +15,12 @@ struct LogEntry: Sendable {
     let level: LogLevel
 }
 
-/// Small process-wide de-duplicator for log fan-out. Multiple service callbacks can
-/// legitimately report the same event in the same run-loop window; printing it twice
-/// makes the runtime trace misleading without adding information.
-private enum GlobalLogDeduplicator {
-    static let lock = NSLock()
-    static var recent: [String: Date] = [:]
-    static let duplicateWindow: TimeInterval = 0.30
+/// Small process-wide de-duplicator for log fan-out.
+/// This is a standalone struct that is NOT isolated to any actor.
+private struct GlobalLogDeduplicator {
+    private static let lock = NSLock()
+    private static var recent: [String: Date] = [:]
+    private static let duplicateWindow: TimeInterval = 0.30
 
     static func shouldEmit(_ message: String, now: Date = Date()) -> Bool {
         lock.lock()
@@ -58,13 +57,16 @@ nonisolated func godLog(_ message: String, level: LogLevel = .info, file: String
     // Single stdout emission. ConsoleLogger observes the notification but does not print it.
     print(fullMessage)
 
-    // Route to in-app console via notification.
-    NotificationCenter.default.post(
-        name: .newLogEntry,
-        object: LogEntry(message: fullMessage, level: level)
-    )
+    // Route to in-app console via notification - use Task to hop to MainActor
+    Task { @MainActor in
+        NotificationCenter.default.post(
+            name: .newLogEntry,
+            object: LogEntry(message: fullMessage, level: level)
+        )
+    }
 }
 
-extension NSNotification.Name {
-    static let newLogEntryInternal = NSNotification.Name("newLogEntryInternal")
+// MARK: - Notification Names
+extension Notification.Name {
+    static let newLogEntry = Notification.Name("newLogEntry")
 }

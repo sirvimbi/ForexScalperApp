@@ -717,5 +717,4 @@ extension Notification.Name {
     nonisolated static let mt5OhlcUpdated = Notification.Name("mt5OhlcUpdated")
     nonisolated static let signalSourceChanged = Notification.Name("signalSourceChanged")
     nonisolated static let sourceMetricsUpdated = Notification.Name("sourceMetricsUpdated")
-    nonisolated static let newLogEntry = Notification.Name("newLogEntry")
 }

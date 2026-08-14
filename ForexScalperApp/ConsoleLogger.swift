@@ -1,3 +1,4 @@
+// ConsoleLogger.swift - FIXED ACTOR ISOLATION
 import Foundation
 import SwiftUI
 import Combine
@@ -11,7 +12,7 @@ class ConsoleLogger: ObservableObject {
     private var lastMessage: String?
     private var lastMessageTime = Date.distantPast
 
-    struct LogEntryUI: Identifiable, Equatable {
+    struct LogEntryUI: Identifiable, Equatable, Sendable {
         let id = UUID()
         let timestamp: Date
         let message: String
@@ -49,11 +50,13 @@ class ConsoleLogger: ObservableObject {
 
     private func startCleanupTimer() {
         Timer.publish(every: 300, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
+        .autoconnect()
+        .sink { [weak self] _ in
+            Task { @MainActor in
                 self?.cleanupOldLogs()
             }
-            .store(in: &cancellables)
+        }
+        .store(in: &cancellables)
     }
 
     private var cancellables = Set<AnyCancellable>()
@@ -122,7 +125,7 @@ class ConsoleLogger: ObservableObject {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
 
         return logs.map { "[\(formatter.string(from: $0.timestamp))] \($0.message)" }
-            .joined(separator: "\n")
+        .joined(separator: "\n")
     }
 
     func clearLogs() {
