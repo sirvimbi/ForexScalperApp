@@ -1,9 +1,20 @@
 import Foundation
 
-/// Makes the signal engine's existing evaluation output explicit and easy to follow in real time.
-/// The engine remains the authority for the decision; this component only observes and explains logs.
+/// Observes the signal engine's existing logs and keeps the in-app trace readable.
+/// The signal engine remains the sole authority for scoring and trade decisions.
 enum SignalDiagnostics {
+    private static let lock = NSLock()
+    private static var installed = false
+
     static func install() {
+        lock.lock()
+        guard !installed else {
+            lock.unlock()
+            return
+        }
+        installed = true
+        lock.unlock()
+
         NotificationCenter.default.addObserver(
             forName: .newLogEntry,
             object: nil,
@@ -11,26 +22,19 @@ enum SignalDiagnostics {
         ) { notification in
             guard let entry = notification.object as? LogEntry else { return }
             let message = entry.message
-            guard !message.contains("🧭 SIGNAL TRACE") else { return }
 
-            if message.contains("📊 EVAL:") {
-                emitTrace(from: message, kind: "EVALUATION")
-            } else if message.contains("🚀 HYBRID SIGNAL:") || message.contains("⚡️ FAST SIGNAL:") {
-                emitTrace(from: message, kind: "ACCEPTED")
-            } else if message.contains("skipped:") && message.contains("ScalpingSignalEngine.swift") {
-                emitTrace(from: message, kind: "REJECTED")
+            // The engine now emits the complete pillar-by-pillar trace itself.
+            // Do not echo EVAL/PILLAR messages: that was creating a second copy of
+            // the same analysis in the console.
+            guard !message.contains("🧭 SIGNAL TRACE"),
+                  !message.contains("🔎 SIGNAL PILLAR"),
+                  !message.contains("📊 EVAL:") else { return }
+
+            if message.contains("🚀 HYBRID SIGNAL:") || message.contains("⚡️ FAST SIGNAL:") {
+                godLog("🧭 SIGNAL TRACE [ACCEPTED] \(message)", level: .diagnostic)
             }
         }
 
         godLog("🧭 Signal diagnostics installed — live confidence/pillar decisions enabled", level: .diagnostic)
-    }
-
-    private static func emitTrace(from message: String, kind: String) {
-        if let range = message.range(of: "📊 EVAL:") {
-            let evaluation = String(message[range.lowerBound...])
-            godLog("🧭 SIGNAL TRACE [EVALUATION] \(evaluation)", level: .diagnostic)
-        } else {
-            godLog("🧭 SIGNAL TRACE [\(kind)] \(message)", level: kind == "REJECTED" ? .warning : .success)
-        }
     }
 }
