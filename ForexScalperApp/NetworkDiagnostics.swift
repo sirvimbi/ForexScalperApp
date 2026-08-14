@@ -3,7 +3,18 @@ import Foundation
 /// Runtime HTTP diagnostics for development builds.
 /// Captures request start/end, status codes, payload sizes and failures without logging secrets.
 enum NetworkDiagnostics {
+    private static let lock = NSLock()
+    private static var installed = false
+
     static func install() {
+        lock.lock()
+        guard !installed else {
+            lock.unlock()
+            return
+        }
+        installed = true
+        lock.unlock()
+
         URLProtocol.registerClass(DiagnosticsURLProtocol.self)
         godLog("🌐 Network diagnostics installed (HTTP/HTTPS requests)", level: .diagnostic)
     }
