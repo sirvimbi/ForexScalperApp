@@ -15,11 +15,16 @@
 #define DATA_INVALID_SOCKET ((ulong)-1)
 #define DATA_PROTOCOL_VERSION FOREX_SCALPER_EA_VERSION
 #define EA_V22_MAGIC FOREX_SCALPER_EA_MAGIC
-#define V22_TRAIL_ACTIVATION_PIPS 5.0
+#define V22_TRAIL_ACTIVATION_PIPS_DEFAULT 5.0
 #define V22_STAGE1_R 1.0
 #define V22_STAGE2_R 2.0
 #define V22_MIN_TRAIL_STEP_PIPS 1.0
 #define V22_BE_LOCK_PIPS 0.5
+#define V22_TRAIL_MIN_ACTIVATION_PIPS 1.0
+#define V22_TRAIL_MAX_ACTIVATION_PIPS 100.0
+#define V22_TRAIL_ATR_PERIOD 14
+#define V22_TRAIL_BASELINE_ATR_PIPS 5.0
+#define V22_TRAIL_MAX_VOL_MULTIPLIER 1.50
 
 class CData
 {
@@ -56,7 +61,8 @@ public:
          Print(" FOREXSCALPERAPP MT5 EXECUTION BRIDGE V22.0");
          Print(" EA-authoritative trade management: ENABLED");
          Print(" Partial TP: 50% @ 1R | 30% @ 2R | remainder runner");
-         Print(" Trailing: activates at 5 pips; profit-adaptive distance");
+         PrintFormat(" Trailing: configurable activation (default %.1f pips); volatility-aware curve", V22_TRAIL_ACTIVATION_PIPS_DEFAULT);
+         Print(" Trail curve: 3 / 4.5 / 6 / 8 / 10 / 12 pips baseline");
          Print(" Runner: unlimited hold; no fixed TP/time exit");
          Print(" Hard SL: mandatory emergency protection");
          Print(" Swift trade monitor: OBSERVATION / UNPROFITABLE EXITS ONLY");
@@ -258,15 +264,44 @@ private:
    }
    void SetState(string key, double value) { GlobalVariableSet(key, value); }
    double ReadState(string key, double fallback) { return GlobalVariableCheck(key) ? GlobalVariableGet(key) : fallback; }
+   double TrailActivationPips()
+   {
+      double configured = V22_TRAIL_ACTIVATION_PIPS_DEFAULT;
+      const string key = "FSV22_TRAIL_ACTIVATION_PIPS";
+      if(GlobalVariableCheck(key)) configured = GlobalVariableGet(key);
+      if(configured < V22_TRAIL_MIN_ACTIVATION_PIPS) configured = V22_TRAIL_MIN_ACTIVATION_PIPS;
+      if(configured > V22_TRAIL_MAX_ACTIVATION_PIPS) configured = V22_TRAIL_MAX_ACTIVATION_PIPS;
+      return configured;
+   }
    double DynamicTrailingPips(double profitPips)
    {
-      if(profitPips >= 100.0) return 18.0;
-      if(profitPips >= 60.0) return 15.0;
-      if(profitPips >= 40.0) return 12.0;
-      if(profitPips >= 25.0) return 10.0;
-      if(profitPips >= 15.0) return 8.0;
-      if(profitPips >= 10.0) return 6.0;
-      return 5.0;
+      if(profitPips >= 80.0) return 12.0;
+      if(profitPips >= 40.0) return 10.0;
+      if(profitPips >= 25.0) return 8.0;
+      if(profitPips >= 15.0) return 6.0;
+      if(profitPips >= 10.0) return 4.5;
+      if(profitPips >= 5.0) return 3.0;
+      return 0.0;
+   }
+   double VolatilityAdjustedTrailPips(string symbol, double baseTrailPips)
+   {
+      if(baseTrailPips <= 0.0) return 0.0;
+      double pip = PipSize(symbol);
+      if(pip <= 0.0) return baseTrailPips;
+      int handle = iATR(symbol, PERIOD_M5, V22_TRAIL_ATR_PERIOD);
+      if(handle == INVALID_HANDLE) return baseTrailPips;
+      double atr[];
+      ArraySetAsSeries(atr, true);
+      double result = baseTrailPips;
+      if(CopyBuffer(handle, 0, 0, 1, atr) == 1 && atr[0] > 0.0)
+      {
+         double atrPips = atr[0] / pip;
+         double multiplier = atrPips / V22_TRAIL_BASELINE_ATR_PIPS;
+         multiplier = MathMax(1.0, MathMin(V22_TRAIL_MAX_VOL_MULTIPLIER, multiplier));
+         result = baseTrailPips * multiplier;
+      }
+      IndicatorRelease(handle);
+      return result;
    }
    bool ImproveStop(ulong ticket, string symbol, ENUM_POSITION_TYPE type, double currentSL, double desiredSL)
    {
@@ -374,14 +409,19 @@ private:
                PrintFormat("[EA V22] PARTIAL TP2 UNAVAILABLE | %s #%I64u | current=%.4f | brokerMin=%.4f | runner remains protected", symbol, ticket, volume, minVolume);
             }
          }
-         if(profitPips >= V22_TRAIL_ACTIVATION_PIPS)
+         double activationPips = TrailActivationPips();
+         if(profitPips >= activationPips)
          {
-            double trailPips = DynamicTrailingPips(profitPips);
-            double desiredSL = (type == POSITION_TYPE_BUY) ? tick.bid - trailPips * pip : tick.ask + trailPips * pip;
-            desiredSL = ClampTrailingStop(symbol, type, desiredSL);
-            double currentSL = PositionGetDouble(POSITION_SL);
-            if(ImproveStop(ticket, symbol, type, currentSL, desiredSL))
-               PrintFormat("[EA V22] TRAIL | %s #%I64u | profit=%.1f pips | distance=%.1f pips | SL=%.*f", symbol, ticket, profitPips, trailPips, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS), desiredSL);
+            double baseTrailPips = DynamicTrailingPips(profitPips);
+            if(baseTrailPips > 0.0)
+            {
+               double trailPips = VolatilityAdjustedTrailPips(symbol, baseTrailPips);
+               double desiredSL = (type == POSITION_TYPE_BUY) ? tick.bid - trailPips * pip : tick.ask + trailPips * pip;
+               desiredSL = ClampTrailingStop(symbol, type, desiredSL);
+               double currentSL = PositionGetDouble(POSITION_SL);
+               if(ImproveStop(ticket, symbol, type, currentSL, desiredSL))
+                  PrintFormat("[EA V22] TRAIL | %s #%I64u | activation=%.1f pips | profit=%.1f pips | base=%.1f | volatility=%.1fx | distance=%.1f pips | SL=%.*f", symbol, ticket, activationPips, profitPips, baseTrailPips, trailPips / baseTrailPips, trailPips, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS), desiredSL);
+            }
          }
       }
    }
