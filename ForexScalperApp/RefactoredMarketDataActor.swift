@@ -20,7 +20,6 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         "W1": 1
     ]
 
-    // Prevent a live stream from flooding the console with identical inventory lines.
     private var lastInventoryLog: [String: (count: Int, latest: Int, status: String, loggedAt: Date)] = [:]
     private let inventoryLogInterval: TimeInterval = 30
 
@@ -30,7 +29,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         if !isHydrated.contains(key) {
             let cached = await CandlePersistenceManager.shared.loadCandles(for: symbol, timeframe: timeframe)
             if candleStore[key] == nil {
-                candleStore[key] = cached
+                candleStore[key] = cached.map(normalizeCandleTimestamp)
             }
             isHydrated.insert(key)
             godLog("💧 CANDLE HYDRATE | \(symbol) | TF=\(timeframe) | persisted=\(cached.count)", level: cached.isEmpty ? .warning : .diagnostic)
@@ -39,7 +38,8 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         var array = candleStore[key] ?? []
         var addedCount = 0
 
-        for candle in newCandles {
+        for rawCandle in newCandles {
+            let candle = normalizeCandleTimestamp(rawCandle)
             if let index = array.lastIndex(where: { $0.closeTime == candle.closeTime }) {
                 array[index] = candle
             } else {
@@ -52,10 +52,12 @@ actor RefactoredMarketDataActor: MarketDataProvider {
             array.removeFirst(array.count - maxCandles)
         }
 
+        // Keep the store chronologically ordered after repairing legacy timestamps.
+        array.sort { $0.closeTime < $1.closeTime }
         candleStore[key] = array
 
         if addedCount > 0 {
-            await CandlePersistenceManager.shared.saveCandles(newCandles, for: symbol, timeframe: timeframe)
+            await CandlePersistenceManager.shared.saveCandles(array.suffix(min(array.count, newCandles.count)), for: symbol, timeframe: timeframe)
         }
 
         if timeframe == "1m", let last = array.last {
@@ -77,6 +79,30 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         return candles
     }
 
+    private func normalizeCandleTimestamp(_ candle: Kline) -> Kline {
+        var seconds = Double(candle.closeTime)
+
+        if seconds > 10_000_000_000 {
+            // Milliseconds -> seconds.
+            seconds /= 1000.0
+        } else if seconds > 0 && seconds < 946_684_800 {
+            // Common legacy corruption: milliseconds were divided by 1000 twice.
+            // Forex/crypto market history in this app should not legitimately predate 2000.
+            seconds *= 1000.0
+        }
+
+        return Kline(
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+            volume: candle.volume,
+            closeTime: Int(seconds.rounded()),
+            spread: candle.spread,
+            isClosed: candle.isClosed
+        )
+    }
+
     private func logCandleInventory(symbol: String, timeframe: String, candles: [Kline], added: Int?) {
         let minimum = diagnosticMinimums[timeframe] ?? 1
         let count = candles.count
@@ -86,15 +112,13 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         let latestEpoch = candles.last?.closeTime ?? 0
         let oldestEpoch = candles.first?.closeTime ?? 0
         let now = Date()
-
-        let previous = lastInventoryLog["\(symbol)_\(timeframe)"]
+        let key = "\(symbol)_\(timeframe)"
+        let previous = lastInventoryLog[key]
         let changed = previous?.count != count || previous?.latest != latestEpoch || previous?.status != status
         let periodic = previous == nil || now.timeIntervalSince(previous!.loggedAt) >= inventoryLogInterval
 
-        // Always log a newly discovered state, but suppress identical high-frequency reads.
         guard changed || periodic || added.map({ $0 > 0 }) == true else { return }
-
-        lastInventoryLog["\(symbol)_\(timeframe)"] = (count: count, latest: latestEpoch, status: status, loggedAt: now)
+        lastInventoryLog[key] = (count: count, latest: latestEpoch, status: status, loggedAt: now)
 
         let level: LogLevel = count == 0 ? .warning : (depthOK ? .success : .diagnostic)
         let missing = max(0, minimum - count)
@@ -106,24 +130,11 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         )
     }
 
-    /// MT5/Binance timestamps should be Unix seconds after ingestion. This formatter also
-    /// repairs the common "milliseconds divided twice" diagnostic value so a bad cache is
-    /// immediately visible instead of making every candle look like 1970.
     private func formatCandleDate(_ epoch: Int) -> String {
         guard epoch > 0 else { return "none" }
-
-        var seconds = Double(epoch)
-        if seconds > 10_000_000_000 {
-            seconds /= 1000.0
-        } else if seconds < 946_684_800 {
-            // Forex/crypto candles in this app cannot legitimately be from before 2000.
-            // A value around 1.7M is characteristic of an epoch that was divided by 1000 twice.
-            seconds *= 1000.0
-        }
-
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: Date(timeIntervalSince1970: seconds))
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(epoch)))
     }
 
     func getLatestPrice(symbol: String) async -> Double? {
