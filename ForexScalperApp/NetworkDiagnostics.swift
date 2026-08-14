@@ -27,14 +27,14 @@ enum NetworkDiagnostics {
 private final class DiagnosticsURLProtocol: URLProtocol {
     private static let handledKey = "ForexScalperApp.DiagnosticsURLProtocol.handled"
     private var session: URLSession?
-    private var task: URLSessionDataTask?
+    private var dataTask: URLSessionDataTask?
     private var startTime = Date()
 
     override class func canInit(with request: URLRequest) -> Bool {
         guard let scheme = request.url?.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             return false
         }
-        return !property(forKey: handledKey, in: request)
+        return property(forKey: handledKey, in: request) == nil
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -46,14 +46,22 @@ private final class DiagnosticsURLProtocol: URLProtocol {
         let bodyBytes = request.httpBody?.count ?? 0
         NetworkDiagnostics.logTask("→ \(method) \(url) body=\(bodyBytes)b")
 
-        var forwarded = request
-        URLProtocol.setProperty(true, forKey: Self.handledKey, in: &forwarded)
+        guard let forwarded = request.mutableCopy() as? NSMutableURLRequest else {
+            let error = NSError(domain: "NetworkDiagnostics", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Unable to create mutable URL request for diagnostics"
+            ])
+            NetworkDiagnostics.logTask("✖ \(method) \(url) FAILED: \(error.localizedDescription)", level: .error)
+            client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
+
+        URLProtocol.setProperty(true, forKey: Self.handledKey, in: forwarded)
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = []
         let session = URLSession(configuration: configuration)
         self.session = session
-        task = session.dataTask(with: forwarded) { [weak self] data, response, error in
+        dataTask = session.dataTask(with: forwarded as URLRequest) { [weak self] data, response, error in
             guard let self else { return }
             let elapsed = Int(Date().timeIntervalSince(self.startTime) * 1000)
             let bytes = data?.count ?? 0
@@ -79,12 +87,12 @@ private final class DiagnosticsURLProtocol: URLProtocol {
             }
             self.client?.urlProtocolDidFinishLoading(self)
         }
-        task?.resume()
+        dataTask?.resume()
     }
 
     override func stopLoading() {
-        task?.cancel()
-        task = nil
+        dataTask?.cancel()
+        dataTask = nil
         session?.invalidateAndCancel()
         session = nil
     }
