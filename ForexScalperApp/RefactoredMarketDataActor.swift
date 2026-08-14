@@ -25,18 +25,17 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         
         if !isHydrated.contains(key) {
             let cached = await CandlePersistenceManager.shared.loadCandles(for: symbol, timeframe: timeframe)
-            if candleStore[key] == nil {
-                candleStore[key] = cached
-            }
+            candleStore[key] = normalizeCandles(cached)
             isHydrated.insert(key)
 
             godLog("💧 CANDLE HYDRATE | \(symbol) | \(timeframe) | persisted=\(cached.count)", level: cached.isEmpty ? .warning : .diagnostic)
         }
         
         var array = candleStore[key] ?? []
+        let normalizedIncoming = normalizeCandles(newCandles)
         var addedCount = 0
         
-        for candle in newCandles {
+        for candle in normalizedIncoming {
             if let index = array.lastIndex(where: { $0.closeTime == candle.closeTime }) {
                 array[index] = candle
             } else {
@@ -45,6 +44,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
             }
         }
         
+        array.sort { $0.closeTime < $1.closeTime }
         if array.count > maxCandles {
             array.removeFirst(array.count - maxCandles)
         }
@@ -52,7 +52,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         candleStore[key] = array
         
         if addedCount > 0 {
-            await CandlePersistenceManager.shared.saveCandles(newCandles, for: symbol, timeframe: timeframe)
+            await CandlePersistenceManager.shared.saveCandles(normalizedIncoming, for: symbol, timeframe: timeframe)
         }
         
         if timeframe == "1m", let last = array.last {
@@ -72,6 +72,34 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         let candles = candleStore[key] ?? []
         logCandleInventory(symbol: symbol, timeframe: timeframe, candles: candles, added: nil)
         return candles
+    }
+    
+    private func normalizeCandles(_ candles: [Kline]) -> [Kline] {
+        candles.map { candle in
+            let date = candle.closeTime
+            let epochSeconds = date.timeIntervalSince1970
+            let milliseconds: Int
+
+            // Kline's integer closeTime initializer represents milliseconds.
+            // Some existing feeds supplied epoch seconds, which were therefore
+            // interpreted as milliseconds and appeared around January 1970.
+            if date < Date(timeIntervalSince1970: 946684800) {
+                milliseconds = Int(epochSeconds * 1_000_000)
+            } else {
+                milliseconds = Int(epochSeconds * 1_000)
+            }
+
+            return Kline(
+                open: candle.open,
+                high: candle.high,
+                low: candle.low,
+                close: candle.close,
+                volume: candle.volume,
+                closeTime: milliseconds,
+                spread: candle.spread,
+                isClosed: candle.isClosed
+            )
+        }
     }
     
     private func logCandleInventory(symbol: String, timeframe: String, candles: [Kline], added: Int?) {
