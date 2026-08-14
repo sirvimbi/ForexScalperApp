@@ -22,6 +22,7 @@ actor MT5Service {
     private var _isConnected = false
     private var lastRequestTime: Date?
     private let minimumInterval: TimeInterval = 0.1
+    private let maxStopModificationRetries = 5
 
     var isConnected: Bool { _isConnected }
 
@@ -152,9 +153,8 @@ actor MT5Service {
                 if response.statusCode == 404 || response.statusCode == 503 { continue }
                 guard response.statusCode == 200, let root = try? JSONSerialization.jsonObject(with: data) else { continue }
                 let raw: [[String: Any]]
-                if let object = root as? [String: Any] {
-                    raw = (object["data"] as? [[String: Any]]) ?? (object["candles"] as? [[String: Any]]) ?? (object["rates"] as? [[String: Any]]) ?? (object["items"] as? [[String: Any]]) ?? []
-                } else { raw = (root as? [[String: Any]]) ?? [] }
+                if let object = root as? [String: Any] { raw = (object["data"] as? [[String: Any]]) ?? (object["candles"] as? [[String: Any]]) ?? (object["rates"] as? [[String: Any]]) ?? (object["items"] as? [[String: Any]]) ?? [] }
+                else { raw = (root as? [[String: Any]]) ?? [] }
                 let candles = raw.compactMap { dict -> Kline? in
                     guard let time = Self.number(dict["time"] ?? dict["timestamp"] ?? dict["time_stamp"]), let open = Self.number(dict["open"] ?? dict["o"]), let high = Self.number(dict["high"] ?? dict["h"]), let low = Self.number(dict["low"] ?? dict["l"]), let close = Self.number(dict["close"] ?? dict["c"]) else { return nil }
                     let seconds = time > 10_000_000_000 ? time / 1000 : time
@@ -211,7 +211,6 @@ actor MT5Service {
         var symbol = signal.symbol.replacingOccurrences(of: "/", with: "")
         let suffix = await MainActor.run { ScalpingConfig.shared.brokerSuffix }
         if !suffix.isEmpty && !symbol.hasSuffix(suffix) { symbol += suffix }
-
         guard await isSymbolTradable(symbol) else { throw TradingError.apiError("Symbol \(symbol) is not tradable on MT5") }
         let limits = await getVolumeLimits(for: symbol)
         let requested = signal.positionSize ?? signal.volume
@@ -219,46 +218,25 @@ actor MT5Service {
         let stepped = max(limits.min, (clamped / limits.step).rounded() * limits.step)
         let orderType: String = signal.type == .buy ? "buy" : signal.type == .sell ? "sell" : ""
         guard !orderType.isEmpty else { throw TradingError.apiError("Invalid signal type: none") }
-
         guard let url = URL(string: baseURL + "/v1/order") else { throw TradingError.apiError("Invalid MT5 order URL") }
-
-        // The V10.5 EA exposes /v1/order as a MARKET ENTRY endpoint only.
-        // `executionMode` is an app-side execution preference, not the bridge action.
-        // Sending values such as "instant" makes the EA reject an otherwise valid signal
-        // with "Unsupported order action". Always send the bridge action as "market".
         let executionPreference = signal.executionMode?.rawValue.lowercased() ?? "market"
         var body: [String: Any] = [
-            "action": "market",
-            "symbol": symbol,
-            "order_type": signal.orderType?.rawValue.lowercased() ?? orderType,
-            "volume": stepped,
-            "price": signal.price,
-            "sl": signal.stopLoss ?? 0,
-            "tp": signal.takeProfit ?? 0,
-            "magic": signal.magicNumber ?? 888888,
-            "comment": signal.comment ?? "GOD_MODE_SCALPER",
-            "deviation": signal.deviation ?? 20,
-            "type_filling": signal.filler?.rawValue.lowercased() ?? "ioc"
+            "action": "market", "symbol": symbol, "order_type": signal.orderType?.rawValue.lowercased() ?? orderType,
+            "volume": stepped, "price": signal.price, "sl": signal.stopLoss ?? 0, "tp": signal.takeProfit ?? 0,
+            "magic": signal.magicNumber ?? 888888, "comment": signal.comment ?? "GOD_MODE_SCALPER",
+            "deviation": signal.deviation ?? 20, "type_filling": signal.filler?.rawValue.lowercased() ?? "ioc"
         ]
         if signal.stopLoss == nil { body.removeValue(forKey: "sl") }
         if signal.takeProfit == nil { body.removeValue(forKey: "tp") }
-
         godLog("🚀 MT5 EXECUTION | \(symbol) | side=\(orderType.uppercased()) | action=market | preference=\(executionPreference) | volume=\(String(format: "%.4f", stepped)) | price=\(String(format: "%.5f", signal.price)) | SL=\(signal.stopLoss.map { String(format: "%.5f", $0) } ?? "none") | TP=\(signal.takeProfit.map { String(format: "%.5f", $0) } ?? "none")", level: .info)
-
         do {
             let (data, response) = try await request(url, method: "POST", body: body, timeout: 15)
             let raw = String(data: data, encoding: .utf8) ?? ""
-            guard response.statusCode == 200 else {
-                throw TradingError.apiError("MT5 order HTTP \(response.statusCode): \(raw.prefix(500))")
-            }
+            guard response.statusCode == 200 else { throw TradingError.apiError("MT5 order HTTP \(response.statusCode): \(raw.prefix(500))") }
             guard !data.isEmpty else { throw TradingError.apiError("Empty response from MT5 Bridge") }
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let success = json["success"] as? Bool, success == false {
-                throw TradingError.apiError("MT5 Bridge Error: \(json["error"] as? String ?? "Execution failed")")
-            }
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let success = json["success"] as? Bool, success == false { throw TradingError.apiError("MT5 Bridge Error: \(json["error"] as? String ?? "Execution failed")") }
             let result = try decoder.decode(MT5TradeResult.self, from: data)
-            guard result.retcode == 10008 || result.retcode == 10009 else {
-                throw TradingError.apiError("MT5 Error (\(result.retcode)): \(result.comment ?? "Execution failed")")
-            }
+            guard result.retcode == 10008 || result.retcode == 10009 else { throw TradingError.apiError("MT5 Error (\(result.retcode)): \(result.comment ?? "Execution failed")") }
             godLog("✅ MT5: Trade executed successfully (Code: \(result.retcode))", level: .success)
             return result
         } catch let error as TradingError { throw error }
@@ -272,26 +250,60 @@ actor MT5Service {
             if let volume { body["volume"] = volume }
             do {
                 let (data, response) = try await request(url, method: "POST", body: body, timeout: 15)
-                if response.statusCode == 200 {
-                    let result = try decoder.decode(MT5TradeResult.self, from: data)
-                    return result.retcode == 10009 || result.retcode == 10010
-                }
+                if response.statusCode == 200 { let result = try decoder.decode(MT5TradeResult.self, from: data); return result.retcode == 10009 || result.retcode == 10010 }
             } catch { godLog("⚠️ MT5: Close failed at \(path): \(error.localizedDescription)", level: .warning) }
         }
         return false
     }
 
     func modifyPosition(ticket: Int64, sl: Double, tp: Double) async throws -> Bool {
+        var targetSL = sl
+        var targetTP = tp
+        var lastFailure = "unknown"
+
         for path in ["/v1/order/modify", "/api/mt5/modify", "/modify"] {
             guard let url = URL(string: baseURL + path) else { continue }
-            do {
-                let (data, response) = try await request(url, method: "POST", body: ["ticket": ticket, "sl": sl, "tp": tp], timeout: 15)
-                if response.statusCode == 200 {
-                    let result = try decoder.decode(MT5TradeResult.self, from: data)
-                    return result.retcode == 10009 || result.retcode == 10010
+
+            for attempt in 1...maxStopModificationRetries {
+                do {
+                    let body: [String: Any] = ["ticket": ticket, "sl": targetSL, "tp": targetTP]
+                    godLog("🛠️ MT5 MODIFY | ticket=\(ticket) | attempt=\(attempt)/\(maxStopModificationRetries) | SL=\(String(format: "%.5f", targetSL)) | TP=\(String(format: "%.5f", targetTP))", level: .diagnostic)
+                    let (data, response) = try await request(url, method: "POST", body: body, timeout: 15)
+                    let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                    let success = json?["success"] as? Bool
+
+                    if response.statusCode == 200, success != false {
+                        let result = try decoder.decode(MT5TradeResult.self, from: data)
+                        if result.retcode == 10009 || result.retcode == 10010 || result.retcode == 10008 {
+                            godLog("✅ MT5 MODIFY ACCEPTED | ticket=\(ticket) | attempt=\(attempt)", level: .success)
+                            return true
+                        }
+                    }
+
+                    lastFailure = json?["error"] as? String ?? "MT5 rejected SL/TP modification"
+                    let adjustedSL = Self.number(json?["adjusted_sl"])
+                    let adjustedTP = Self.number(json?["adjusted_tp"])
+                    let retryable = json?["retryable"] as? Bool ?? false
+
+                    if retryable, let adjustedSL, let adjustedTP,
+                       adjustedSL.isFinite, adjustedTP.isFinite,
+                       (abs(adjustedSL - targetSL) > .ulpOfOne || abs(adjustedTP - targetTP) > .ulpOfOne) {
+                        targetSL = max(0, adjustedSL)
+                        targetTP = max(0, adjustedTP)
+                        godLog("🔁 MT5 MODIFY RETRY | ticket=\(ticket) | broker-adjusted SL=\(String(format: "%.5f", targetSL)) | TP=\(String(format: "%.5f", targetTP)) | reason=\(lastFailure)", level: .diagnostic)
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                        continue
+                    }
+
+                    if response.statusCode != 200 { break }
+                } catch {
+                    lastFailure = error.localizedDescription
+                    godLog("⚠️ MT5: Modify failed at \(path), attempt \(attempt): \(lastFailure)", level: .warning)
                 }
-            } catch { godLog("⚠️ MT5: Modify failed at \(path): \(error.localizedDescription)", level: .warning) }
+            }
         }
+
+        godLog("❌ MT5 MODIFY FAILED | ticket=\(ticket) | reason=\(lastFailure)", level: .warning)
         return false
     }
 
