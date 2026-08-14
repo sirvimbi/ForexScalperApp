@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 @MainActor
 final class V22TrailingActivationController: ObservableObject {
@@ -16,7 +17,7 @@ final class V22TrailingActivationController: ObservableObject {
     func save() {
         activationPips = min(50, max(1, activationPips))
         UserDefaults.standard.set(activationPips, forKey: defaultsKey)
-        Task {
+        Task { @MainActor in
             do {
                 let value = try await MT5V22TrailingSettingsService.shared.setActivationPips(activationPips)
                 syncStatus = String(format: "MT5 V22 synced • %.1f pips", value)
@@ -29,7 +30,7 @@ final class V22TrailingActivationController: ObservableObject {
     }
 
     func refreshFromMT5() {
-        Task {
+        Task { @MainActor in
             do {
                 let value = try await MT5V22TrailingSettingsService.shared.getActivationPips()
                 activationPips = value
@@ -109,7 +110,7 @@ struct V22TrailingActivationSettingsCard: View {
 }
 
 actor MT5V22TrailingSettingsService {
-    static let shared = MT5V22TrailingSettingsService()
+    nonisolated static let shared = MT5V22TrailingSettingsService()
     private let session = URLSession(configuration: .default)
 
     private var baseURL: String {
@@ -118,9 +119,11 @@ actor MT5V22TrailingSettingsService {
         return raw
     }
 
-    private var authToken: String {
-        let saved = SecureCredentialStore.shared.read("mt5AuthToken") ?? ""
-        return saved.isEmpty ? "" : (saved.hasPrefix("Bearer ") ? saved : "Bearer \(saved)")
+    private func authToken() async -> String {
+        await MainActor.run {
+            let saved = SecureCredentialStore.shared.read("mt5AuthToken") ?? ""
+            return saved.isEmpty ? "" : (saved.hasPrefix("Bearer ") ? saved : "Bearer \(saved)")
+        }
     }
 
     func setActivationPips(_ pips: Double) async throws -> Double {
@@ -137,7 +140,8 @@ actor MT5V22TrailingSettingsService {
         request.httpMethod = method
         request.timeoutInterval = 5
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if !authToken.isEmpty { request.setValue(authToken, forHTTPHeaderField: "Authorization") }
+        let token = await authToken()
+        if !token.isEmpty { request.setValue(token, forHTTPHeaderField: "Authorization") }
         if let pips {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: ["trailing_activation_pips": pips])
@@ -145,7 +149,8 @@ actor MT5V22TrailingSettingsService {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw URLError(.badServerResponse) }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let value = json["trailing_activation_pips"] as? Double else { throw URLError(.cannotParseResponse) }
+              let rawValue = json["trailing_activation_pips"],
+              let value = (rawValue as? Double) ?? (rawValue as? NSNumber)?.doubleValue else { throw URLError(.cannotParseResponse) }
         return min(100, max(1, value))
     }
 }
