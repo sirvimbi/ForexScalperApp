@@ -5,7 +5,8 @@ import Combine
 struct SecureCredentialStore {
     nonisolated static let shared = SecureCredentialStore()
     private let service = "com.sirvimbi.ForexScalperApp.mt5"
-    private func key(_ name: String) -> String { "mt5.\(name)" }
+
+    nonisolated private func key(_ name: String) -> String { "mt5.\(name)" }
 
     nonisolated func read(_ name: String) -> String? {
         let query: [String: Any] = [
@@ -16,7 +17,8 @@ struct SecureCredentialStore {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
@@ -28,7 +30,10 @@ struct SecureCredentialStore {
             kSecAttrAccount as String: key(name)
         ]
         let data = Data(value.utf8)
-        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        let status = SecItemUpdate(
+            query as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
         if status == errSecItemNotFound {
             var add = query
             add[kSecValueData as String] = data
