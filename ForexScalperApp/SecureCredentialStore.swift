@@ -1,12 +1,13 @@
 import Foundation
 import Security
+import Combine
 
 struct SecureCredentialStore {
-    static let shared = SecureCredentialStore()
+    nonisolated static let shared = SecureCredentialStore()
     private let service = "com.sirvimbi.ForexScalperApp.mt5"
     private func key(_ name: String) -> String { "mt5.\(name)" }
 
-    func read(_ name: String) -> String? {
+    nonisolated func read(_ name: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -20,7 +21,7 @@ struct SecureCredentialStore {
     }
 
     @discardableResult
-    func write(_ value: String, for name: String) -> Bool {
+    nonisolated func write(_ value: String, for name: String) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
