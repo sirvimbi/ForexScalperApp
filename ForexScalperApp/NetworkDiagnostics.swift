@@ -35,7 +35,58 @@ private final class DiagnosticsURLProtocol: URLProtocol {
         guard let scheme = request.url?.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             return false
         }
+
+        // URLSessionWebSocketTask performs its HTTP Upgrade handshake internally.
+        // URLProtocol must never intercept that request: forwarding it through a
+        // URLSessionDataTask cannot preserve the WebSocket upgrade and causes the
+        // connection to fail immediately after a successful HTTP 101 response.
+        if isWebSocketUpgradeRequest(request) {
+            return false
+        }
+
+        // Some URLSession WebSocket implementations expose the internal handshake
+        // to URLProtocol as HTTP(S) without the Upgrade headers. These are explicit
+        // WebSocket-only endpoints in this application and must also bypass it.
+        if let host = request.url?.host?.lowercased() {
+            if host == "stream.binance.com" || host == "localhost" || host == "127.0.0.1" {
+                return false
+            }
+        }
+
         return property(forKey: handledKey, in: request) == nil
+    }
+
+    private class func isWebSocketUpgradeRequest(_ request: URLRequest) -> Bool {
+        let headers = request.allHTTPHeaderFields ?? [:]
+        var upgrade: String?
+        var connection: String?
+        var hasWebSocketKey = false
+        var hasWebSocketVersion = false
+
+        for (key, value) in headers {
+            switch key.lowercased() {
+            case "upgrade":
+                upgrade = value.lowercased()
+            case "connection":
+                connection = value.lowercased()
+            case "sec-websocket-key":
+                hasWebSocketKey = true
+            case "sec-websocket-version":
+                hasWebSocketVersion = true
+            default:
+                break
+            }
+        }
+
+        let connectionRequestsUpgrade = connection?
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .contains("upgrade") ?? false
+
+        return upgrade == "websocket"
+            || connectionRequestsUpgrade
+            || hasWebSocketKey
+            || hasWebSocketVersion
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -47,13 +98,10 @@ private final class DiagnosticsURLProtocol: URLProtocol {
         let bodyBytes = request.httpBody?.count ?? 0
         NetworkDiagnostics.logTask("→ \(method) \(url) body=\(bodyBytes)b")
 
-        // Create a mutable copy manually instead of using mutableCopy()
         var forwarded = request
 
-        // Check if this is a file upload or large body that we shouldn't intercept
         if let body = request.httpBody, body.count > 1024 * 1024 {
             NetworkDiagnostics.logTask("⚠️ \(method) \(url) large body (\(body.count) bytes) - skipping diagnostics", level: .warning)
-            // Forward the original request without diagnostics for large bodies
             let originalRequest = request
             let task = URLSession.shared.dataTask(with: originalRequest) { [weak self] data, response, error in
                 guard let self = self else { return }
@@ -129,7 +177,6 @@ private final class DiagnosticsURLProtocol: URLProtocol {
 // Extension to allow setting property on URLRequest
 extension URLProtocol {
     static func setProperty(_ value: Any, forKey key: String, in request: inout URLRequest) {
-        // Create a mutable copy of the request using NSMutableURLRequest
         if let mutableRequest = (request as NSURLRequest).mutableCopy() as? NSMutableURLRequest {
             URLProtocol.setProperty(value, forKey: key, in: mutableRequest)
             request = mutableRequest as URLRequest
