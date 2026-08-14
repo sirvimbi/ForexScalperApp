@@ -6,12 +6,15 @@ import Combine
 struct ForexScalperApp: App {
     @StateObject private var coordinator: RefactoredAppCoordinator
     @StateObject private var viewModel: DashboardViewModel
+    @StateObject private var runtimeMaintenance: AppRuntimeMaintenance
     
     init() {
         let coord = RefactoredAppCoordinator()
         let vm = DashboardViewModel(coordinator: coord)
+        let maintenance = AppRuntimeMaintenance(coordinator: coord, viewModel: vm)
         self._coordinator = StateObject(wrappedValue: coord)
         self._viewModel = StateObject(wrappedValue: vm)
+        self._runtimeMaintenance = StateObject(wrappedValue: maintenance)
         
         // Install runtime diagnostics before services start so startup/network activity is visible.
         NetworkDiagnostics.install()
