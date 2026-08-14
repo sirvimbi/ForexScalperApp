@@ -1,0 +1,331 @@
+name: V23 Reversal Entry Integration
+
+on:
+  push:
+    branches:
+      - agent/v23-reversal-confirmed-entry
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply V23 smart entry changes
+        shell: python3 {0}
+        run: |
+          from pathlib import Path
+
+          # ---------------- Swift: MT5Service.swift ----------------
+          p = Path('ForexScalperApp/MT5Service.swift')
+          s = p.read_text()
+
+          anchor = '    func executeTrade(signal: Signal) async throws -> MT5TradeResult {'
+          if anchor not in s:
+              raise SystemExit('MT5Service executeTrade anchor not found')
+
+          methods = r'''    // V23: Reversal-confirmed entry timing.
+    // A BUY signal that is currently in a bearish pullback is not chased. The
+    // bridge waits for the first confirmed turn (bullish candle + higher close
+    // + rising fast EMA). SELL is the exact inverse. If no reversal occurs in
+    // the bounded window, the trade is cancelled rather than injected late.
+    private func waitForReversalEntryIfNeeded(signal: Signal, symbol: String, atr: Double) async throws {
+        let enabled = await MainActor.run { ScalpingConfig.shared.enablePullbackEntry }
+        guard enabled, signal.timeframe == "1m" else { return }
+
+        let maxWaitSeconds = 45
+        let emaPeriod = await MainActor.run { max(5, ScalpingConfig.shared.pullbackEMAPeriod) }
+        let minimumPullbackATR = 0.25
+        let reversalToleranceATR = 0.10
+        let pollNanoseconds: UInt64 = 750_000_000
+
+        let pipSize = symbol.contains("JPY") ? 0.01 : 0.0001
+        let atrSafe = max(atr, pipSize * 2.0)
+        let normalizedType = signal.type
+
+        for attempt in 0...Int(Double(maxWaitSeconds) / 0.75) {
+            if Task.isCancelled { throw TradingError.apiError("Smart entry cancelled") }
+
+            let candles = try await getCandles(symbol: symbol, timeframe: "1m", count: max(emaPeriod + 12, 40))
+            guard candles.count >= emaPeriod + 4 else {
+                try? await Task.sleep(nanoseconds: pollNanoseconds)
+                continue
+            }
+
+            let closes = candles.map { $0.close }
+            let emaFast = Indicators.ema(closes, period: emaPeriod)
+            guard let current = candles.last,
+                  let previous = candles.dropLast().last,
+                  emaFast.count >= 3 else {
+                try? await Task.sleep(nanoseconds: pollNanoseconds)
+                continue
+            }
+
+            let emaNow = emaFast[emaFast.count - 1]
+            let emaPrev = emaFast[emaFast.count - 2]
+            let recentStart = max(0, candles.count - 4)
+            let recentMove = current.close - candles[recentStart].close
+
+            let buyDip = current.close <= emaNow + atrSafe * reversalToleranceATR || recentMove <= -atrSafe * minimumPullbackATR
+            let sellDip = current.close >= emaNow - atrSafe * reversalToleranceATR || recentMove >= atrSafe * minimumPullbackATR
+
+            let bullishCandle = current.close > current.open
+            let bearishCandle = current.close < current.open
+            let higherClose = current.close > previous.close
+            let lowerClose = current.close < previous.close
+            let risingEMA = emaNow > emaPrev
+            let fallingEMA = emaNow < emaPrev
+            let buyReversal = bullishCandle && higherClose && risingEMA && current.close >= emaNow - atrSafe * reversalToleranceATR
+            let sellReversal = bearishCandle && lowerClose && fallingEMA && current.close <= emaNow + atrSafe * reversalToleranceATR
+
+            if normalizedType == .buy {
+                if !buyDip {
+                    if buyReversal {
+                        godLog("🎯 V23 ENTRY READY | \(symbol) | BUY | no active dip + bullish alignment | EMA=\(String(format: \"%.5f\", emaNow)) | close=\(String(format: \"%.5f\", current.close))", level: .success)
+                        return
+                    }
+                    godLog("⏳ V23 ENTRY HOLD | \(symbol) | BUY | waiting bullish confirmation | close=\(String(format: \"%.5f\", current.close)) | EMA=\(String(format: \"%.5f\", emaNow))", level: .diagnostic)
+                } else if buyReversal {
+                    godLog("🎯 V23 REVERSAL CONFIRMED | \(symbol) | BUY | dip→bullish reversal | close=\(String(format: \"%.5f\", current.close)) | EMA9=\(String(format: \"%.5f\", emaNow)) | attempt=\(attempt)", level: .success)
+                    return
+                } else {
+                    godLog("🛑 V23 ENTRY HOLD | \(symbol) | BUY | dip detected; reversal not confirmed | close=\(String(format: \"%.5f\", current.close)) | EMA=\(String(format: \"%.5f\", emaNow))", level: .info)
+                }
+            } else if normalizedType == .sell {
+                if !sellDip {
+                    if sellReversal {
+                        godLog("🎯 V23 ENTRY READY | \(symbol) | SELL | no active rally + bearish alignment | EMA=\(String(format: \"%.5f\", emaNow)) | close=\(String(format: \"%.5f\", current.close))", level: .success)
+                        return
+                    }
+                    godLog("⏳ V23 ENTRY HOLD | \(symbol) | SELL | waiting bearish confirmation | close=\(String(format: \"%.5f\", current.close)) | EMA=\(String(format: \"%.5f\", emaNow))", level: .diagnostic)
+                } else if sellReversal {
+                    godLog("🎯 V23 REVERSAL CONFIRMED | \(symbol) | SELL | rally→bearish reversal | close=\(String(format: \"%.5f\", current.close)) | EMA9=\(String(format: \"%.5f\", emaNow)) | attempt=\(attempt)", level: .success)
+                    return
+                } else {
+                    godLog("🛑 V23 ENTRY HOLD | \(symbol) | SELL | rally detected; reversal not confirmed | close=\(String(format: \"%.5f\", current.close)) | EMA=\(String(format: \"%.5f\", emaNow))", level: .info)
+                }
+            }
+
+            try? await Task.sleep(nanoseconds: pollNanoseconds)
+        }
+
+        godLog("⏱️ V23 ENTRY CANCELLED | \(symbol) | no reversal confirmation within \(maxWaitSeconds)s | signal not chased", level: .warning)
+        throw TradingError.apiError("Smart entry timeout: reversal confirmation was not reached")
+    }
+
+'''
+          s = s.replace(anchor, methods + anchor, 1)
+
+          # Replace the stale signal price with live market execution (0 => CTrade uses Bid/Ask).
+          old = '        let executionPreference = signal.executionMode?.rawValue.lowercased() ?? "market"\n        var body: [String: Any] = [\n            "action": "market", "symbol": symbol, "order_type": signal.orderType?.rawValue.lowercased() ?? orderType,\n            "volume": stepped, "price": signal.price, "sl": signal.stopLoss ?? 0, "tp": signal.takeProfit ?? 0,'
+          new = '        let executionPreference = signal.executionMode?.rawValue.lowercased() ?? "market"\n        let atrVal = (try? await getATR(symbol: symbol, period: 14)) ?? 0.0020\n        try await waitForReversalEntryIfNeeded(signal: signal, symbol: symbol, atr: atrVal)\n        // V23: price=0 delegates market pricing to MT5 at the instant of execution.\n        // This prevents a stale signal snapshot from becoming the requested entry price.\n        var body: [String: Any] = [\n            "action": "market", "symbol": symbol, "order_type": signal.orderType?.rawValue.lowercased() ?? orderType,\n            "volume": stepped, "price": 0.0, "sl": signal.stopLoss ?? 0, "tp": signal.takeProfit ?? 0,'
+          if old not in s:
+              raise SystemExit('MT5Service execution body anchor not found')
+          s = s.replace(old, new, 1)
+
+          old_log = '        godLog("🚀 MT5 EXECUTION | \\(symbol) | side=\\(orderType.uppercased()) | action=market | preference=\\(executionPreference) | volume=\\(String(format: "%.4f", stepped)) | price=\\(String(format: "%.5f", signal.price)) | SL=\\(signal.stopLoss.map { String(format: "%.5f", $0) } ?? "none") | TP=\\(signal.takeProfit.map { String(format: "%.5f", $0) } ?? "none")", level: .info)'
+          new_log = '        godLog("🚀 V23 MT5 EXECUTION | \\(symbol) | side=\\(orderType.uppercased()) | action=market-live | preference=\\(executionPreference) | volume=\\(String(format: "%.4f", stepped)) | signalPrice=\\(String(format: "%.5f", signal.price)) | livePrice=broker | SL=\\(signal.stopLoss.map { String(format: "%.5f", $0) } ?? "none") | TP=\\(signal.takeProfit.map { String(format: "%.5f", $0) } ?? "none")", level: .info)'
+          if old_log not in s:
+              raise SystemExit('MT5Service execution log anchor not found')
+          s = s.replace(old_log, new_log, 1)
+          p.write_text(s)
+
+          # ---------------- Swift: RefactoredAppCoordinator.swift ----------------
+          p = Path('ForexScalperApp/RefactoredAppCoordinator.swift')
+          s = p.read_text()
+          start = s.find('        // Smart entry: do not chase an extended candle.')
+          end = s.find('        var executionMode: MT5ExecutionMode = .market', start)
+          if start == -1 or end == -1:
+              raise SystemExit('old coordinator smart-entry block not found')
+          replacement = '        // V23: reversal-confirmed entry is now owned by MT5Service so the\n        // final live-price execution and entry timing are atomic with the bridge.\n        godLog("🧭 V23 SMART ENTRY | \\(symbol) | reversal-confirmation delegated to MT5Service", level: .info)\n\n'
+          s = s[:start] + replacement + s[end:]
+
+          start = s.find('    private func shouldWaitForPullback(symbol: String, signal: Signal, atr: Double) async -> Bool {')
+          end = s.find('    private func calculateLatestIndicators(symbol: String) async -> IndicatorSet? {', start)
+          if start == -1 or end == -1:
+              raise SystemExit('old coordinator smart-entry helper block not found')
+          s = s[:start] + s[end:]
+          p.write_text(s)
+
+          # ---------------- EA: CommandHandlerV22.mqh ----------------
+          p = Path('Files/MetaTrader/Include/CommandHandlerV22.mqh')
+          s = p.read_text()
+          class_anchor = 'class CCommandHandlerV22 : public CCommandHandler\n{\npublic:'
+          class_replacement = '''class CCommandHandlerV22 : public CCommandHandler
+{
+private:
+   CTrade m_v22PendingTrade;
+
+public:
+   CCommandHandlerV22()
+   {
+      m_v22PendingTrade.SetExpertMagicNumber(888888);
+      m_v22PendingTrade.SetAsyncMode(false);
+   }
+'''
+          if class_anchor not in s:
+              raise SystemExit('V22 class anchor not found')
+          s = s.replace(class_anchor, class_replacement, 1)
+
+          route_anchor = '      if(req.path == "/v1/settings/trailing" || req.path == "/settings/trailing")\n      {\n         string response = HandleTrailingSettings(req);\n         SendSettingsResponse(sock, 200, response);\n         return;\n      }\n      CCommandHandler::HandleCommand(sock, req);'
+          route_replacement = '''      if(req.path == "/v1/settings/trailing" || req.path == "/settings/trailing")
+      {
+         string response = HandleTrailingSettings(req);
+         SendSettingsResponse(sock, 200, response);
+         return;
+      }
+      if(req.path == "/v1/order/pending" || req.path == "/order/pending")
+      {
+         string response = HandlePendingOrder(req.body);
+         SendSettingsResponse(sock, 200, response);
+         return;
+      }
+      if(req.path == "/v1/order/pending/cancel" || req.path == "/order/pending/cancel")
+      {
+         string response = HandlePendingCancel(req.body);
+         SendSettingsResponse(sock, 200, response);
+         return;
+      }
+      if(req.path == "/v1/order/pending/list" || req.path == "/order/pending/list")
+      {
+         string response = HandlePendingList();
+         SendSettingsResponse(sock, 200, response);
+         return;
+      }
+      CCommandHandler::HandleCommand(sock, req);'''
+          if route_anchor not in s:
+              raise SystemExit('V22 route anchor not found')
+          s = s.replace(route_anchor, route_replacement, 1)
+
+          method_anchor = '   void SendSettingsResponse(ulong sock, int statusCode, string body)\n'
+          pending_methods = r'''   string HandlePendingOrder(string body)
+   {
+      CJAVal req;
+      if(!req.Deserialize(body)) return "{\"success\":false,\"error\":\"Invalid JSON\"}";
+
+      string action = req["action"].ToStr();
+      StringToLower(action);
+      string rawSymbol = req["symbol"].ToStr();
+      string symbol = FindSymbol(rawSymbol);
+      double volume = req["volume"].ToDbl();
+      double price = req["price"].ToDbl();
+      double sl = req["sl"].ToDbl();
+      double tp = req["tp"].ToDbl();
+      string comment = req["comment"].ToStr();
+      if(comment == "") comment = "GOD_MODE_V23_ENTRY";
+      if(symbol == "") return "{\"success\":false,\"error\":\"Symbol not found\"}";
+      if(volume <= 0.0 || price <= 0.0) return "{\"success\":false,\"error\":\"Volume and pending price are required\"}";
+
+      double minVolume = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
+      double maxVolume = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
+      double step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
+      if(minVolume > 0 && volume < minVolume) volume = minVolume;
+      if(maxVolume > 0) volume = MathMin(volume, maxVolume);
+      if(step > 0) volume = MathFloor(volume / step + 1e-9) * step;
+      if(volume < minVolume) return "{\"success\":false,\"error\":\"Volume cannot be normalized to broker minimum\"}";
+
+      MqlTick tick;
+      if(!SymbolInfoTick(symbol, tick)) return "{\"success\":false,\"error\":\"No live quote\"}";
+      m_v22PendingTrade.SetTypeFillingBySymbol(symbol);
+      m_v22PendingTrade.SetExpertMagicNumber(888888);
+
+      bool ok = false;
+      if(action == "buy_limit")
+      {
+         if(price >= tick.ask) return "{\"success\":false,\"error\":\"BUY_LIMIT price must be below current Ask\"}";
+         ok = m_v22PendingTrade.BuyLimit(volume, price, symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+      }
+      else if(action == "sell_limit")
+      {
+         if(price <= tick.bid) return "{\"success\":false,\"error\":\"SELL_LIMIT price must be above current Bid\"}";
+         ok = m_v22PendingTrade.SellLimit(volume, price, symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+      }
+      else if(action == "buy_stop")
+      {
+         if(price <= tick.ask) return "{\"success\":false,\"error\":\"BUY_STOP price must be above current Ask\"}";
+         ok = m_v22PendingTrade.BuyStop(volume, price, symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+      }
+      else if(action == "sell_stop")
+      {
+         if(price >= tick.bid) return "{\"success\":false,\"error\":\"SELL_STOP price must be below current Bid\"}";
+         ok = m_v22PendingTrade.SellStop(volume, price, symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+      }
+      else return "{\"success\":false,\"error\":\"Unsupported pending action\"}";
+
+      uint retcode = m_v22PendingTrade.ResultRetcode();
+      ulong order = m_v22PendingTrade.ResultOrder();
+      string desc = m_v22PendingTrade.ResultRetcodeDescription();
+      PrintFormat("[EA V22.1] PENDING %s | %s | price=%.10f | volume=%.4f | ok=%s | retcode=%u | order=%I64u | %s", action, symbol, price, volume, ok ? "true" : "false", retcode, order, desc);
+      return StringFormat("{\"success\":%s,\"action\":\"%s\",\"symbol\":\"%s\",\"order\":%I64u,\"retcode\":%u,\"comment\":\"%s\",\"price\":%s,\"volume\":%s}",
+                          ok ? "true" : "false", JsonEscape(action), JsonEscape(symbol), order, retcode, JsonEscape(desc), DoubleToString(price, 10), DoubleToString(volume, 8));
+   }
+
+   string HandlePendingCancel(string body)
+   {
+      CJAVal req;
+      if(!req.Deserialize(body)) return "{\"success\":false,\"error\":\"Invalid JSON\"}";
+      ulong ticket = (ulong)StringToInteger(req["ticket"].ToStr());
+      if(ticket == 0) return "{\"success\":false,\"error\":\"Pending order ticket required\"}";
+      bool ok = m_v22PendingTrade.OrderDelete(ticket);
+      uint retcode = m_v22PendingTrade.ResultRetcode();
+      string desc = m_v22PendingTrade.ResultRetcodeDescription();
+      PrintFormat("[EA V22.1] PENDING CANCEL | ticket=%I64u | ok=%s | retcode=%u | %s", ticket, ok ? "true" : "false", retcode, desc);
+      return StringFormat("{\"success\":%s,\"ticket\":%I64u,\"retcode\":%u,\"comment\":\"%s\"}", ok ? "true" : "false", ticket, retcode, JsonEscape(desc));
+   }
+
+   string HandlePendingList()
+   {
+      string rows = "";
+      int count = 0;
+      for(int i = OrdersTotal() - 1; i >= 0; i--)
+      {
+         ulong ticket = OrderGetTicket(i);
+         if(ticket == 0) continue;
+         long magic = OrderGetInteger(ORDER_MAGIC);
+         if(magic != 888888) continue;
+         ENUM_ORDER_TYPE type = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+         if(type != ORDER_TYPE_BUY_LIMIT && type != ORDER_TYPE_SELL_LIMIT && type != ORDER_TYPE_BUY_STOP && type != ORDER_TYPE_SELL_STOP) continue;
+         string row = StringFormat("{\"ticket\":%I64u,\"symbol\":\"%s\",\"type\":\"%s\",\"volume\":%s,\"price\":%s,\"sl\":%s,\"tp\":%s,\"comment\":\"%s\"}",
+            ticket, JsonEscape(OrderGetString(ORDER_SYMBOL)), EnumToString(type), DoubleToString(OrderGetDouble(ORDER_VOLUME_CURRENT), 8),
+            DoubleToString(OrderGetDouble(ORDER_PRICE_OPEN), 10), DoubleToString(OrderGetDouble(ORDER_SL), 10), DoubleToString(OrderGetDouble(ORDER_TP), 10), JsonEscape(OrderGetString(ORDER_COMMENT)));
+         if(count > 0) rows += ",";
+         rows += row;
+         count++;
+      }
+      return StringFormat("{\"success\":true,\"count\":%d,\"data\":[%s]}", count, rows);
+   }
+
+'''
+          if method_anchor not in s:
+              raise SystemExit('V22 response method anchor not found')
+          s = s.replace(method_anchor, pending_methods + method_anchor, 1)
+          p.write_text(s)
+
+          # Bump the EA visible version so the compiled chart can be unambiguously identified.
+          p = Path('Files/MetaTrader/Experts/SocketBridgeEA.mq5')
+          s = p.read_text()
+          s = s.replace('Execution Bridge V22.0', 'Execution Bridge V22.1', 1)
+          s = s.replace('#property version   "22.0"', '#property version   "22.1"', 1)
+          s = s.replace('V22.0 across all paths', 'V22.1 across all paths')
+          s = s.replace('FOREXSCALPERAPP MT5 EXECUTION BRIDGE V22.0', 'FOREXSCALPERAPP MT5 EXECUTION BRIDGE V22.1')
+          s = s.replace('EA V22.0', 'EA V22.1')
+          p.write_text(s)
+
+          # Validate that the expected anchors were actually changed.
+          assert 'V23 ENTRY HOLD' in Path('ForexScalperApp/MT5Service.swift').read_text()
+          assert '/v1/order/pending' in Path('Files/MetaTrader/Include/CommandHandlerV22.mqh').read_text()
+          assert '#property version   "22.1"' in Path('Files/MetaTrader/Experts/SocketBridgeEA.mq5').read_text()
+          print('V23 changes applied')
+      - name: Commit V23 changes and remove integration workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ForexScalperApp/MT5Service.swift ForexScalperApp/RefactoredAppCoordinator.swift Files/MetaTrader/Include/CommandHandlerV22.mqh Files/MetaTrader/Experts/SocketBridgeEA.mq5
+          git commit -m "feat: V23 reversal-confirmed smart entry and EA pending actions"
+          git rm .github/workflows/v23-entry.yml
+          git commit -m "chore: remove V23 integration workflow"
+          git push
