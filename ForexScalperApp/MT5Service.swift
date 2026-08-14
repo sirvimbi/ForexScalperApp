@@ -29,7 +29,7 @@ actor MT5Service {
         if let custom = customAuthToken {
             return custom.hasPrefix("Bearer ") ? custom : "Bearer \(custom)"
         }
-        let saved = UserDefaults.standard.string(forKey: "mt5AuthToken") ?? "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"
+        let saved = SecureCredentialStore.shared.read("mt5AuthToken") ?? ""
         return saved.hasPrefix("Bearer ") ? saved : "Bearer \(saved)"
     }
 
@@ -77,6 +77,12 @@ actor MT5Service {
             throw TradingError.apiError("Invalid response from MT5 Bridge")
         }
         return (data, http)
+    }
+
+    func disconnect() {
+        _isConnected = false
+        lastWorkingPath = nil
+        godLog("🔌 MT5Service: connection state cleared", level: .diagnostic)
     }
 
     func initialize(login: Int, password: String, server: String) async throws {
