@@ -9,6 +9,7 @@ actor BinanceService: MarketDataProvider {
     private var pingTimer: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var isReconnecting = false
+    private var isWebSocketConnected = false
 
     private let baseURL = "https://api.binance.com/api/v3"
     // Binance uses /stream for combined streams. /ws is for a single raw stream.
@@ -22,15 +23,17 @@ actor BinanceService: MarketDataProvider {
         Task {
             await fetchHistoricalData()
             connectWebSocket()
-            startPingTimer()
         }
     }
 
     func disconnect() {
+        isWebSocketConnected = false
+        pingTimer?.cancel()
+        pingTimer = nil
+        reconnectTask?.cancel()
+        reconnectTask = nil
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
-        pingTimer?.cancel()
-        reconnectTask?.cancel()
         onKlineReceived = nil
         isReconnecting = false
         print("🔌 Binance: Disconnected")
@@ -115,6 +118,9 @@ actor BinanceService: MarketDataProvider {
     private func connectWebSocket() {
         reconnectTask?.cancel()
         reconnectTask = nil
+        pingTimer?.cancel()
+        pingTimer = nil
+        isWebSocketConnected = false
 
         let streams = buildStreams()
 
@@ -123,7 +129,6 @@ actor BinanceService: MarketDataProvider {
             return
         }
 
-        // Only include 1m and 5m for real-time updates.
         let filteredStreams = streams.filter { stream in
             stream.contains("@kline_1m") || stream.contains("@kline_5m")
         }
@@ -135,9 +140,7 @@ actor BinanceService: MarketDataProvider {
             return
         }
 
-        // IMPORTANT: Binance's combined-stream endpoint is /stream?streams=...
-        // The /ws endpoint is for a single raw stream and returns 404 when used
-        // with the combined-stream query parameter.
+        // Binance's combined-stream endpoint is /stream?streams=...
         let streamString = filteredStreams.joined(separator: "/")
         let urlString = "\(wsBaseURL)?streams=\(streamString)"
 
@@ -148,10 +151,12 @@ actor BinanceService: MarketDataProvider {
 
         print("🌐 Connecting to Binance WebSocket: \(url.absoluteString.prefix(200))...")
         webSocketTask?.cancel(with: .goingAway, reason: nil)
-        webSocketTask = URLSession.shared.webSocketTask(with: url)
-        webSocketTask?.resume()
 
-        receiveMessage()
+        let task = URLSession.shared.webSocketTask(with: url)
+        webSocketTask = task
+        task.resume()
+
+        receiveMessage(task: task)
         print("⏳ Binance WebSocket task started; awaiting handshake (1m & 5m)")
     }
 
@@ -171,11 +176,10 @@ actor BinanceService: MarketDataProvider {
         return streams
     }
 
-    private func receiveMessage() {
-        guard let task = webSocketTask else { return }
-
-        Task {
-            await receiveMessages(task: task)
+    private func receiveMessage(task: URLSessionWebSocketTask) {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.receiveMessages(task: task)
         }
     }
 
@@ -183,6 +187,16 @@ actor BinanceService: MarketDataProvider {
         while !Task.isCancelled {
             do {
                 let message = try await task.receive()
+
+                guard webSocketTask === task else {
+                    return
+                }
+
+                if !isWebSocketConnected {
+                    isWebSocketConnected = true
+                    print("✅ Binance WebSocket connected — receiving market data")
+                    startPingTimer()
+                }
 
                 switch message {
                 case .string(let text):
@@ -195,9 +209,22 @@ actor BinanceService: MarketDataProvider {
                     break
                 }
             } catch {
-                print("❌ WebSocket Error: \(error.localizedDescription)")
+                guard webSocketTask === task else {
+                    return
+                }
+
+                isWebSocketConnected = false
+                pingTimer?.cancel()
+                pingTimer = nil
+
+                let nsError = error as NSError
+                if nsError.code == NSURLErrorCancelled {
+                    return
+                }
+
+                print("⚠️ Binance WebSocket disconnected — \(error.localizedDescription)")
                 await scheduleReconnect()
-                break
+                return
             }
         }
     }
@@ -206,12 +233,14 @@ actor BinanceService: MarketDataProvider {
         guard !isReconnecting else { return }
         isReconnecting = true
 
+        print("🔄 Binance: scheduling reconnect in 5s")
+
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 5_000_000_000)
-            if !Task.isCancelled, let self = self {
-                await self.connectWebSocket()
-                await self.setReconnecting(false)
-            }
+            guard !Task.isCancelled, let self else { return }
+
+            await self.connectWebSocket()
+            await self.setReconnecting(false)
         }
     }
 
@@ -250,18 +279,22 @@ actor BinanceService: MarketDataProvider {
         pingTimer = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
-                guard let self = self else { break }
+                guard !Task.isCancelled, let self else { break }
                 await self.sendPing()
             }
         }
     }
 
     private func sendPing() {
-        webSocketTask?.sendPing { error in
-            if let error = error {
-                print("❌ WebSocket Ping Error: \(error.localizedDescription)")
+        guard isWebSocketConnected, let task = webSocketTask, task.state == .running else {
+            return
+        }
+
+        task.sendPing { error in
+            if let error {
+                godLog("🏓 Binance ping failed — connection will be evaluated by receive loop: \(error.localizedDescription)", level: .diagnostic)
             } else {
-                print("🏓 Received pong")
+                godLog("🏓 Binance pong received", level: .diagnostic)
             }
         }
     }
