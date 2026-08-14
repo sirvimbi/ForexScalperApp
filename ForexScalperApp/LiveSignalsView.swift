@@ -1,3 +1,5 @@
+// LiveSignalsView.swift - FIXED
+
 import SwiftUI
 
 struct LiveSignalsView: View {
@@ -21,13 +23,21 @@ struct LiveSignalsView: View {
                     #if os(iOS)
                     HStack { Text("Live Signals").font(.largeTitle).bold().foregroundColor(.white); Spacer(); Text("LIVE").font(.caption).foregroundColor(.accentGreen) }.padding(.horizontal)
                     #endif
-                    let pending = coordinator.signals.filter { $0.status == .pending }
-                    if pending.isEmpty {
+
+                    // FIXED: Calculate pending signals once and use the same instance
+                    let pendingSignals = coordinator.signals.filter { $0.status == .pending }
+
+                    if pendingSignals.isEmpty {
                         NoSignalsView(connectionStatus: viewModel.mt5Connected ? "Connected" : coordinator.connectionStatus, signalsCount: coordinator.signals.count, signals: coordinator.signals)
                     } else {
-                        ForEach(pending.sorted(by: { $0.timestamp > $1.timestamp })) { signal in signalCard(signal).id(signal.id) }
+                        ForEach(pendingSignals.sorted(by: { $0.timestamp > $1.timestamp })) { signal in
+                            signalCard(signal)
+                                .id(signal.id)
+                        }
                     }
-                }.padding(20).animation(.easeInOut, value: pending.count)
+                }
+                .padding(20)
+                .animation(.easeInOut, value: coordinator.signals.filter { $0.status == .pending }.count)
             }
             .refreshable { viewModel.refreshData() }
             .onAppear { viewModel.startAutoRefresh(interval: 2.0) }
