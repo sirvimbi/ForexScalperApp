@@ -1,4 +1,4 @@
-// BinanceService.swift - FIXED with single stream approach
+// BinanceService.swift - FIXED with single combined-stream connection
 import Foundation
 
 actor BinanceService: MarketDataProvider {
@@ -11,7 +11,8 @@ actor BinanceService: MarketDataProvider {
     private var isReconnecting = false
 
     private let baseURL = "https://api.binance.com/api/v3"
-    private let wsBaseURL = "wss://stream.binance.com:9443/ws" // Use /ws instead of /stream
+    // Binance uses /stream for combined streams. /ws is for a single raw stream.
+    private let wsBaseURL = "wss://stream.binance.com:9443/stream"
 
     func connect(symbols: [String], timeframes: [String], onKline: @escaping @Sendable (String, String, Kline, Bool) -> Void) {
         self.symbols = symbols
@@ -27,6 +28,7 @@ actor BinanceService: MarketDataProvider {
 
     func disconnect() {
         webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
         pingTimer?.cancel()
         reconnectTask?.cancel()
         onKlineReceived = nil
@@ -109,13 +111,11 @@ actor BinanceService: MarketDataProvider {
         }
     }
 
-    // FIXED: Use single WebSocket connection with the most important streams only
+    // Use one combined WebSocket connection for the 1m and 5m streams.
     private func connectWebSocket() {
         reconnectTask?.cancel()
         reconnectTask = nil
 
-        // Build streams - only subscribe to 1m and 5m for real-time updates
-        // Other timeframes can be fetched via REST API
         let streams = buildStreams()
 
         if streams.isEmpty {
@@ -123,9 +123,8 @@ actor BinanceService: MarketDataProvider {
             return
         }
 
-        // Only use 1m and 5m for WebSocket - subscribe to fewer streams
+        // Only include 1m and 5m for real-time updates.
         let filteredStreams = streams.filter { stream in
-            // Only include 1m and 5m streams
             stream.contains("@kline_1m") || stream.contains("@kline_5m")
         }
 
@@ -136,22 +135,24 @@ actor BinanceService: MarketDataProvider {
             return
         }
 
-        // Use a single connection with all filtered streams
-        // Binance can handle up to 1024 streams per connection with /ws endpoint
+        // IMPORTANT: Binance's combined-stream endpoint is /stream?streams=...
+        // The /ws endpoint is for a single raw stream and returns 404 when used
+        // with the combined-stream query parameter.
         let streamString = filteredStreams.joined(separator: "/")
         let urlString = "\(wsBaseURL)?streams=\(streamString)"
 
         guard let url = URL(string: urlString) else {
-            print("❌ Failed to create WebSocket URL")
+            print("❌ Failed to create Binance WebSocket URL")
             return
         }
 
         print("🌐 Connecting to Binance WebSocket: \(url.absoluteString.prefix(200))...")
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = URLSession.shared.webSocketTask(with: url)
         webSocketTask?.resume()
 
         receiveMessage()
-        print("✅ WebSocket connected for real-time updates (1m & 5m)")
+        print("⏳ Binance WebSocket task started; awaiting handshake (1m & 5m)")
     }
 
     private func buildStreams() -> [String] {
@@ -206,7 +207,7 @@ actor BinanceService: MarketDataProvider {
         isReconnecting = true
 
         reconnectTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
             if !Task.isCancelled, let self = self {
                 await self.connectWebSocket()
                 await self.setReconnecting(false)
@@ -248,7 +249,7 @@ actor BinanceService: MarketDataProvider {
         pingTimer?.cancel()
         pingTimer = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
                 guard let self = self else { break }
                 await self.sendPing()
             }
