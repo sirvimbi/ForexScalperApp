@@ -51,13 +51,13 @@ class ConsoleLogger: ObservableObject {
 
     private func startCleanupTimer() {
         Timer.publish(every: automaticClearInterval, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                Task { @MainActor in
-                    self?.automaticClearLogs()
-                }
+        .autoconnect()
+        .sink { [weak self] _ in
+            Task { @MainActor in
+                self?.automaticClearLogs()
             }
-            .store(in: &cancellables)
+        }
+        .store(in: &cancellables)
     }
 
     private var cancellables = Set<AnyCancellable>()
@@ -92,6 +92,7 @@ class ConsoleLogger: ObservableObject {
             case .diagnostic: uiLevel = .diagnostic
             }
 
+            // ✅ FIX: Explicitly call on MainActor since we're already on .main queue
             self.appendLog(entry.message, level: uiLevel, printToConsole: false)
         }
     }
@@ -100,23 +101,28 @@ class ConsoleLogger: ObservableObject {
         appendLog(message, level: level, printToConsole: true)
     }
 
-    private func appendLog(_ message: String, level: LogEntryUI.LogLevelUI, printToConsole: Bool) {
-        let now = Date()
-        if message == lastMessage && now.timeIntervalSince(lastMessageTime) < 0.30 {
-            return
-        }
-        lastMessage = message
-        lastMessageTime = now
+    // ✅ FIX: Make this method nonisolated since it's called from within MainActor context
+    nonisolated func appendLog(_ message: String, level: LogEntryUI.LogLevelUI, printToConsole: Bool) {
+        Task { @MainActor in
+            let now = Date()
 
-        let entry = LogEntryUI(timestamp: now, message: message, level: level)
-        logs.append(entry)
+            // Access and mutate state on MainActor
+            if message == self.lastMessage && now.timeIntervalSince(self.lastMessageTime) < 0.30 {
+                return
+            }
+            self.lastMessage = message
+            self.lastMessageTime = now
 
-        if logs.count > maxLogs {
-            logs.removeFirst(logs.count - maxLogs)
-        }
+            let entry = LogEntryUI(timestamp: now, message: message, level: level)
+            self.logs.append(entry)
 
-        if printToConsole {
-            print(message)
+            if self.logs.count > self.maxLogs {
+                self.logs.removeFirst(self.logs.count - self.maxLogs)
+            }
+
+            if printToConsole {
+                print(message)
+            }
         }
     }
 
@@ -125,7 +131,7 @@ class ConsoleLogger: ObservableObject {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
 
         return logs.map { "[\(formatter.string(from: $0.timestamp))] \($0.message)" }
-            .joined(separator: "\n")
+        .joined(separator: "\n")
     }
 
     func clearLogs() {

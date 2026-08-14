@@ -18,11 +18,14 @@ struct LogEntry: Sendable {
 /// Small process-wide de-duplicator for log fan-out.
 /// This is a standalone struct that is NOT isolated to any actor.
 private struct GlobalLogDeduplicator {
-    private static let lock = NSLock()
-    private static var recent: [String: Date] = [:]
-    private static let duplicateWindow: TimeInterval = 0.30
+    // ✅ FIX: Use nonisolated(unsafe) for mutable stored properties
+    nonisolated(unsafe) private static var recent: [String: Date] = [:]
+    nonisolated private static let lock = NSLock()
+    nonisolated private static let duplicateWindow: TimeInterval = 0.30
 
-    static func shouldEmit(_ message: String, now: Date = Date()) -> Bool {
+    // ✅ FIX: Mark the method as nonisolated
+    nonisolated static func shouldEmit(_ message: String, now: Date = Date()) -> Bool {
+        // NSLock operations are thread-safe
         lock.lock()
         defer { lock.unlock() }
 
@@ -41,8 +44,7 @@ private struct GlobalLogDeduplicator {
 
 /// Thread-safe logging function that can be called from any context.
 nonisolated func godLog(_ message: String, level: LogLevel = .info, file: String = #file, line: Int = #line) {
-    // Suppress only identical messages emitted within the same short callback window.
-    // Distinct messages, errors, requests and repeated events after the window remain visible.
+    // Call shouldEmit directly (now properly nonisolated)
     guard GlobalLogDeduplicator.shouldEmit(message) else { return }
 
     let fileName = (file as NSString).lastPathComponent

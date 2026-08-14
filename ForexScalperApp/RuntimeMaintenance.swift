@@ -12,7 +12,7 @@ final class AppRuntimeMaintenance: ObservableObject {
     private weak var viewModel: DashboardViewModel?
     private var task: Task<Void, Never>?
     private var signalCancellable: AnyCancellable?
-    private var previousSignalStates: [UUID: Signal.Status] = [:]
+    private var previousSignalStates: [UUID: SignalStatus] = [:]
 
     init(coordinator: RefactoredAppCoordinator, viewModel: DashboardViewModel) {
         self.coordinator = coordinator
