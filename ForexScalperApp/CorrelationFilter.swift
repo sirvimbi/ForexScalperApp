@@ -63,6 +63,6 @@ actor CorrelationFilter {
     
     func syncActiveSymbols(_ symbols: Set<String>) async {
         self.activeSymbols = symbols
-        godLog("📊 Correlation: Force-synced \(activeSymbols.count) active symbols", level: .diagnostic)
+        godLog("📊 Correlation: Force-synced \(activeSymbols.count) active symbols", level: .info)
     }
 }

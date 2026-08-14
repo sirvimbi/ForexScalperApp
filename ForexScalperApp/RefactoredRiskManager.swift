@@ -17,7 +17,7 @@ actor RefactoredRiskManager: RiskManagerProtocol {
     
     func updateParameters(_ params: RiskParameters) {
         parameters = params
-        godLog("🛡️ RISK CONFIG | balance=\(String(format: "%.2f", params.accountBalance)) | risk/trade=\(String(format: "%.2f", params.riskPerTrade * 100))% | maxDailyRisk=\(String(format: "%.2f", params.maxDailyRisk * 100))% | maxConcurrent=\(params.maxConcurrentTrades)", level: .diagnostic)
+        godLog("🛡️ RISK CONFIG | balance=\(String(format: "%.2f", params.accountBalance)) | risk/trade=\(String(format: "%.2f", params.riskPerTrade * 100))% | maxDailyRisk=\(String(format: "%.2f", params.maxDailyRisk * 100))% | maxConcurrent=\(params.maxConcurrentTrades)", level: .info)
     }
 
     /// Full, non-mutating risk-gate explanation used by the signal engine.
@@ -52,7 +52,7 @@ actor RefactoredRiskManager: RiskManagerProtocol {
 
         for check in checks {
             let passed = check.contains(" PASS ")
-            godLog("   ├─ \(passed ? "✅" : "❌") \(check)", level: passed ? .diagnostic : .warning)
+            godLog("   ├─ \(passed ? "✅" : "❌") \(check)", level: passed ? .info : .warning)
         }
 
         godLog("🛡️ RISK DECISION | \(symbol) | \(allowed ? "ALLOW" : "BLOCK") | balance=\(String(format: "%.2f", parameters.accountBalance)) | risk/trade=\(String(format: "%.2f", parameters.riskPerTrade * 100))% | dailyPnL=\(String(format: "%.2f", todayPnL))", level: allowed ? .success : .warning)
@@ -119,6 +119,6 @@ actor RefactoredRiskManager: RiskManagerProtocol {
 
     func syncActiveTrades(_ symbols: Set<String>) {
         self.activeTrades = symbols
-        godLog("🛡️ RISK SYNC | activeTrades=\(symbols.sorted().joined(separator: ", ")) | count=\(symbols.count)", level: .diagnostic)
+        godLog("🛡️ RISK SYNC | activeTrades=\(symbols.sorted().joined(separator: ", ")) | count=\(symbols.count)", level: .info)
     }
 }

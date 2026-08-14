@@ -29,7 +29,7 @@ enum SignalDiagnostics {
             consume(entry.message)
         }
 
-        godLog("🧭 Signal diagnostics installed — structured calculation tracing enabled", level: .diagnostic)
+        godLog("🧭 Signal diagnostics installed — structured calculation tracing enabled", level: .info)
         SignalAuditSettings.shared.logSettings()
     }
 

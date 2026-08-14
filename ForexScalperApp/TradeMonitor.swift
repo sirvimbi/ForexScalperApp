@@ -92,7 +92,7 @@ actor TradeMonitor {
         activeTrades.removeValue(forKey: trade.id)
 
         // GOD MODE FIX: Let the coordinator handle the final verified sync
-        godLog("🧹 Monitor: Stopped tracking \(trade.symbol). Waiting for broker verification.", level: .diagnostic)
+        godLog("🧹 Monitor: Stopped tracking \(trade.symbol). Waiting for broker verification.", level: .info)
     }
     
     private func calculatePnL(trade: TradeRecord, exitPrice: Double) -> Double {

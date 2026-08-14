@@ -489,6 +489,10 @@ enum TradingPair: String, CaseIterable {
     // Exotics
     case usdsek = "USDSEK", usdnok = "USDNOK", usdpln = "USDPLN", usdmxn = "USDMXN", usdzar = "USDZAR", usdhkd = "USDHKD", usdsgd = "USDSGD", usdtry = "USDTRY", usdils = "USDILS", usdcnh = "USDCNH", usdthb = "USDTHB", usddkk = "USDDKK", eursek = "EURSEK", eurnok = "EURNOK", eurpln = "EURPLN", eurmxn = "EURMXN", eurzar = "EURZAR", eurtry = "EURTRY", eurdkk = "EURDKK", eurhkd = "EURHKD", eurczk = "EURCZK", eurhuf = "EURHUF", gbptry = "GBPTRY"
     
+    // Commodities & Indices
+    case xauusd = "XAUUSD", xagusd = "XAGUSD", wti = "USOIL", brent = "UKOIL"
+    case us30 = "US30", nas100 = "NAS100", sp500 = "US500", dax = "GER30"
+    
     var displayName: String {
         return self.rawValue.prefix(3) + "/" + self.rawValue.suffix(3)
     }

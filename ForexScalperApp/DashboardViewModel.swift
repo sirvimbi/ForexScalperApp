@@ -326,6 +326,7 @@ class DashboardViewModel: ObservableObject {
         
         Task {
             await MT5Service.shared.setBaseURL(mt5BridgeURL)
+            await MT5WebSocketService.shared.setBaseURL(mt5BridgeURL)
             await MT5Service.shared.setAuthToken(mt5AuthToken)
         }
         
@@ -454,12 +455,12 @@ class DashboardViewModel: ObservableObject {
         godLog("🔄 MT5: Manual connection sequence started...", level: .info)
         
         // Ensure latest values are used
-        godLog("🌐 MT5: Setting Bridge URL to \(mt5BridgeURL)", level: .diagnostic)
+        godLog("🌐 MT5: Setting Bridge URL to \(mt5BridgeURL)", level: .info)
         await MT5Service.shared.setBaseURL(mt5BridgeURL)
         await MT5Service.shared.setAuthToken(mt5AuthToken)
         
         do {
-            godLog("🔍 MT5: Pinging bridge...", level: .diagnostic)
+            godLog("🔍 MT5: Pinging bridge...", level: .info)
             let success = try await MT5Service.shared.checkConnection()
             
             self.mt5Connected = success

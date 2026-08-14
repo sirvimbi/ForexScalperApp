@@ -52,11 +52,11 @@ final class NewsService: ObservableObject {
         isFetching = true
         defer { isFetching = false }
 
-        godLog("🌍 NewsService: Fetching economic calendar...", level: .diagnostic)
+        godLog("🌍 NewsService: Fetching economic calendar...", level: .info)
 
         for url in calendarURLs {
             do {
-                godLog("🌐 NewsService: Trying calendar source: \(url.host ?? "unknown")", level: .diagnostic)
+                godLog("🌐 NewsService: Trying calendar source: \(url.host ?? "unknown")", level: .info)
 
                 var request = URLRequest(url: url)
                 request.setValue("ForexScalperApp/10.6", forHTTPHeaderField: "User-Agent")

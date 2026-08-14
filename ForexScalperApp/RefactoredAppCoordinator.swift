@@ -806,7 +806,7 @@ class RefactoredAppCoordinator: ObservableObject {
         // "Unsupported order action" failure.
         if await shouldWaitForPullback(symbol: symbol, signal: signal, atr: atrVal) {
             godLog("📌 SMART ENTRY | \(symbol) | pullback zone not reached yet | waiting up to 12s", level: .info)
-            godLog("📌 PENDING LIMIT | \(symbol) | deferred safely: current EA bridge exposes market action only", level: .diagnostic)
+            godLog("📌 PENDING LIMIT | \(symbol) | deferred safely: current EA bridge exposes market action only", level: .info)
             var reached = false
             for second in 1...12 {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)

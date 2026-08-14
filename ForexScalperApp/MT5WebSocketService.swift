@@ -16,9 +16,22 @@ actor MT5WebSocketService {
     private var lastPriceTimestamp: [String: Int64] = [:]
     private var l2Cache: [String: (buyVol: Double, sellVol: Double, timestamp: Date)] = [:]
     private var failureWasReported = false
+    private var customWSURL: URL?
 
     private let maxReconnectDelay: UInt64 = 30
-    private let wsURL = URL(string: "ws://127.0.0.1:8890")!
+    private var wsURL: URL {
+        if let custom = customWSURL { return custom }
+        return URL(string: "ws://127.0.0.1:8890")!
+    }
+
+    func setBaseURL(_ urlString: String) {
+        let wsUrlString = urlString.replacingOccurrences(of: "http://", with: "ws://")
+                                    .replacingOccurrences(of: "https://", with: "wss://")
+        if let url = URL(string: wsUrlString) {
+            self.customWSURL = url
+            godLog("🌐 MT5 WS: Base URL updated to \(wsUrlString)", level: .info)
+        }
+    }
 
     func connect(symbols: [String]) {
         self.symbols = symbols
@@ -27,7 +40,7 @@ actor MT5WebSocketService {
         failureWasReported = false
         reconnectTask?.cancel()
         reconnectTask = nil
-        godLog("🌐 MT5 WS: connect requested → \(wsURL.absoluteString) | symbols=\(symbols.count)", level: .diagnostic)
+        godLog("🌐 MT5 WS: connect requested → \(wsURL.absoluteString) | symbols=\(symbols.count)", level: .info)
         openSocket()
     }
 
@@ -41,7 +54,7 @@ actor MT5WebSocketService {
         session = nil
         isConnected = false
         failureWasReported = false
-        godLog("🌐 MT5 WS: disconnected by application", level: .diagnostic)
+        godLog("🌐 MT5 WS: disconnected by application", level: .info)
     }
 
     func connected() -> Bool { isConnected }
@@ -64,7 +77,7 @@ actor MT5WebSocketService {
         let task = newSession.webSocketTask(with: wsURL)
         webSocket = task
         task.resume()
-        godLog("🌐 MT5 WS: socket task started (attempt \(max(reconnectAttempt, 1)))", level: .diagnostic)
+        godLog("🌐 MT5 WS: socket task started (attempt \(max(reconnectAttempt, 1)))", level: .info)
         receiveLoop(task)
     }
 
@@ -109,7 +122,7 @@ actor MT5WebSocketService {
                 godLog("❌ MT5 WS: receive failed [\(nsError.code)] \(error.localizedDescription)", level: .warning)
                 failureWasReported = true
             } else {
-                godLog("🔁 MT5 WS: reconnect cycle continues — \(error.localizedDescription)", level: .diagnostic)
+                godLog("🔁 MT5 WS: reconnect cycle continues — \(error.localizedDescription)", level: .info)
             }
 
             scheduleReconnect()
@@ -123,7 +136,7 @@ actor MT5WebSocketService {
         let exponent = min(reconnectAttempt - 1, 5)
         let delay = min(UInt64(1 << exponent), maxReconnectDelay)
 
-        godLog("🔄 MT5 WS: scheduling reconnect #\(reconnectAttempt) in \(delay)s", level: .diagnostic)
+        godLog("🔄 MT5 WS: scheduling reconnect #\(reconnectAttempt) in \(delay)s", level: .info)
 
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
@@ -157,8 +170,8 @@ actor MT5WebSocketService {
         case "trade_event": handleTradeEvent(json)
         case "track_mbook": handleMbookUpdate(json)
         case "ohlc_update": handleOhlcUpdate(json)
-        case "pong": godLog("🏓 MT5 WS: pong received", level: .diagnostic)
-        default: godLog("🔍 MT5 WS: unhandled event type=\(type)", level: .diagnostic)
+        case "pong": godLog("🏓 MT5 WS: pong received", level: .info)
+        default: godLog("🔍 MT5 WS: unhandled event type=\(type)", level: .info)
         }
     }
 
@@ -202,7 +215,7 @@ actor MT5WebSocketService {
             "reason": string(json["reason"]) ?? "Unknown",
             "time": int64(json["time"]) ?? Int64(Date().timeIntervalSince1970)
         ]
-        godLog("📥 MT5 WS: trade_event ticket=\(ticket) symbol=\(symbol)", level: .diagnostic)
+        godLog("📥 MT5 WS: trade_event ticket=\(ticket) symbol=\(symbol)", level: .info)
         NotificationCenter.default.post(name: .mt5TradeClosed, object: nil, userInfo: userInfo)
     }
 

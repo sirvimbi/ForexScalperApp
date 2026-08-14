@@ -28,7 +28,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
             candleStore[key] = normalizeCandles(cached)
             isHydrated.insert(key)
 
-            godLog("💧 CANDLE HYDRATE | \(symbol) | \(timeframe) | persisted=\(cached.count)", level: cached.isEmpty ? .warning : .diagnostic)
+            godLog("💧 CANDLE HYDRATE | \(symbol) | \(timeframe) | persisted=\(cached.count)", level: cached.isEmpty ? .warning : .info)
         }
 
         var array = candleStore[key] ?? []
@@ -107,7 +107,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         let count = candles.count
         let depthOK = count >= minimum
         let status = count == 0 ? "MISSING" : (depthOK ? "READY" : "PARTIAL")
-        let level: LogLevel = count == 0 ? .warning : (depthOK ? .success : .diagnostic)
+        let level: LogLevel = count == 0 ? .warning : (depthOK ? .success : .info)
 
         let latest = candles.last.map { formatCandleDate($0.closeTime) } ?? "none"
         let oldest = candles.first.map { formatCandleDate($0.closeTime) } ?? "none"

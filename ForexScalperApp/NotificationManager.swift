@@ -63,7 +63,7 @@ class NotificationManager: NSObject, ObservableObject {
         content.categoryIdentifier = "SIGNAL_ACTION"
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "signal_\(signal.id.uuidString)", content: content, trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)))
         playForegroundSound(kind)
-        godLog("🔔 SIGNAL NOTIFICATION | \(signal.symbol) | confidence=\(String(format: "%.0f", signal.confidence))%", level: .diagnostic)
+        godLog("🔔 SIGNAL NOTIFICATION | \(signal.symbol) | confidence=\(String(format: "%.0f", signal.confidence))%", level: .info)
     }
 
     func sendTradeClosedNotification(_ trade: TradeRecord) {

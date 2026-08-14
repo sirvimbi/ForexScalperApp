@@ -106,7 +106,7 @@ actor ScalpingTradeMonitor {
             if improves {
                 do {
                     if try await MT5Service.shared.modifyPosition(ticket: ticket, sl: candidateSL, tp: trade.takeProfit ?? 0) {
-                        godLog("🛡️ TRAILING SL | \(trade.symbol) | profit=\(String(format: "%.1f", profitPips))p | distance=\(String(format: "%.1f", distancePips))p | SL=\(String(format: "%.5f", candidateSL))", level: .diagnostic)
+                        godLog("🛡️ TRAILING SL | \(trade.symbol) | profit=\(String(format: "%.1f", profitPips))p | distance=\(String(format: "%.1f", distancePips))p | SL=\(String(format: "%.5f", candidateSL))", level: .info)
                     }
                 } catch {
                     godLog("⚠️ Trailing SL update failed | \(trade.symbol) | \(error.localizedDescription)", level: .warning)
@@ -150,7 +150,7 @@ actor ScalpingTradeMonitor {
         guard improves else { return }
         do {
             _ = try await MT5Service.shared.modifyPosition(ticket: ticket, sl: lockPrice, tp: trade.takeProfit ?? 0)
-            godLog("🛡️ PARTIAL PROTECTION | \(trade.symbol) | SL locked near breakeven", level: .diagnostic)
+            godLog("🛡️ PARTIAL PROTECTION | \(trade.symbol) | SL locked near breakeven", level: .info)
         } catch {
             godLog("⚠️ Partial protection failed | \(trade.symbol) | \(error.localizedDescription)", level: .warning)
         }

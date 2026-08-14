@@ -47,7 +47,7 @@ struct NoSignalsView: View {
             Text("SCANNING FOR INSTITUTIONAL FLOW")
                 .font(.system(size: 14, weight: .bold, design: .monospaced))
                 .foregroundColor(.textPrimary)
-            Text(connectionStatus == "Connected"
+            Text(connectionStatus.lowercased().contains("connected")
                  ? "Active WebSocket stream on Port 8890. Waiting for high-probability confluence."
                  : "Waiting for MT5 bridge connection...")
                 .font(.system(size: 11))

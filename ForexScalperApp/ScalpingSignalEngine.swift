@@ -60,7 +60,7 @@ actor ScalpingSignalEngine {
 
     func evaluateScalpingSignal(symbol: String) async -> ScalpingSignal? {
         let started = Date()
-        godLog("🧪 SIGNAL EVAL START | \(symbol) | mode=FULL | requestedTFs=1m,5m,1h,4h,D1,W1", level: .diagnostic)
+        godLog("🧪 SIGNAL EVAL START | \(symbol) | mode=FULL | requestedTFs=1m,5m,1h,4h,D1,W1", level: .info)
 
         // WHITELIST CHECK
         guard allowedSymbols.contains(symbol) else {
@@ -74,17 +74,17 @@ actor ScalpingSignalEngine {
             let perf = symbolPerformance[symbol]!
             let wr = Double(perf.wins) / Double(perf.wins + perf.losses)
             learningWarning = "Historical Win Rate is only \(Int(wr*100))%"
-            godLog("🧠 SIGNAL CONTEXT | \(symbol) | historical win rate=\(Int(wr * 100))% | warning only", level: .diagnostic)
+            godLog("🧠 SIGNAL CONTEXT | \(symbol) | historical win rate=\(Int(wr * 100))% | warning only", level: .info)
         }
 
         // MT5 TRADABLE CHECK
         let tradable = await MT5Service.shared.isSymbolTradable(symbol)
-        godLog("🧱 SIGNAL GATE | \(symbol) | MT5 tradable=\(tradable)", level: .diagnostic)
+        godLog("🧱 SIGNAL GATE | \(symbol) | MT5 tradable=\(tradable)", level: .info)
         guard tradable else { return nil }
 
         // RISK MANAGER CHECK
         let riskAllowed = await riskManager.canOpenTrade(for: symbol)
-        godLog("🧱 SIGNAL GATE | \(symbol) | riskManager.canOpenTrade=\(riskAllowed)", level: .diagnostic)
+        godLog("🧱 SIGNAL GATE | \(symbol) | riskManager.canOpenTrade=\(riskAllowed)", level: .info)
         guard riskAllowed else { return nil }
 
         let (enabledNews, highMin, medMin, cooldown, spreadTol, rocPeriod) = await MainActor.run {
@@ -99,25 +99,25 @@ actor ScalpingSignalEngine {
 
         // NEWS CHECK
         if enabledNews {
-            godLog("📡 SIGNAL FETCH | \(symbol) | news impact request started", level: .diagnostic)
+            godLog("📡 SIGNAL FETCH | \(symbol) | news impact request started", level: .info)
             let (impact, _) = await NewsService.shared.getImpactForSymbol(symbol, timeframeMinutes: Int(max(highMin, medMin)))
-            godLog("📡 SIGNAL FETCH | \(symbol) | news impact=\(impact)", level: .diagnostic)
+            godLog("📡 SIGNAL FETCH | \(symbol) | news impact=\(impact)", level: .info)
             if impact == .high {
                 godLog("⚠️ \(symbol) skipped: High-impact news detected", level: .info)
                 return nil
             }
         } else {
-            godLog("📡 SIGNAL FETCH | \(symbol) | news filter disabled", level: .diagnostic)
+            godLog("📡 SIGNAL FETCH | \(symbol) | news filter disabled", level: .info)
         }
 
         // COOLDOWN CHECK
         if let lastSignal = lastSignalTime[symbol], Date().timeIntervalSince(lastSignal) < cooldown {
             let remaining = Int(ceil(cooldown - Date().timeIntervalSince(lastSignal)))
-            godLog("⏱ SIGNAL GATE | \(symbol) | FAIL | cooldown active | remaining=\(remaining)s", level: .diagnostic)
+            godLog("⏱ SIGNAL GATE | \(symbol) | FAIL | cooldown active | remaining=\(remaining)s", level: .info)
             return nil
         }
 
-        godLog("📥 SIGNAL FETCH START | \(symbol) | parallel candle tasks=1m,5m,1h,4h,D1,W1", level: .diagnostic)
+        godLog("📥 SIGNAL FETCH START | \(symbol) | parallel candle tasks=1m,5m,1h,4h,D1,W1", level: .info)
         async let c1m = marketData.getCandles(symbol: symbol, timeframe: "1m")
         async let c5m = marketData.getCandles(symbol: symbol, timeframe: "5m")
         async let c1h = marketData.getCandles(symbol: symbol, timeframe: "1h")
@@ -129,7 +129,7 @@ actor ScalpingSignalEngine {
             "1m": c1m, "5m": c5m, "1h": c1h,
             "4h": c4h, "D1": cD1, "W1": cW1
         ]
-        godLog("📥 SIGNAL FETCH DONE | \(symbol) | counts=1m:\(candlesByTimeframe["1m"]?.count ?? 0),5m:\(candlesByTimeframe["5m"]?.count ?? 0),1h:\(candlesByTimeframe["1h"]?.count ?? 0),4h:\(candlesByTimeframe["4h"]?.count ?? 0),D1:\(candlesByTimeframe["D1"]?.count ?? 0),W1:\(candlesByTimeframe["W1"]?.count ?? 0)", level: .diagnostic)
+        godLog("📥 SIGNAL FETCH DONE | \(symbol) | counts=1m:\(candlesByTimeframe["1m"]?.count ?? 0),5m:\(candlesByTimeframe["5m"]?.count ?? 0),1h:\(candlesByTimeframe["1h"]?.count ?? 0),4h:\(candlesByTimeframe["4h"]?.count ?? 0),D1:\(candlesByTimeframe["D1"]?.count ?? 0),W1:\(candlesByTimeframe["W1"]?.count ?? 0)", level: .info)
 
         // DATA VALIDATION CHECK
         guard validateData(candlesByTimeframe, symbol: symbol) else {
@@ -148,7 +148,7 @@ actor ScalpingSignalEngine {
             actualSpread = (indicators.atr / indicators.currentPrice) * 10000
         }
 
-        godLog("📏 SIGNAL PILLAR | \(symbol) | Spread | \(String(format: "%.2f", actualSpread)) <= \(String(format: "%.2f", spreadTol))", level: .diagnostic)
+        godLog("📏 SIGNAL PILLAR | \(symbol) | Spread | \(String(format: "%.2f", actualSpread)) <= \(String(format: "%.2f", spreadTol))", level: .info)
         if actualSpread > spreadTol {
             godLog("⚠️ \(symbol) skipped: Spread too high (\(String(format: "%.1f", actualSpread)) > \(spreadTol))", level: .info)
             return nil
@@ -157,7 +157,7 @@ actor ScalpingSignalEngine {
         // VOLATILITY CHECK
         let atrPercentage = indicators.atr / indicators.currentPrice * 100
         let volatilityOK = await validateVolatility(symbol, indicators: indicators)
-        godLog("📏 SIGNAL PILLAR | \(symbol) | Volatility | ATR=\(String(format: "%.3f", atrPercentage))% | \(volatilityOK ? "PASS" : "FAIL")", level: .diagnostic)
+        godLog("📏 SIGNAL PILLAR | \(symbol) | Volatility | ATR=\(String(format: "%.3f", atrPercentage))% | \(volatilityOK ? "PASS" : "FAIL")", level: .info)
         guard volatilityOK else {
             godLog("⚠️ \(symbol) skipped: Volatility outside bounds (\(String(format: "%.3f", atrPercentage))%)", level: .info)
             return nil
@@ -182,14 +182,14 @@ actor ScalpingSignalEngine {
 
         if adjustedSignal.confidence < threshold {
             let warning = "Self-Learning adjusted confidence from \(Int(finalSignal.confidence))% to \(Int(adjustedSignal.confidence))% (Win Rate < 50%)"
-            godLog("🧠 SIGNAL ADJUSTMENT | \(symbol) | \(warning)", level: .diagnostic)
+            godLog("🧠 SIGNAL ADJUSTMENT | \(symbol) | \(warning)", level: .info)
             // We don't block anymore, but we keep the insight
             return adjustedSignal.withSelfLearningInsight(warning)
         }
 
         // RISK/REWARD CHECK
         let rrOK = await RRLock.validate(signal: adjustedSignal)
-        godLog("⚖️ SIGNAL GATE | \(symbol) | R:R=\(rrOK ? "PASS" : "FAIL")", level: .diagnostic)
+        godLog("⚖️ SIGNAL GATE | \(symbol) | R:R=\(rrOK ? "PASS" : "FAIL")", level: .info)
         guard rrOK else {
             godLog("⚠️ \(symbol) skipped: Risk/Reward check failed", level: .info)
             return nil
@@ -219,13 +219,13 @@ actor ScalpingSignalEngine {
 
         let logMsg = "📊 EVAL: \(symbol) \(signal.type) | Conf: \(Int(signal.confidence))% (Need \(Int(threshold))%) | Score: B=\(signal.score) S=\(signal.sellScore) | MET: [\(metString)] | FAILED: [\(failedString)]"
         godLog(logMsg, level: .info)
-        godLog("🧭 SIGNAL DECISION TRACE | \(symbol) | direction=\(signal.type) | confidence=\(String(format: "%.1f", signal.confidence))% | threshold=\(String(format: "%.1f", threshold))% | pillarsPassed=\(metPillars.count)/\(allPillars.count)", level: .diagnostic)
+        godLog("🧭 SIGNAL DECISION TRACE | \(symbol) | direction=\(signal.type) | confidence=\(String(format: "%.1f", signal.confidence))% | threshold=\(String(format: "%.1f", threshold))% | pillarsPassed=\(metPillars.count)/\(allPillars.count)", level: .info)
     }
 
     // --- FAST EVALUATION (V10.0 Early Entry) ---
     func evaluateFastSignal(symbol: String, currentPrice: Double) async -> ScalpingSignal? {
         let started = Date()
-        godLog("⚡ FAST SIGNAL START | \(symbol) | price=\(String(format: "%.5f", currentPrice))", level: .diagnostic)
+        godLog("⚡ FAST SIGNAL START | \(symbol) | price=\(String(format: "%.5f", currentPrice))", level: .info)
         guard allowedSymbols.contains(symbol) else {
             godLog("🛑 FAST SIGNAL GATE | \(symbol) | FAIL | not in whitelist", level: .warning)
             return nil
@@ -233,23 +233,23 @@ actor ScalpingSignalEngine {
 
         // 1. Performance/Tradable/Risk Checks (Quick)
         let learningAllowed = shouldTradeSymbol(symbol)
-        godLog("🧱 FAST GATE | \(symbol) | historical-performance=\(learningAllowed ? "PASS" : "WARN")", level: .diagnostic)
+        godLog("🧱 FAST GATE | \(symbol) | historical-performance=\(learningAllowed ? "PASS" : "WARN")", level: .info)
         guard learningAllowed else { return nil }
         let riskAllowed = await riskManager.canOpenTrade(for: symbol)
-        godLog("🧱 FAST GATE | \(symbol) | riskManager=\(riskAllowed ? "PASS" : "FAIL")", level: .diagnostic)
+        godLog("🧱 FAST GATE | \(symbol) | riskManager=\(riskAllowed ? "PASS" : "FAIL")", level: .info)
         guard riskAllowed else { return nil }
 
         // 2. Cached HTF Trend Check
         let h4Trend = await getCachedTrend(symbol: symbol, timeframe: "4h")
         let d1Trend = await getCachedTrend(symbol: symbol, timeframe: "D1")
         let htfAligned = h4Trend != .none && h4Trend == d1Trend
-        godLog("🔎 FAST PILLAR | \(symbol) | HTF Alignment | H4=\(h4Trend) D1=\(d1Trend) | \(htfAligned ? "PASS" : "FAIL")", level: .diagnostic)
+        godLog("🔎 FAST PILLAR | \(symbol) | HTF Alignment | H4=\(h4Trend) D1=\(d1Trend) | \(htfAligned ? "PASS" : "FAIL")", level: .info)
         guard htfAligned else { return nil }
 
         // 3. Fast Indicators (1m only)
-        godLog("📥 FAST FETCH | \(symbol) | 1m candles", level: .diagnostic)
+        godLog("📥 FAST FETCH | \(symbol) | 1m candles", level: .info)
         let candles1m = await marketData.getCandles(symbol: symbol, timeframe: "1m")
-        godLog("📥 FAST FETCH DONE | \(symbol) | 1m count=\(candles1m.count)", level: .diagnostic)
+        godLog("📥 FAST FETCH DONE | \(symbol) | 1m count=\(candles1m.count)", level: .info)
         guard candles1m.count >= 100 else {
             godLog("🛑 FAST GATE | \(symbol) | FAIL | need 100 1m candles", level: .warning)
             return nil
@@ -269,7 +269,7 @@ actor ScalpingSignalEngine {
             return nil
         }
         let rrOK = await RRLock.validate(signal: finalSignal)
-        godLog("⚖️ FAST GATE | \(symbol) | R:R=\(rrOK ? "PASS" : "FAIL")", level: .diagnostic)
+        godLog("⚖️ FAST GATE | \(symbol) | R:R=\(rrOK ? "PASS" : "FAIL")", level: .info)
         guard rrOK else { return nil }
 
         lastSignalTime[symbol] = Date()
@@ -280,18 +280,18 @@ actor ScalpingSignalEngine {
     private func getCachedTrend(symbol: String, timeframe: String) async -> SignalType {
         if let cached = cachedHTFTrends[symbol]?[timeframe],
            Date().timeIntervalSince(cached.timestamp) < htfCacheDuration {
-            godLog("🗃 HTF CACHE | \(symbol) | \(timeframe) | trend=\(cached.trend) | age=\(Int(Date().timeIntervalSince(cached.timestamp)))s", level: .diagnostic)
+            godLog("🗃 HTF CACHE | \(symbol) | \(timeframe) | trend=\(cached.trend) | age=\(Int(Date().timeIntervalSince(cached.timestamp)))s", level: .info)
             return cached.trend
         }
 
         // Refresh cache
-        godLog("📥 HTF FETCH | \(symbol) | \(timeframe) | cache miss", level: .diagnostic)
+        godLog("📥 HTF FETCH | \(symbol) | \(timeframe) | cache miss", level: .info)
         let candles = await marketData.getCandles(symbol: symbol, timeframe: timeframe)
         let trend = calculateHTFTrend(candles: candles)
 
         if cachedHTFTrends[symbol] == nil { cachedHTFTrends[symbol] = [:] }
         cachedHTFTrends[symbol]?[timeframe] = (trend: trend, timestamp: Date())
-        godLog("🗃 HTF CACHE WRITE | \(symbol) | \(timeframe) | candles=\(candles.count) | trend=\(trend)", level: .diagnostic)
+        godLog("🗃 HTF CACHE WRITE | \(symbol) | \(timeframe) | candles=\(candles.count) | trend=\(trend)", level: .info)
 
         return trend
     }
@@ -314,7 +314,7 @@ actor ScalpingSignalEngine {
         let gaps = AdvancedIndicators.detectFairValueGaps(candles1m)
         let delta = await MT5WebSocketService.shared.getDeltaVolume(for: symbol)
 
-        godLog("📊 FAST INDICATORS | \(symbol) | RSI=\(String(format: "%.1f", rsi)) Stoch=\(String(format: "%.1f", stoch.k.last ?? 50)) BB=\(String(format: "%.3f", bbPos)) ATR=\(String(format: "%.5f", atr)) ΔVol=\(String(format: "%.2f", delta))", level: .diagnostic)
+        godLog("📊 FAST INDICATORS | \(symbol) | RSI=\(String(format: "%.1f", rsi)) Stoch=\(String(format: "%.1f", stoch.k.last ?? 50)) BB=\(String(format: "%.3f", bbPos)) ATR=\(String(format: "%.5f", atr)) ΔVol=\(String(format: "%.2f", delta))", level: .info)
 
         return IndicatorSet(
             rsi: rsi, stochasticK: stoch.k.last ?? 50, stochasticD: stoch.d.last ?? 50,
@@ -407,7 +407,7 @@ actor ScalpingSignalEngine {
         let gaps = AdvancedIndicators.detectFairValueGaps(c1m)
         let delta = await MT5WebSocketService.shared.getDeltaVolume(for: symbol)
 
-        godLog("📊 INDICATORS | \(symbol) | price=\(String(format: "%.5f", currentPrice)) RSI=\(String(format: "%.1f", rsi)) StochK=\(String(format: "%.1f", stochK)) CCI=\(String(format: "%.1f", cci)) BB=\(String(format: "%.3f", bbPosition)) SAR=\(String(format: "%.5f", sar)) ATR=\(String(format: "%.5f", atr)) EMA=\(String(format: "%.5f", ema9))/\(String(format: "%.5f", ema21))/\(String(format: "%.5f", ema50)) ΔVol=\(String(format: "%.2f", delta))", level: .diagnostic)
+        godLog("📊 INDICATORS | \(symbol) | price=\(String(format: "%.5f", currentPrice)) RSI=\(String(format: "%.1f", rsi)) StochK=\(String(format: "%.1f", stochK)) CCI=\(String(format: "%.1f", cci)) BB=\(String(format: "%.3f", bbPosition)) SAR=\(String(format: "%.5f", sar)) ATR=\(String(format: "%.5f", atr)) EMA=\(String(format: "%.5f", ema9))/\(String(format: "%.5f", ema21))/\(String(format: "%.5f", ema50)) ΔVol=\(String(format: "%.2f", delta))", level: .info)
 
         return IndicatorSet(
             rsi: rsi,
@@ -445,7 +445,7 @@ actor ScalpingSignalEngine {
 
     private func tracePillar(symbol: String, pillar: String, passed: Bool, detail: String, contribution: Double, buyScore: Double, sellScore: Double) {
         let status = passed ? "✅ PASS" : "❌ FAIL"
-        godLog("🔎 SIGNAL PILLAR | \(symbol) | \(status) | \(pillar) | \(detail) | +\(String(format: "%.1f", contribution)) | scores B=\(String(format: "%.1f", buyScore)) S=\(String(format: "%.1f", sellScore))", level: .diagnostic)
+        godLog("🔎 SIGNAL PILLAR | \(symbol) | \(status) | \(pillar) | \(detail) | +\(String(format: "%.1f", contribution)) | scores B=\(String(format: "%.1f", buyScore)) S=\(String(format: "%.1f", sellScore))", level: .info)
     }
 
     private func generateSignal(symbol: String, indicators: IndicatorSet, candles1m: [Kline]) async -> ScalpingSignal {
@@ -595,10 +595,10 @@ actor ScalpingSignalEngine {
         let type: SignalType = buyScore > sellScore ? .buy : (sellScore > buyScore ? .sell : .none)
         let finalScore = type == .buy ? buyScore : sellScore
         var confidence = min(finalScore * 1.1, 98.0)
-        godLog("🎯 SIGNAL SCORE | \(symbol) | direction=\(type) | buyScore=\(String(format: "%.1f", buyScore)) | sellScore=\(String(format: "%.1f", sellScore)) | baseConfidence=\(String(format: "%.1f", confidence))%", level: .diagnostic)
+        godLog("🎯 SIGNAL SCORE | \(symbol) | direction=\(type) | buyScore=\(String(format: "%.1f", buyScore)) | sellScore=\(String(format: "%.1f", sellScore)) | baseConfidence=\(String(format: "%.1f", confidence))%", level: .info)
 
         // V10.0: ML Prediction Filter
-        godLog("🤖 ML REQUEST | \(symbol) | feature extraction + prediction", level: .diagnostic)
+        godLog("🤖 ML REQUEST | \(symbol) | feature extraction + prediction", level: .info)
         let (mlDir, mlConf) = await getMLTrendPrediction(symbol: symbol, candles: candles1m)
         let mlWeight = weights["ML"] ?? 10.0
 
@@ -615,9 +615,9 @@ actor ScalpingSignalEngine {
         }
 
         // News Multiplier
-        godLog("📡 NEWS MULTIPLIER REQUEST | \(symbol)", level: .diagnostic)
+        godLog("📡 NEWS MULTIPLIER REQUEST | \(symbol)", level: .info)
         let newsMultiplier = await getNewsSpreadMultiplier(symbol: symbol, configMultiplier: newsMultiplierVal)
-        godLog("📡 NEWS MULTIPLIER RESULT | \(symbol) | multiplier=\(String(format: "%.2f", newsMultiplier))", level: .diagnostic)
+        godLog("📡 NEWS MULTIPLIER RESULT | \(symbol) | multiplier=\(String(format: "%.2f", newsMultiplier))", level: .info)
 
         // V10.0: FIXED STOP LOSS (30 PIPS)
         let pipSize = symbol.contains("JPY") ? 0.01 : 0.0001
@@ -632,7 +632,7 @@ actor ScalpingSignalEngine {
         // V10.0: Find Optimal Entry (Pullback Logic)
         let optimalEntry = findOptimalEntry(symbol: symbol, type: type, basePrice: indicators.currentPrice, candles: candles1m, atr: indicators.atr, fvgGaps: indicators.fvgGaps, emaPeriod: pullbackEMAPeriod)
 
-        godLog("🧮 SIGNAL OUTPUT | \(symbol) | type=\(type) confidence=\(String(format: "%.1f", confidence))% SL=\(String(format: "%.5f", sl)) TP=\(String(format: "%.5f", tp)) entry=\(optimalEntry.map { String(format: "%.5f", $0) } ?? "market")", level: .diagnostic)
+        godLog("🧮 SIGNAL OUTPUT | \(symbol) | type=\(type) confidence=\(String(format: "%.1f", confidence))% SL=\(String(format: "%.5f", sl)) TP=\(String(format: "%.5f", tp)) entry=\(optimalEntry.map { String(format: "%.5f", $0) } ?? "market")", level: .info)
 
         return ScalpingSignal(
             type: type,
@@ -692,7 +692,7 @@ actor ScalpingSignalEngine {
             return (.none, 0)
         }
         let direction: SignalType = prediction.signal == .buy ? .buy : (prediction.signal == .sell ? .sell : .none)
-        godLog("🤖 ML RESULT | \(symbol) | direction=\(direction) confidence=\(String(format: "%.1f", prediction.confidence))%", level: .diagnostic)
+        godLog("🤖 ML RESULT | \(symbol) | direction=\(direction) confidence=\(String(format: "%.1f", prediction.confidence))%", level: .info)
         return (direction, prediction.confidence)
     }
 

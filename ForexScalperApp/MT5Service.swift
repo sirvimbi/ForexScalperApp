@@ -8,7 +8,7 @@ actor MT5Service {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 45
-        config.waitsForConnectivity = true
+        config.waitsForConnectivity = false
         config.httpMaximumConnectionsPerHost = 10
         return URLSession(configuration: config)
     }()
@@ -44,12 +44,12 @@ actor MT5Service {
 
     func setBaseURL(_ url: String) {
         customBaseURL = url.hasSuffix("/") ? String(url.dropLast()) : url
-        godLog("🌐 MT5: Base URL set to \(customBaseURL!)", level: .diagnostic)
+        godLog("🌐 MT5: Base URL set to \(customBaseURL!)", level: .info)
     }
 
     func setAuthToken(_ token: String) {
         customAuthToken = token
-        godLog("🔐 MT5: Auth token updated", level: .diagnostic)
+        godLog("🔐 MT5: Auth token updated", level: .info)
     }
 
     private func waitForRateLimit() async {
@@ -82,7 +82,7 @@ actor MT5Service {
     func disconnect() {
         _isConnected = false
         lastWorkingPath = nil
-        godLog("🔌 MT5Service: connection state cleared", level: .diagnostic)
+        godLog("🔌 MT5Service: connection state cleared", level: .info)
     }
 
     func initialize(login: Int, password: String, server: String) async throws {

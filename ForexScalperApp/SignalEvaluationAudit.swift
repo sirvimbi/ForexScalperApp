@@ -51,6 +51,6 @@ final class SignalAuditSettings {
     }
 
     func logSettings() {
-        godLog("⚙️ SIGNAL AUDIT SETTINGS | enabled=\(enabled) | detailLevel=\(detailLevel)", level: .diagnostic)
+        godLog("⚙️ SIGNAL AUDIT SETTINGS | enabled=\(enabled) | detailLevel=\(detailLevel)", level: .info)
     }
 }

@@ -11,6 +11,13 @@ actor BinanceService: MarketDataProvider {
     private var isReconnecting = false
     private var isWebSocketConnected = false
 
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 20
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
+
     private let baseURL = "https://api.binance.com/api/v3"
     // Binance uses /stream for combined streams. /ws is for a single raw stream.
     private let wsBaseURL = "wss://stream.binance.com:9443/stream"
@@ -36,7 +43,7 @@ actor BinanceService: MarketDataProvider {
         webSocketTask = nil
         onKlineReceived = nil
         isReconnecting = false
-        print("🔌 Binance: Disconnected")
+        godLog("🔌 Binance: Disconnected", level: .info)
     }
 
     func getCandles(symbol: String, timeframe: String) async -> [Kline] {
@@ -50,7 +57,7 @@ actor BinanceService: MarketDataProvider {
     // MARK: - Private Methods
 
     private func fetchHistoricalData() async {
-        print("📥 Fetching historical data for \(symbols.count) symbols...")
+        godLog("📥 Fetching historical data for \(symbols.count) symbols...", level: .info)
 
         for symbol in symbols {
             let binanceSymbol = convertToBinanceSymbol(symbol)
@@ -62,7 +69,7 @@ actor BinanceService: MarketDataProvider {
             }
         }
 
-        print("✅ Historical data fetch complete")
+        godLog("✅ Historical data fetch complete", level: .success)
     }
 
     private func fetchKlines(symbol: String, interval: String, limit: Int) async {
@@ -74,11 +81,11 @@ actor BinanceService: MarketDataProvider {
         guard let url = URL(string: urlString) else { return }
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await session.data(from: url)
 
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                 if let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[Any]] {
-                    print("📥 Received \(jsonArray.count) historical \(interval) candles for \(symbol)")
+                    godLog("📥 Received \(jsonArray.count) historical \(interval) candles for \(symbol)", level: .info)
 
                     let klines = jsonArray.compactMap { item -> Kline? in
                         guard item.count >= 11,
@@ -107,10 +114,10 @@ actor BinanceService: MarketDataProvider {
                     }
                 }
             } else {
-                print("⚠️ Failed to fetch Binance historical data for \(symbol) (\(binanceSymbol)) \(interval): \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                godLog("⚠️ Failed to fetch Binance historical data for \(symbol) (\(binanceSymbol)) \(interval): \((response as? HTTPURLResponse)?.statusCode ?? 0)")
             }
         } catch {
-            print("❌ Error fetching historical data for \(symbol) \(interval): \(error)")
+            godLog("❌ Error fetching historical data for \(symbol) \(interval): \(error)")
         }
     }
 
@@ -125,7 +132,7 @@ actor BinanceService: MarketDataProvider {
         let streams = buildStreams()
 
         if streams.isEmpty {
-            print("ℹ️ No symbols available for Binance WebSocket")
+            godLog("ℹ️ No symbols available for Binance WebSocket")
             return
         }
 
@@ -133,10 +140,10 @@ actor BinanceService: MarketDataProvider {
             stream.contains("@kline_1m") || stream.contains("@kline_5m")
         }
 
-        print("📊 Subscribing to \(filteredStreams.count) streams (1m & 5m only)")
+        godLog("📊 Subscribing to \(filteredStreams.count) streams (1m & 5m only)")
 
         if filteredStreams.isEmpty {
-            print("ℹ️ No 1m or 5m streams available for Binance WebSocket")
+            godLog("ℹ️ No 1m or 5m streams available for Binance WebSocket")
             return
         }
 
@@ -145,19 +152,19 @@ actor BinanceService: MarketDataProvider {
         let urlString = "\(wsBaseURL)?streams=\(streamString)"
 
         guard let url = URL(string: urlString) else {
-            print("❌ Failed to create Binance WebSocket URL")
+            godLog("❌ Failed to create Binance WebSocket URL")
             return
         }
 
-        print("🌐 Connecting to Binance WebSocket: \(url.absoluteString.prefix(200))...")
+        godLog("🌐 Connecting to Binance WebSocket: \(url.absoluteString.prefix(200))...")
         webSocketTask?.cancel(with: .goingAway, reason: nil)
 
-        let task = URLSession.shared.webSocketTask(with: url)
+        let task = session.webSocketTask(with: url)
         webSocketTask = task
         task.resume()
 
         receiveMessage(task: task)
-        print("⏳ Binance WebSocket task started; awaiting handshake (1m & 5m)")
+        godLog("⏳ Binance WebSocket task started; awaiting handshake (1m & 5m)", level: .info)
     }
 
     private func buildStreams() -> [String] {
@@ -194,7 +201,7 @@ actor BinanceService: MarketDataProvider {
 
                 if !isWebSocketConnected {
                     isWebSocketConnected = true
-                    print("✅ Binance WebSocket connected — receiving market data")
+                    godLog("✅ Binance WebSocket connected — receiving market data", level: .success)
                     startPingTimer()
                 }
 
@@ -222,7 +229,7 @@ actor BinanceService: MarketDataProvider {
                     return
                 }
 
-                print("⚠️ Binance WebSocket disconnected — \(error.localizedDescription)")
+                godLog("⚠️ Binance WebSocket disconnected — \(error.localizedDescription)", level: .warning)
                 await scheduleReconnect()
                 return
             }
@@ -233,7 +240,7 @@ actor BinanceService: MarketDataProvider {
         guard !isReconnecting else { return }
         isReconnecting = true
 
-        print("🔄 Binance: scheduling reconnect in 5s")
+        godLog("🔄 Binance: scheduling reconnect in 5s", level: .info)
 
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 5_000_000_000)
@@ -292,9 +299,9 @@ actor BinanceService: MarketDataProvider {
 
         task.sendPing { error in
             if let error {
-                godLog("🏓 Binance ping failed — connection will be evaluated by receive loop: \(error.localizedDescription)", level: .diagnostic)
+                godLog("🏓 Binance ping failed — connection will be evaluated by receive loop: \(error.localizedDescription)", level: .info)
             } else {
-                godLog("🏓 Binance pong received", level: .diagnostic)
+                godLog("🏓 Binance pong received", level: .info)
             }
         }
     }

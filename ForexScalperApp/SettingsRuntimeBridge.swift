@@ -19,7 +19,7 @@ final class SettingsRuntimeBridge {
             .removeDuplicates()
             .sink { value in
                 UserDefaults.standard.set(value, forKey: "stellas.useManualLot")
-                godLog("⚙️ SETTINGS APPLIED | useManualLot=\(value) | manualLot=\(String(format: "%.4f", config.manualLotSize))", level: .diagnostic)
+                godLog("⚙️ SETTINGS APPLIED | useManualLot=\(value) | manualLot=\(String(format: "%.4f", config.manualLotSize))", level: .info)
             }
             .store(in: &cancellables)
     }

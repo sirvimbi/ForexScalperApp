@@ -74,7 +74,7 @@ class ConsoleLogger: ObservableObject {
         logs.removeAll(keepingCapacity: true)
         lastMessage = nil
         lastMessageTime = .distantPast
-        godLog("🧹 Log Buffer: automatically cleared \(removed) entries after 30 minutes", level: .diagnostic)
+        godLog("🧹 Log Buffer: automatically cleared \(removed) entries after 30 minutes", level: .info)
     }
 
     private func setupObservers() {

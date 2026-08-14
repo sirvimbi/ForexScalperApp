@@ -17,10 +17,10 @@ enum NetworkDiagnostics {
         lock.unlock()
 
         URLProtocol.registerClass(DiagnosticsURLProtocol.self)
-        godLog("🌐 Network diagnostics installed (HTTP/HTTPS requests)", level: .diagnostic)
+        godLog("🌐 Network diagnostics installed (HTTP/HTTPS requests)", level: .info)
     }
 
-    static func logTask(_ message: String, level: LogLevel = .diagnostic) {
+    static func logTask(_ message: String, level: LogLevel = .info) {
         godLog("🌐 NET: \(message)", level: level)
     }
 }
@@ -114,7 +114,7 @@ private final class DiagnosticsURLProtocol: URLProtocol {
                 }
 
                 if let http = response as? HTTPURLResponse {
-                    let level: LogLevel = (200..<400).contains(http.statusCode) ? .diagnostic : .warning
+                    let level: LogLevel = (200..<400).contains(http.statusCode) ? .info : .warning
                     NetworkDiagnostics.logTask("← \(http.statusCode) \(method) \(url) \(elapsed)ms", level: level)
                 }
 
@@ -149,7 +149,7 @@ private final class DiagnosticsURLProtocol: URLProtocol {
             }
 
             if let http = response as? HTTPURLResponse {
-                let level: LogLevel = (200..<400).contains(http.statusCode) ? .diagnostic : .warning
+                let level: LogLevel = (200..<400).contains(http.statusCode) ? .info : .warning
                 NetworkDiagnostics.logTask("← \(http.statusCode) \(method) \(url) \(elapsed)ms bytes=\(bytes)", level: level)
             } else {
                 NetworkDiagnostics.logTask("← response \(method) \(url) \(elapsed)ms bytes=\(bytes)")
