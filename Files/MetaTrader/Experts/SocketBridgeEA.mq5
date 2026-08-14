@@ -1,31 +1,10 @@
 //+------------------------------------------------------------------+
 //| SocketBridgeEA.mq5                                               |
-//| GOD MODE V10.5 - SWIFT CONTROLLED EXECUTION BRIDGE              |
-//|                                                                  |
-//| ARCHITECTURE                                                     |
-//|                                                                  |
-//| Swift App = Strategy + Trade Management Authority               |
-//| MT5 EA    = Execution + Market Data + Event Transport           |
-//|                                                                  |
-//| The EA DOES NOT autonomously perform:                            |
-//|   - Breakeven                                                    |
-//|   - Trailing stop                                                |
-//|   - Partial TP                                                   |
-//|   - Maximum hold exits                                           |
-//|   - Emergency exits                                              |
-//|   - Minimum-profit exits                                         |
-//|   - Strategy decisions                                           |
-//|                                                                  |
-//| Swift may instruct the EA to:                                    |
-//|   - Open market BUY/SELL                                         |
-//|   - Fully close a position                                       |
-//|   - Partially close a position                                   |
-//|   - Modify SL/TP                                                 |
-//|                                                                  |
-//| Broker-side SL/TP remains active after being installed.          |
+//| ForexScalperApp MT5 Execution Bridge V21.0                      |
 //+------------------------------------------------------------------+
 #property copyright "God Mode Scalper"
-#property version   "10.5"
+#property version   "21.0"
+#property description "ForexScalperApp Swift/MT5 Execution Bridge V21.0"
 #property strict
 
 #include <CommandHandler.mqh>
@@ -34,912 +13,324 @@
 #include <SocketManager.mqh>
 #include <Trade/Trade.mqh>
 
-//--------------------------------------------------------------------
-// BRIDGE CONFIGURATION
-//--------------------------------------------------------------------
 #define HTTP_PORT             8890
 #define SOCKET_BUFFER_SIZE    65536
 #define TIMER_INTERVAL_MS     20
 #define MAGIC_NUMBER          888888
 #define DEFAULT_DEVIATION     15
-
 #define EA_INVALID_SOCKET     ((ulong)-1)
 
-//--------------------------------------------------------------------
-// GLOBAL BRIDGE OBJECTS
-//--------------------------------------------------------------------
 CSocketManager httpServer;
-
 ulong httpClientSockets[];
 ulong WebSocketClients[];
-
 CCommandHandler *commandHandler = NULL;
-CData           *dataManager    = NULL;
-
+CData *dataManager = NULL;
 CTrade tradeControl;
-
-//--------------------------------------------------------------------
-// TIMER STATE
-//--------------------------------------------------------------------
 datetime lastServerInitAttempt = 0;
-datetime lastHeartbeat          = 0;
+datetime lastHeartbeat = 0;
 
-//--------------------------------------------------------------------
-// EXPERT INITIALIZATION
-//--------------------------------------------------------------------
 int OnInit()
 {
-   //-----------------------------------------------------------------
-   // DLL CHECK
-   //-----------------------------------------------------------------
    if(!TerminalInfoInteger(TERMINAL_DLLS_ALLOWED))
    {
-      Print(
-         "CRITICAL: DLL imports must be enabled in EA settings."
-      );
-
+      Print("[EA V21.0] CRITICAL: DLL imports must be enabled.");
       return INIT_FAILED;
    }
 
-   //-----------------------------------------------------------------
-   // WINSOCK INITIALIZATION
-   //-----------------------------------------------------------------
    char wsaData[];
-   ArrayResize(
-      wsaData,
-      400
-   );
-
-   if(
-      WSAStartup(
-         0x0202,
-         wsaData
-      ) != 0
-   )
+   ArrayResize(wsaData, 400);
+   if(WSAStartup(0x0202, wsaData) != 0)
    {
-      Print(
-         "CRITICAL: WSAStartup failed."
-      );
-
+      Print("[EA V21.0] CRITICAL: WSAStartup failed.");
       return INIT_FAILED;
    }
 
-   //-----------------------------------------------------------------
-   // TRADE OBJECT CONFIGURATION
-   //
-   // IMPORTANT:
-   // These settings are execution defaults only.
-   // They are NOT trade-management rules.
-   //-----------------------------------------------------------------
-   tradeControl.SetExpertMagicNumber(
-      MAGIC_NUMBER
-   );
+   tradeControl.SetExpertMagicNumber(MAGIC_NUMBER);
+   tradeControl.SetDeviationInPoints(DEFAULT_DEVIATION);
+   tradeControl.SetAsyncMode(false);
 
-   tradeControl.SetDeviationInPoints(
-      DEFAULT_DEVIATION
-   );
-
-   tradeControl.SetAsyncMode(
-      false
-   );
-
-   //-----------------------------------------------------------------
-   // BRIDGE INITIALIZATION
-   //-----------------------------------------------------------------
    if(!InitializeWebSocketServer())
    {
-      Print(
-         "CRITICAL: Failed to start bridge server on port ",
-         HTTP_PORT
-      );
-
+      Print("[EA V21.0] CRITICAL: bridge initialization failed on port ", HTTP_PORT);
       WSACleanup();
-
       return INIT_FAILED;
    }
 
-   //-----------------------------------------------------------------
-   // TIMER
-   //-----------------------------------------------------------------
-   EventSetMillisecondTimer(
-      TIMER_INTERVAL_MS
-   );
+   EventSetMillisecondTimer(TIMER_INTERVAL_MS);
 
-   //-----------------------------------------------------------------
-   // STARTUP LOG
-   //-----------------------------------------------------------------
    Print("==================================================");
-   Print(" GOD MODE V10.5");
-   Print(" SWIFT CONTROLLED EXECUTION BRIDGE");
-   Print("==================================================");
-
-   Print(
-      "Bridge port       : ",
-      HTTP_PORT
-   );
-
-   Print(
-      "Magic number      : ",
-      MAGIC_NUMBER
-   );
-
-   Print(
-      "Trade authority   : SWIFT APP"
-   );
-
-   Print(
-      "EA role           : EXECUTION + DATA + EVENTS"
-   );
-
-   Print(
-      "Autonomous TP     : DISABLED"
-   );
-
-   Print(
-      "Autonomous BE     : DISABLED"
-   );
-
-   Print(
-      "Autonomous trail  : DISABLED"
-   );
-
-   Print(
-      "Autonomous exits  : DISABLED"
-   );
-
-   Print(
-      "Status            : ONLINE"
-   );
-
+   Print(" FOREXSCALPERAPP MT5 EXECUTION BRIDGE V21.0");
+   Print(" Swift strategy authority + EA broker protection");
+   Print(" Partial TP: 50% @ 1R | 30% @ 2R | 20% runner");
+   Print(" Trailing: activates at 5 pips; dynamic distance");
+   Print(" Runner: unlimited hold; no EA max-TP/time exit");
+   Print(" Hard SL: retained as emergency protection");
+   Print(" Bridge port: ", HTTP_PORT, " | Magic: ", MAGIC_NUMBER);
+   Print(" Status: ONLINE");
    Print("==================================================");
 
    return INIT_SUCCEEDED;
 }
 
-//--------------------------------------------------------------------
-// DEINITIALIZATION
-//--------------------------------------------------------------------
-void OnDeinit(
-   const int reason
-)
+void OnDeinit(const int reason)
 {
    EventKillTimer();
-
    CleanupHandlers();
    CloseAllConnections();
-
-   Print(
-      "GOD MODE V10.5 STOPPED. Reason=",
-      reason
-   );
+   Print("FOREXSCALPERAPP EA V21.0 STOPPED. Reason=", reason);
 }
 
-//--------------------------------------------------------------------
-// TICK
-//
-// IMPORTANT:
-// There is deliberately NO trade-management logic here.
-//
-// The EA does not:
-//   - inspect profit
-//   - move SL
-//   - move TP
-//   - close trades
-//   - trail trades
-//   - perform breakeven
-//   - enforce holding time
-//
-// It only publishes market data to connected Swift clients.
-//--------------------------------------------------------------------
 void OnTick()
 {
-   if(
-      ArraySize(WebSocketClients) > 0
-   )
-   {
+   if(dataManager == NULL)
+      return;
+
+   if(ArraySize(WebSocketClients) > 0)
       SendUpdateToClients();
-   }
+   else
+      dataManager.SendCurrentPrices(EA_INVALID_SOCKET);
 }
 
-//--------------------------------------------------------------------
-// TRADE TRANSACTION
-//
-// Every broker-side trade transaction is forwarded to Swift.
-//
-// This includes:
-//   - Swift-created entries
-//   - Swift-created closes
-//   - Swift-created partial closes
-//   - SL/TP triggered by broker
-//   - Position modifications
-//   - Other trade transactions
-//--------------------------------------------------------------------
 void OnTradeTransaction(
    const MqlTradeTransaction &trans,
    const MqlTradeRequest &request,
    const MqlTradeResult &result
 )
 {
-   if(
-      dataManager == NULL
-   )
-   {
+   if(dataManager == NULL || !dataManager.isTrackingOrderEvent)
       return;
-   }
 
-   if(
-      !dataManager.isTrackingOrderEvent
-   )
+   for(int i = ArraySize(WebSocketClients) - 1; i >= 0; i--)
    {
-      return;
-   }
-
-   for(
-      int i = ArraySize(WebSocketClients) - 1;
-      i >= 0;
-      i--
-   )
-   {
-      ulong socket =
-         WebSocketClients[i];
-
-      if(
-         socket == EA_INVALID_SOCKET
-      )
-      {
+      ulong socket = WebSocketClients[i];
+      if(socket == EA_INVALID_SOCKET)
          continue;
-      }
 
-      if(
-         !IsSocketAlive(socket)
-      )
+      if(!IsSocketAlive(socket))
       {
          closesocket(socket);
-
-         ArrayRemove(
-            WebSocketClients,
-            i
-         );
-
+         ArrayRemove(WebSocketClients, i);
          continue;
       }
 
-      dataManager.HandleTradeTransaction(
-         trans,
-         request,
-         result,
-         socket
-      );
+      dataManager.HandleTradeTransaction(trans, request, result, socket);
    }
 }
 
-//--------------------------------------------------------------------
-// TIMER
-//--------------------------------------------------------------------
 void OnTimer()
 {
-   datetime now =
-      TimeCurrent();
+   datetime now = TimeCurrent();
 
-   //-----------------------------------------------------------------
-   // SERVER RECOVERY
-   //-----------------------------------------------------------------
    if(!httpServer.IsValid())
    {
-      if(
-         (now - lastServerInitAttempt) >= 10
-      )
-      {
+      if((now - lastServerInitAttempt) >= 10)
          InitializeWebSocketServer();
-      }
-
       return;
    }
 
-   //-----------------------------------------------------------------
-   // CLIENT PROCESSING
-   //-----------------------------------------------------------------
    AcceptNewClients();
-
    ProcessHttpClients();
 
-   //-----------------------------------------------------------------
-   // HEARTBEAT
-   //-----------------------------------------------------------------
-   if(
-      (now - lastHeartbeat) >= 60
-   )
+   if((now - lastHeartbeat) >= 60)
    {
-      Print(
-         "GOD MODE heartbeat | WebSocket clients=",
-         ArraySize(WebSocketClients),
-         " | MT5 positions=",
-         PositionsTotal()
-      );
-
-      lastHeartbeat =
-         now;
+      Print("[EA V21.0] heartbeat | WebSocket clients=", ArraySize(WebSocketClients),
+            " | MT5 positions=", PositionsTotal());
+      lastHeartbeat = now;
    }
 }
 
-//--------------------------------------------------------------------
-// INITIALIZE WEB SOCKET / HTTP SERVER
-//--------------------------------------------------------------------
 bool InitializeWebSocketServer()
 {
-   lastServerInitAttempt =
-      TimeCurrent();
+   lastServerInitAttempt = TimeCurrent();
 
-   //-----------------------------------------------------------------
-   // CREATE SERVER
-   //-----------------------------------------------------------------
-   if(
-      !httpServer.CreateServer(
-         HTTP_PORT
-      )
-   )
+   if(!httpServer.CreateServer(HTTP_PORT))
    {
-      Print(
-         "Failed to bind bridge port ",
-         HTTP_PORT
-      );
-
+      Print("[EA V21.0] Failed to bind bridge port ", HTTP_PORT);
       return false;
    }
 
-   //-----------------------------------------------------------------
-   // CLEAN OLD HANDLERS
-   //-----------------------------------------------------------------
-   if(
-      commandHandler != NULL
-   )
+   CleanupHandlers();
+   commandHandler = new CCommandHandler();
+   dataManager = new CData();
+
+   if(commandHandler == NULL || dataManager == NULL)
    {
-      delete commandHandler;
-
-      commandHandler = NULL;
-   }
-
-   if(
-      dataManager != NULL
-   )
-   {
-      delete dataManager;
-
-      dataManager = NULL;
-   }
-
-   //-----------------------------------------------------------------
-   // CREATE HANDLERS
-   //-----------------------------------------------------------------
-   commandHandler =
-      new CCommandHandler();
-
-   dataManager =
-      new CData();
-
-   if(
-      commandHandler == NULL ||
-      dataManager == NULL
-   )
-   {
-      Print(
-         "CRITICAL: Failed to allocate bridge handlers."
-      );
-
+      Print("[EA V21.0] CRITICAL: handler allocation failed.");
       CleanupHandlers();
-
       httpServer.Close();
-
       return false;
    }
 
-   //-----------------------------------------------------------------
-   // CONNECT DATA MANAGER
-   //-----------------------------------------------------------------
-   commandHandler.SetPriceSender(
-      dataManager
-   );
-
-   Print(
-      "Bridge server listening on port ",
-      HTTP_PORT
-   );
-
+   commandHandler.SetPriceSender(dataManager);
+   Print("[EA V21.0] Bridge server listening on port ", HTTP_PORT);
    return true;
 }
 
-//--------------------------------------------------------------------
-// ACCEPT NEW TCP CLIENTS
-//--------------------------------------------------------------------
 void AcceptNewClients()
 {
-   ulong newSocket =
-      (ulong)httpServer.AcceptClient();
-
-   if(
-      newSocket == EA_INVALID_SOCKET
-   )
-   {
+   ulong newSocket = (ulong)httpServer.AcceptClient();
+   if(newSocket == EA_INVALID_SOCKET)
       return;
-   }
 
-   int count =
-      ArraySize(
-         httpClientSockets
-      );
-
-   ArrayResize(
-      httpClientSockets,
-      count + 1
-   );
-
-   httpClientSockets[count] =
-      newSocket;
+   int count = ArraySize(httpClientSockets);
+   ArrayResize(httpClientSockets, count + 1);
+   httpClientSockets[count] = newSocket;
 }
 
-//--------------------------------------------------------------------
-// PROCESS HTTP CLIENTS
-//--------------------------------------------------------------------
 void ProcessHttpClients()
 {
-   for(
-      int i = ArraySize(httpClientSockets) - 1;
-      i >= 0;
-      i--
-   )
+   for(int i = ArraySize(httpClientSockets) - 1; i >= 0; i--)
    {
-      ulong socket =
-         httpClientSockets[i];
-
-      if(
-         socket == EA_INVALID_SOCKET
-      )
+      ulong socket = httpClientSockets[i];
+      if(socket == EA_INVALID_SOCKET)
       {
-         ArrayRemove(
-            httpClientSockets,
-            i
-         );
-
+         ArrayRemove(httpClientSockets, i);
          continue;
       }
 
       char buffer[SOCKET_BUFFER_SIZE];
+      int received = recv(socket, buffer, ArraySize(buffer), 0);
 
-      int received =
-         recv(
-            socket,
-            buffer,
-            ArraySize(buffer),
-            0
-         );
-
-      //----------------------------------------------------------------
-      // DATA RECEIVED
-      //----------------------------------------------------------------
-      if(
-         received > 0
-      )
+      if(received > 0)
       {
-         string message =
-            CharArrayToString(
-               buffer,
-               0,
-               received
-            );
+         string message = CharArrayToString(buffer, 0, received);
+         HttpRequest request = ParseHttpRequest(message);
 
-         HttpRequest request =
-            ParseHttpRequest(
-               message
-            );
-
-         //----------------------------------------------------------------
-         // WEBSOCKET REQUEST
-         //----------------------------------------------------------------
-         if(
-            request.isWebSocket
-         )
+         if(request.isWebSocket)
          {
-            if(
-               PerformWebSocketHandshake(
-                  socket,
-                  message
-               )
-            )
+            if(PerformWebSocketHandshake(socket, message))
             {
-               int count =
-                  ArraySize(
-                     WebSocketClients
-                  );
-
-               ArrayResize(
-                  WebSocketClients,
-                  count + 1
-               );
-
-               WebSocketClients[count] =
-                  socket;
-
-               ArrayRemove(
-                  httpClientSockets,
-                  i
-               );
-
-               Print(
-                  "WebSocket connected. Clients=",
-                  count + 1
-               );
+               int count = ArraySize(WebSocketClients);
+               ArrayResize(WebSocketClients, count + 1);
+               WebSocketClients[count] = socket;
+               ArrayRemove(httpClientSockets, i);
+               Print("[EA V21.0] WebSocket connected. Clients=", count + 1);
             }
             else
             {
-               closesocket(
-                  socket
-               );
-
-               ArrayRemove(
-                  httpClientSockets,
-                  i
-               );
+               closesocket(socket);
+               ArrayRemove(httpClientSockets, i);
             }
-
             continue;
          }
 
-         //----------------------------------------------------------------
-         // HTTP REQUEST
-         //----------------------------------------------------------------
-         if(
-            commandHandler != NULL
-         )
-         {
-            commandHandler.HandleCommand(
-               socket,
-               request
-            );
-         }
+         if(commandHandler != NULL)
+            commandHandler.HandleCommand(socket, request);
 
-         closesocket(
-            socket
-         );
-
-         ArrayRemove(
-            httpClientSockets,
-            i
-         );
-
+         closesocket(socket);
+         ArrayRemove(httpClientSockets, i);
          continue;
       }
 
-      //----------------------------------------------------------------
-      // CONNECTION CLOSED / ERROR
-      //----------------------------------------------------------------
-      if(
-         received == 0 ||
-         (
-            received < 0 &&
-            WSAGetLastError() != 10035
-         )
-      )
+      if(received == 0 || (received < 0 && WSAGetLastError() != 10035))
       {
-         closesocket(
-            socket
-         );
-
-         ArrayRemove(
-            httpClientSockets,
-            i
-         );
+         closesocket(socket);
+         ArrayRemove(httpClientSockets, i);
       }
    }
 }
 
-//--------------------------------------------------------------------
-// PARSE HTTP REQUEST
-//--------------------------------------------------------------------
-HttpRequest ParseHttpRequest(
-   string message
-)
+HttpRequest ParseHttpRequest(string message)
 {
    HttpRequest request;
+   request.method = "";
+   request.path = "";
+   request.query = "";
+   request.body = "";
+   request.isWebSocket = false;
 
-   request.method =
-      "";
+   string lowerMessage = message;
+   StringToLower(lowerMessage);
+   request.isWebSocket = (StringFind(lowerMessage, "upgrade: websocket") >= 0);
 
-   request.path =
-      "";
-
-   request.query =
-      "";
-
-   request.body =
-      "";
-
-   request.isWebSocket =
-      false;
-
-   //-----------------------------------------------------------------
-   // CASE-INSENSITIVE WEBSOCKET DETECTION
-   //-----------------------------------------------------------------
-   string lowerMessage =
-      message;
-
-   StringToLower(
-      lowerMessage
-   );
-
-   request.isWebSocket =
-      (
-         StringFind(
-            lowerMessage,
-            "upgrade: websocket"
-         ) >= 0
-      );
-
-   //-----------------------------------------------------------------
-   // REQUEST LINE
-   //-----------------------------------------------------------------
-   int firstSpace =
-      StringFind(
-         message,
-         " "
-      );
-
-   if(
-      firstSpace >= 0
-   )
+   int firstSpace = StringFind(message, " ");
+   if(firstSpace >= 0)
    {
-      request.method =
-         StringSubstr(
-            message,
-            0,
-            firstSpace
-         );
-
-      int secondSpace =
-         StringFind(
-            message,
-            " ",
-            firstSpace + 1
-         );
-
-      if(
-         secondSpace > firstSpace
-      )
+      request.method = StringSubstr(message, 0, firstSpace);
+      int secondSpace = StringFind(message, " ", firstSpace + 1);
+      if(secondSpace > firstSpace)
       {
-         string fullPath =
-            StringSubstr(
-               message,
-               firstSpace + 1,
-               secondSpace - firstSpace - 1
-            );
-
-         int questionMark =
-            StringFind(
-               fullPath,
-               "?"
-            );
-
-         if(
-            questionMark >= 0
-         )
+         string fullPath = StringSubstr(message, firstSpace + 1,
+                                         secondSpace - firstSpace - 1);
+         int questionMark = StringFind(fullPath, "?");
+         if(questionMark >= 0)
          {
-            request.path =
-               StringSubstr(
-                  fullPath,
-                  0,
-                  questionMark
-               );
-
-            request.query =
-               StringSubstr(
-                  fullPath,
-                  questionMark + 1
-               );
+            request.path = StringSubstr(fullPath, 0, questionMark);
+            request.query = StringSubstr(fullPath, questionMark + 1);
          }
          else
          {
-            request.path =
-               fullPath;
+            request.path = fullPath;
          }
       }
    }
 
-   //-----------------------------------------------------------------
-   // BODY
-   //-----------------------------------------------------------------
-   int bodyStart =
-      StringFind(
-         message,
-         "\r\n\r\n"
-      );
-
-   if(
-      bodyStart >= 0
-   )
-   {
-      request.body =
-         StringSubstr(
-            message,
-            bodyStart + 4
-         );
-   }
+   int bodyStart = StringFind(message, "\r\n\r\n");
+   if(bodyStart >= 0)
+      request.body = StringSubstr(message, bodyStart + 4);
 
    return request;
 }
 
-//--------------------------------------------------------------------
-// SOCKET CHECK
-//--------------------------------------------------------------------
-bool IsSocketAlive(
-   ulong socket
-)
+bool IsSocketAlive(ulong socket)
 {
-   if(
-      socket == EA_INVALID_SOCKET
-   )
-   {
+   if(socket == EA_INVALID_SOCKET)
       return false;
-   }
-
-   return IsSocketConnected(
-      socket
-   );
+   return IsSocketConnected(socket);
 }
 
-//--------------------------------------------------------------------
-// SEND MARKET DATA TO SWIFT
-//--------------------------------------------------------------------
 void SendUpdateToClients()
 {
-   for(
-      int i = ArraySize(WebSocketClients) - 1;
-      i >= 0;
-      i--
-   )
+   for(int i = ArraySize(WebSocketClients) - 1; i >= 0; i--)
    {
-      ulong socket =
-         WebSocketClients[i];
-
-      if(
-         !IsSocketAlive(
-            socket
-         )
-      )
+      ulong socket = WebSocketClients[i];
+      if(!IsSocketAlive(socket))
       {
-         closesocket(
-            socket
-         );
-
-         ArrayRemove(
-            WebSocketClients,
-            i
-         );
-
+         closesocket(socket);
+         ArrayRemove(WebSocketClients, i);
          continue;
       }
 
-      if(
-         dataManager == NULL
-      )
-      {
+      if(dataManager == NULL)
          continue;
-      }
 
-      if(
-         dataManager.isTrackingPrice
-      )
-      {
-         dataManager.SendCurrentPrices(
-            socket
-         );
-      }
-
-      if(
-         dataManager.isTrackingOhlc
-      )
-      {
-         dataManager.SendCurrentOhlcs(
-            socket
-         );
-      }
-
-      if(
-         dataManager.isTrackingMbook
-      )
-      {
-         dataManager.SendCurrentMbook(
-            socket
-         );
-      }
+      if(dataManager.isTrackingPrice)
+         dataManager.SendCurrentPrices(socket);
+      if(dataManager.isTrackingOhlc)
+         dataManager.SendCurrentOhlcs(socket);
+      if(dataManager.isTrackingMbook)
+         dataManager.SendCurrentMbook(socket);
    }
 }
 
-//--------------------------------------------------------------------
-// CLOSE ALL CONNECTIONS
-//--------------------------------------------------------------------
 void CloseAllConnections()
 {
-   //-----------------------------------------------------------------
-   // WEBSOCKET CLIENTS
-   //-----------------------------------------------------------------
-   for(
-      int i = 0;
-      i < ArraySize(WebSocketClients);
-      i++
-   )
-   {
-      if(
-         WebSocketClients[i] !=
-         EA_INVALID_SOCKET
-      )
-      {
-         closesocket(
-            WebSocketClients[i]
-         );
-      }
-   }
+   for(int i = 0; i < ArraySize(WebSocketClients); i++)
+      if(WebSocketClients[i] != EA_INVALID_SOCKET)
+         closesocket(WebSocketClients[i]);
+   ArrayResize(WebSocketClients, 0);
 
-   ArrayResize(
-      WebSocketClients,
-      0
-   );
+   for(int i = 0; i < ArraySize(httpClientSockets); i++)
+      if(httpClientSockets[i] != EA_INVALID_SOCKET)
+         closesocket(httpClientSockets[i]);
+   ArrayResize(httpClientSockets, 0);
 
-   //-----------------------------------------------------------------
-   // HTTP CLIENTS
-   //-----------------------------------------------------------------
-   for(
-      int i = 0;
-      i < ArraySize(httpClientSockets);
-      i++
-   )
-   {
-      if(
-         httpClientSockets[i] !=
-         EA_INVALID_SOCKET
-      )
-      {
-         closesocket(
-            httpClientSockets[i]
-         );
-      }
-   }
-
-   ArrayResize(
-      httpClientSockets,
-      0
-   );
-
-   //-----------------------------------------------------------------
-   // SERVER
-   //-----------------------------------------------------------------
    httpServer.Close();
-
    WSACleanup();
 }
 
-//--------------------------------------------------------------------
-// CLEANUP HANDLERS
-//--------------------------------------------------------------------
 void CleanupHandlers()
 {
-   if(
-      commandHandler != NULL
-   )
+   if(commandHandler != NULL)
    {
       commandHandler.Destroy();
-
       delete commandHandler;
-
-      commandHandler =
-         NULL;
+      commandHandler = NULL;
    }
 
-   if(
-      dataManager != NULL
-   )
+   if(dataManager != NULL)
    {
       delete dataManager;
-
-      dataManager =
-         NULL;
+      dataManager = NULL;
    }
 }
