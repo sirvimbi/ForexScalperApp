@@ -101,11 +101,12 @@ actor MT5WebSocketService {
 
         case .failure(let error):
             isConnected = false
+            let nsError = error as NSError
 
             // Keep the first failure prominent, but don't turn a broken local bridge
             // into a wall of identical warnings while the backoff loop is working.
             if !failureWasReported {
-                godLog("❌ MT5 WS: receive failed [\(error._nsError.code)] \(error.localizedDescription)", level: .warning)
+                godLog("❌ MT5 WS: receive failed [\(nsError.code)] \(error.localizedDescription)", level: .warning)
                 failureWasReported = true
             } else {
                 godLog("🔁 MT5 WS: reconnect cycle continues — \(error.localizedDescription)", level: .diagnostic)
@@ -157,8 +158,7 @@ actor MT5WebSocketService {
         case "track_mbook": handleMbookUpdate(json)
         case "ohlc_update": handleOhlcUpdate(json)
         case "pong": godLog("🏓 MT5 WS: pong received", level: .diagnostic)
-        default:
-            godLog("🔍 MT5 WS: unhandled event type=\(type)", level: .diagnostic)
+        default: godLog("🔍 MT5 WS: unhandled event type=\(type)", level: .diagnostic)
         }
     }
 
