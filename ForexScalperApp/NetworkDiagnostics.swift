@@ -3,14 +3,7 @@ import Foundation
 /// Runtime HTTP diagnostics for development builds.
 /// Captures request start/end, status codes, payload sizes and failures without logging secrets.
 enum NetworkDiagnostics {
-    private static let lock = NSLock()
-    private static var installed = false
-
     static func install() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !installed else { return }
-        installed = true
         URLProtocol.registerClass(DiagnosticsURLProtocol.self)
         godLog("🌐 Network diagnostics installed (HTTP/HTTPS requests)", level: .diagnostic)
     }
@@ -22,6 +15,7 @@ enum NetworkDiagnostics {
 
 private final class DiagnosticsURLProtocol: URLProtocol {
     private static let handledKey = "ForexScalperApp.DiagnosticsURLProtocol.handled"
+    private var session: URLSession?
     private var task: URLSessionDataTask?
     private var startTime = Date()
 
@@ -47,6 +41,7 @@ private final class DiagnosticsURLProtocol: URLProtocol {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = []
         let session = URLSession(configuration: configuration)
+        self.session = session
         task = session.dataTask(with: forwarded) { [weak self] data, response, error in
             guard let self else { return }
             let elapsed = Int(Date().timeIntervalSince(self.startTime) * 1000)
@@ -65,8 +60,12 @@ private final class DiagnosticsURLProtocol: URLProtocol {
                 NetworkDiagnostics.logTask("← response \(method) \(url) \(elapsed)ms bytes=\(bytes)")
             }
 
-            if let response { self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed) }
-            if let data { self.client?.urlProtocol(self, didLoad: data) }
+            if let response {
+                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            }
+            if let data {
+                self.client?.urlProtocol(self, didLoad: data)
+            }
             self.client?.urlProtocolDidFinishLoading(self)
         }
         task?.resume()
@@ -75,5 +74,7 @@ private final class DiagnosticsURLProtocol: URLProtocol {
     override func stopLoading() {
         task?.cancel()
         task = nil
+        session?.invalidateAndCancel()
+        session = nil
     }
 }
