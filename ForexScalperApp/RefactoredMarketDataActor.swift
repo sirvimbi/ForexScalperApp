@@ -35,11 +35,11 @@ actor RefactoredMarketDataActor: MarketDataProvider {
             godLog("💧 CANDLE HYDRATE | \(symbol) | TF=\(timeframe) | persisted=\(cached.count)", level: cached.isEmpty ? .warning : .diagnostic)
         }
 
+        let normalizedIncoming = newCandles.map(normalizeCandleTimestamp)
         var array = candleStore[key] ?? []
         var addedCount = 0
 
-        for rawCandle in newCandles {
-            let candle = normalizeCandleTimestamp(rawCandle)
+        for candle in normalizedIncoming {
             if let index = array.lastIndex(where: { $0.closeTime == candle.closeTime }) {
                 array[index] = candle
             } else {
@@ -52,12 +52,11 @@ actor RefactoredMarketDataActor: MarketDataProvider {
             array.removeFirst(array.count - maxCandles)
         }
 
-        // Keep the store chronologically ordered after repairing legacy timestamps.
         array.sort { $0.closeTime < $1.closeTime }
         candleStore[key] = array
 
         if addedCount > 0 {
-            await CandlePersistenceManager.shared.saveCandles(array.suffix(min(array.count, newCandles.count)), for: symbol, timeframe: timeframe)
+            await CandlePersistenceManager.shared.saveCandles(normalizedIncoming, for: symbol, timeframe: timeframe)
         }
 
         if timeframe == "1m", let last = array.last {
@@ -83,11 +82,8 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         var seconds = Double(candle.closeTime)
 
         if seconds > 10_000_000_000 {
-            // Milliseconds -> seconds.
             seconds /= 1000.0
         } else if seconds > 0 && seconds < 946_684_800 {
-            // Common legacy corruption: milliseconds were divided by 1000 twice.
-            // Forex/crypto market history in this app should not legitimately predate 2000.
             seconds *= 1000.0
         }
 
