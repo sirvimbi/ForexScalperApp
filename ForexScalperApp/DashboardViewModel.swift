@@ -12,6 +12,7 @@ class DashboardViewModel: ObservableObject {
     @Published var riskPerTrade: Double = 0.008 { didSet { syncRiskParameters() } }
     @Published var maxDailyRisk: Double = 0.02 { didSet { syncRiskParameters() } }
     @Published var maxConcurrentTrades: Int = 2 { didSet { syncRiskParameters() } }
+    @Published var dailyTradeLimit: Int = 8
     
     // MARK: - Scalping Config (Syncs with Settings UI)
     @Published var scalpingConfig = ScalpingConfig.shared
@@ -27,11 +28,11 @@ class DashboardViewModel: ObservableObject {
     // MARK: - MT5 Settings
     @Published var mt5Connected: Bool = false
     @Published var mt5BridgeURL: String = "http://127.0.0.1:8890"
-    @Published var mt5AuthToken: String = "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"
+    @Published var mt5AuthToken: String = ""
     @Published var mt5MagicNumber: Int = 888888
-    @Published var mt5Login: String = "134522550"
-    @Published var mt5Password: String = "Kenya@254"
-    @Published var mt5Server: String = "ExnessKE-MT5Trial9"
+    @Published var mt5Login: String = ""
+    @Published var mt5Password: String = ""
+    @Published var mt5Server: String = ""
     @Published var isConnecting: Bool = false
     
     // MARK: - IG Settings
@@ -86,6 +87,8 @@ class DashboardViewModel: ObservableObject {
         self.coordinator = coordinator
         self.availableSymbols = TradingPair.allCases.map { $0.rawValue }
         loadSettings()
+        SecureCredentialStore.shared.migrateLegacyUserDefaults()
+        loadSecureMT5Credentials()
         setupNotificationObservers()
         
         // IG Settings Defaults
@@ -115,6 +118,8 @@ class DashboardViewModel: ObservableObject {
             UserDefaults.standard.double(forKey: "maxDailyRisk") : 0.02
         maxConcurrentTrades = UserDefaults.standard.integer(forKey: "maxConcurrentTrades") != 0 ?
             UserDefaults.standard.integer(forKey: "maxConcurrentTrades") : 2
+        dailyTradeLimit = UserDefaults.standard.integer(forKey: "dailyTradeLimit") != 0 ? UserDefaults.standard.integer(forKey: "dailyTradeLimit") : scalpingConfig.maxDailyTrades
+        scalpingConfig.maxDailyTrades = dailyTradeLimit
         
         // Scalping Config (ELITE DEFAULTS)
         scalpingConfig.confidenceThreshold = UserDefaults.standard.double(forKey: "eliteConfidenceThreshold") != 0 ?
@@ -209,12 +214,9 @@ class DashboardViewModel: ObservableObject {
         } else {
             mt5BridgeURL = savedURL
         }
-        mt5AuthToken = UserDefaults.standard.string(forKey: "mt5AuthToken") ?? "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"
         mt5MagicNumber = UserDefaults.standard.integer(forKey: "mt5MagicNumber") != 0 ?
             UserDefaults.standard.integer(forKey: "mt5MagicNumber") : 888888
-        mt5Login = UserDefaults.standard.string(forKey: "mt5Login") ?? "134522550"
-        mt5Password = UserDefaults.standard.string(forKey: "mt5Password") ?? "Kenya@254"
-        mt5Server = UserDefaults.standard.string(forKey: "mt5Server") ?? "ExnessKE-MT5Trial9"
+        loadSecureMT5Credentials()
         
         // Notifications
         notifyOnSignal = UserDefaults.standard.object(forKey: "notifyOnSignal") != nil ? UserDefaults.standard.bool(forKey: "notifyOnSignal") : true
@@ -244,6 +246,8 @@ class DashboardViewModel: ObservableObject {
         UserDefaults.standard.set(riskPerTrade, forKey: "riskPerTrade")
         UserDefaults.standard.set(maxDailyRisk, forKey: "maxDailyRisk")
         UserDefaults.standard.set(maxConcurrentTrades, forKey: "maxConcurrentTrades")
+        UserDefaults.standard.set(dailyTradeLimit, forKey: "dailyTradeLimit")
+        scalpingConfig.maxDailyTrades = dailyTradeLimit
         UserDefaults.standard.set(accountBalance, forKey: "accountBalance")
         
         UserDefaults.standard.set(scalpingConfig.confidenceThreshold, forKey: "eliteConfidenceThreshold")
@@ -302,11 +306,15 @@ class DashboardViewModel: ObservableObject {
         scalpingConfig.saveConfig()
         
         UserDefaults.standard.set(mt5BridgeURL, forKey: "mt5BridgeURL")
-        UserDefaults.standard.set(mt5AuthToken, forKey: "mt5AuthToken")
         UserDefaults.standard.set(mt5MagicNumber, forKey: "mt5MagicNumber")
-        UserDefaults.standard.set(mt5Login, forKey: "mt5Login")
-        UserDefaults.standard.set(mt5Password, forKey: "mt5Password")
-        UserDefaults.standard.set(mt5Server, forKey: "mt5Server")
+        _ = SecureCredentialStore.shared.write(mt5AuthToken, for: "mt5AuthToken")
+        _ = SecureCredentialStore.shared.write(mt5Login, for: "mt5Login")
+        _ = SecureCredentialStore.shared.write(mt5Password, for: "mt5Password")
+        _ = SecureCredentialStore.shared.write(mt5Server, for: "mt5Server")
+        UserDefaults.standard.removeObject(forKey: "mt5AuthToken")
+        UserDefaults.standard.removeObject(forKey: "mt5Login")
+        UserDefaults.standard.removeObject(forKey: "mt5Password")
+        UserDefaults.standard.removeObject(forKey: "mt5Server")
         
         UserDefaults.standard.set(Array(activeSymbols), forKey: "activeSymbols")
         UserDefaults.standard.set(isAutoTradeEnabled, forKey: "isAutoTradeEnabled")
@@ -467,6 +475,22 @@ class DashboardViewModel: ObservableObject {
         isConnecting = false
     }
 
+    private func loadSecureMT5Credentials() {
+        mt5AuthToken = SecureCredentialStore.shared.read("mt5AuthToken") ?? ""
+        mt5Login = SecureCredentialStore.shared.read("mt5Login") ?? ""
+        mt5Password = SecureCredentialStore.shared.read("mt5Password") ?? ""
+        mt5Server = SecureCredentialStore.shared.read("mt5Server") ?? ""
+    }
+
+    func disconnectFromMT5() async {
+        isConnecting = true
+        godLog("🔌 MT5: Disconnect requested", level: .info)
+        await MT5Service.shared.disconnect()
+        mt5Connected = false
+        isConnecting = false
+        godLog("🔌 MT5: Disconnected", level: .success)
+    }
+
     func connectToIG() {
         // Implementation for IG connection
         igConnected = true // Mock for now
@@ -477,7 +501,10 @@ class DashboardViewModel: ObservableObject {
         refreshTimer = Timer.publish(every: interval, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
-                self?.refreshData()
+                Task { @MainActor in
+                    await self?.refreshAccountInfo()
+                    self?.refreshData()
+                }
             }
     }
 

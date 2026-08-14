@@ -158,9 +158,9 @@ class RefactoredAppCoordinator: ObservableObject {
     }
 
     private func connectMT5() async {
-        let mt5Login = UserDefaults.standard.string(forKey: "mt5Login") ?? "436886946"
-        let mt5Password = UserDefaults.standard.string(forKey: "mt5Password") ?? "Kenya@254"
-        let mt5Server = UserDefaults.standard.string(forKey: "mt5Server") ?? "ExnessKE-MT5Trial9"
+        let mt5Login = SecureCredentialStore.shared.read("mt5Login") ?? ""
+        let mt5Password = SecureCredentialStore.shared.read("mt5Password") ?? ""
+        let mt5Server = SecureCredentialStore.shared.read("mt5Server") ?? ""
 
         let loginInt = Int(mt5Login) ?? 0
 
@@ -791,6 +791,11 @@ class RefactoredAppCoordinator: ObservableObject {
             }
 
             await tradeHistory.addTrade(trade)
+
+            await MainActor.run {
+                self.signals.removeAll { $0.id == normalizedSignal.id }
+                self.objectWillChange.send()
+            }
 
             godLog("✅ Trade opened: \(normalizedSymbol) - Risk: KES \(String(format: "%.2f", positionSize.riskAmount))", level: .success)
         }
