@@ -2,8 +2,6 @@ import SwiftUI
 import UserNotifications
 import Combine
 
-// In ForexScalperApp.swift, add notification request on launch
-
 @main
 struct ForexScalperApp: App {
     @StateObject private var coordinator: RefactoredAppCoordinator
@@ -14,6 +12,10 @@ struct ForexScalperApp: App {
         let vm = DashboardViewModel(coordinator: coord)
         self._coordinator = StateObject(wrappedValue: coord)
         self._viewModel = StateObject(wrappedValue: vm)
+        
+        // Install runtime diagnostics before services start so startup/network activity is visible.
+        NetworkDiagnostics.install()
+        SignalDiagnostics.install()
         
         // Request notification permissions via the manager
         NotificationManager.shared.requestAuthorization()
@@ -48,7 +50,6 @@ struct MenuBarView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Status header
             HStack {
                 Image(systemName: "circle.fill")
                     .foregroundColor(coordinator.connectionStatus.contains("Connected") ? .green : .orange)
@@ -59,7 +60,6 @@ struct MenuBarView: View {
             
             Divider()
             
-            // Last signal
             VStack(alignment: .leading, spacing: 4) {
                 Text("Last Signal:")
                     .font(.subheadline)
@@ -72,7 +72,6 @@ struct MenuBarView: View {
             
             Divider()
             
-            // Recent signals
             VStack(alignment: .leading, spacing: 8) {
                 Text("Recent Signals:")
                     .font(.subheadline)
@@ -112,7 +111,6 @@ struct MenuBarView: View {
             
             Divider()
             
-            // Actions
             HStack {
                 Button("Open Dashboard") {
                     if let url = URL(string: "forexscalper://dashboard") {

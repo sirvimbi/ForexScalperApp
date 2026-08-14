@@ -5,19 +5,21 @@ import Combine
 @MainActor
 class ConsoleLogger: ObservableObject {
     static let shared = ConsoleLogger()
-    
+
     @Published var logs: [LogEntryUI] = []
-    private let maxLogs = 1000
-    
+    private let maxLogs = 5000
+    private var lastMessage: String?
+    private var lastMessageTime = Date.distantPast
+
     struct LogEntryUI: Identifiable, Equatable {
         let id = UUID()
         let timestamp: Date
         let message: String
         let level: LogLevelUI
-        
+
         enum LogLevelUI: Sendable {
             case info, warning, error, success, diagnostic
-            
+
             var icon: String {
                 switch self {
                 case .info: return "ℹ️"
@@ -27,7 +29,7 @@ class ConsoleLogger: ObservableObject {
                 case .diagnostic: return "🔍"
                 }
             }
-            
+
             var color: Color {
                 switch self {
                 case .info: return .textPrimary
@@ -39,14 +41,13 @@ class ConsoleLogger: ObservableObject {
             }
         }
     }
-    
+
     private init() {
         setupObservers()
         startCleanupTimer()
     }
-    
+
     private func startCleanupTimer() {
-        // Run cleanup every 5 minutes
         Timer.publish(every: 300, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
@@ -58,60 +59,75 @@ class ConsoleLogger: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     private func cleanupOldLogs() {
-        let thirtyMinutesAgo = Date().addingTimeInterval(-1800)
+        let oneHourAgo = Date().addingTimeInterval(-3600)
         let originalCount = logs.count
-        logs.removeAll { $0.timestamp < thirtyMinutesAgo }
-        
+        logs.removeAll { $0.timestamp < oneHourAgo }
+
         let removed = originalCount - logs.count
         if removed > 0 {
-            log("🧹 Log Cleanup: Removed \(removed) entries older than 30 minutes", level: .diagnostic)
+            appendLog("🧹 Log Cleanup: Removed \(removed) entries older than 60 minutes", level: .diagnostic, printToConsole: true)
         }
     }
-    
+
     private func setupObservers() {
         NotificationCenter.default.addObserver(
             forName: .newLogEntry,
             object: nil,
             queue: .main
-        ) { notification in
-            if let entry = notification.object as? LogEntry {
-                let uiLevel: LogEntryUI.LogLevelUI
-                switch entry.level {
-                case .info: uiLevel = .info
-                case .trade: uiLevel = .info
-                case .success: uiLevel = .success
-                case .warning: uiLevel = .warning
-                case .error: uiLevel = .error
-                case .diagnostic: uiLevel = .diagnostic
-                }
-                DispatchQueue.main.async {
-                    self.log(entry.message, level: uiLevel)
-                }
+        ) { [weak self] notification in
+            guard let self,
+                  let entry = notification.object as? LogEntry else { return }
+
+            let uiLevel: LogEntryUI.LogLevelUI
+            switch entry.level {
+            case .info, .trade: uiLevel = .info
+            case .success: uiLevel = .success
+            case .warning: uiLevel = .warning
+            case .error: uiLevel = .error
+            case .diagnostic: uiLevel = .diagnostic
             }
+
+            // godLog() already prints to stdout. Do not print again here; this was the
+            // source of the duplicated lines visible in the runtime logs.
+            self.appendLog(entry.message, level: uiLevel, printToConsole: false)
         }
     }
-    
+
     func log(_ message: String, level: LogEntryUI.LogLevelUI = .info) {
-        let entry = LogEntryUI(timestamp: Date(), message: message, level: level)
+        appendLog(message, level: level, printToConsole: true)
+    }
+
+    private func appendLog(_ message: String, level: LogEntryUI.LogLevelUI, printToConsole: Bool) {
+        let now = Date()
+        if message == lastMessage && now.timeIntervalSince(lastMessageTime) < 0.30 {
+            return
+        }
+        lastMessage = message
+        lastMessageTime = now
+
+        let entry = LogEntryUI(timestamp: now, message: message, level: level)
         logs.append(entry)
-        
+
         if logs.count > maxLogs {
             logs.removeFirst(logs.count - maxLogs)
         }
-        
-        // Also print to actual console for dev debugging
-        print(message)
+
+        if printToConsole {
+            print(message)
+        }
     }
-    
+
     func exportLogs() -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+
         return logs.map { "[\(formatter.string(from: $0.timestamp))] \($0.message)" }
             .joined(separator: "\n")
     }
-    
+
     func clearLogs() {
         logs.removeAll()
+        lastMessage = nil
+        lastMessageTime = .distantPast
     }
 }
