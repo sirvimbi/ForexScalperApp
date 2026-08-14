@@ -136,7 +136,14 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 14) {
                                     sectionHeader("ACTIVE TRADING PAIRS", icon: "chart.line.uptrend.xyaxis", color: .accentCyan); Divider().background(Color.borderSubtle)
                                     let majorPairs = TradingPair.allCases.filter { !$0.isExotic }.map { $0.rawValue }.sorted(); let exoticPairs = TradingPair.allCases.filter { $0.isExotic }.map { $0.rawValue }.sorted()
-                                    ScrollView { VStack(alignment: .leading, spacing: 16) { if !majorPairs.isEmpty { VStack(alignment: .leading, spacing: 8) { Text("MAJOR PAIRS").font(.system(size: 10, weight: .bold)).foregroundColor(.accentGold); LazyVGrid(columns: [GridItem(.adaptive(minimum: 110))], spacing: 8) { ForEach(majorPairs, id: \.self) { symbol in pairToggle(symbol: symbol) } } }; if !exoticPairs.isEmpty { VStack(alignment: .leading, spacing: 8) { Text("EXOTIC PAIRS").font(.system(size: 10, weight: .bold)).foregroundColor(.accentPurple); LazyVGrid(columns: [GridItem(.adaptive(minimum: 110))], spacing: 8) { ForEach(exoticPairs, id: \.self) { symbol in pairToggle(symbol: symbol) } } } } }.frame(maxHeight: 250)
+                                    ScrollView { VStack(alignment: .leading, spacing: 16) {
+                                        if !majorPairs.isEmpty {
+                                            VStack(alignment: .leading, spacing: 8) { Text("MAJOR PAIRS").font(.system(size: 10, weight: .bold)).foregroundColor(.accentGold); LazyVGrid(columns: [GridItem(.adaptive(minimum: 110))], spacing: 8) { ForEach(majorPairs, id: \.self) { symbol in pairToggle(symbol: symbol) } } }
+                                        }
+                                        if !exoticPairs.isEmpty {
+                                            VStack(alignment: .leading, spacing: 8) { Text("EXOTIC PAIRS").font(.system(size: 10, weight: .bold)).foregroundColor(.accentPurple); LazyVGrid(columns: [GridItem(.adaptive(minimum: 110))], spacing: 8) { ForEach(exoticPairs, id: \.self) { symbol in pairToggle(symbol: symbol) } } }
+                                        }
+                                    }.frame(maxHeight: 250)
                                     HStack { Button("Select All") { viewModel.activeSymbols = Set(viewModel.availableSymbols) }.font(.caption).foregroundColor(.accentCyan).buttonStyle(.plain); Text("|").foregroundColor(.textMuted); Button("Clear All") { viewModel.activeSymbols.removeAll() }.font(.caption).foregroundColor(.accentRed).buttonStyle(.plain); Spacer(); Text("\(viewModel.activeSymbols.count) active").font(.caption2).foregroundColor(.textMuted) }
                                 }.padding(16)
                             }
