@@ -79,8 +79,6 @@ actor MT5Service {
         return (data, http)
     }
 
-    // MARK: - Connection
-
     func initialize(login: Int, password: String, server: String) async throws {
         for path in ["/api/mt5/initialize", "/v1/initialize", "/initialize"] {
             guard let url = URL(string: baseURL + path) else { continue }
@@ -122,8 +120,6 @@ actor MT5Service {
         throw lastError ?? TradingError.apiError("MT5 connection failed - Bridge may be offline")
     }
 
-    // MARK: - Market Data
-
     func getCandles(symbol: String, timeframe: String, count: Int = 1000) async throws -> [Kline] {
         let clean = symbol.replacingOccurrences(of: "/", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
         let tf: String
@@ -141,7 +137,6 @@ actor MT5Service {
         let safeCount = max(1, min(count, 5000))
         var paths = ["/v1/history/prices", "/api/mt5/candles", "/candles"]
         if let working = lastWorkingPath, let i = paths.firstIndex(of: working) { paths.remove(at: i); paths.insert(working, at: 0) }
-
         for path in paths {
             guard var components = URLComponents(string: baseURL + path) else { continue }
             components.queryItems = [URLQueryItem(name: "symbol", value: clean), URLQueryItem(name: "time_frame", value: tf), URLQueryItem(name: "count", value: String(safeCount))]
@@ -165,8 +160,6 @@ actor MT5Service {
         return []
     }
 
-    // MARK: - Account
-
     func getAccountInfo() async throws -> MT5AccountInfo {
         for path in ["/v1/account", "/api/mt5/account", "/account"] {
             guard let url = URL(string: baseURL + path) else { continue }
@@ -175,13 +168,11 @@ actor MT5Service {
                 if response.statusCode == 404 { continue }
                 if response.statusCode == 401 || response.statusCode == 403 { throw TradingError.apiError("Authentication failed - check API token") }
                 guard response.statusCode == 200 else { continue }
-                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    if let accountData = json["data"] as? [String: Any] {
-                        let nested = try JSONSerialization.data(withJSONObject: accountData)
-                        let account = try decoder.decode(MT5AccountInfo.self, from: nested)
-                        _isConnected = true
-                        return account
-                    }
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let accountData = json["data"] as? [String: Any] {
+                    let nested = try JSONSerialization.data(withJSONObject: accountData)
+                    let account = try decoder.decode(MT5AccountInfo.self, from: nested)
+                    _isConnected = true
+                    return account
                 }
                 let account = try decoder.decode(MT5AccountInfo.self, from: data)
                 _isConnected = true
@@ -193,8 +184,6 @@ actor MT5Service {
         _isConnected = false
         throw TradingError.apiError("Failed to fetch MT5 account information - Bridge may be offline or not authenticated")
     }
-
-    // MARK: - Positions
 
     func getPositionsAndOrders() async throws -> (active: [MT5Position], pending: [MT5Position]) {
         for path in ["/v1/order/list", "/api/mt5/positions", "/positions"] {
@@ -212,8 +201,6 @@ actor MT5Service {
         return ([], [])
     }
 
-    // MARK: - Execution
-
     func executeTrade(signal: Signal) async throws -> MT5TradeResult {
         var symbol = signal.symbol.replacingOccurrences(of: "/", with: "")
         let suffix = await MainActor.run { ScalpingConfig.shared.brokerSuffix }
@@ -227,11 +214,15 @@ actor MT5Service {
         let orderType: String = signal.type == .buy ? "buy" : signal.type == .sell ? "sell" : ""
         guard !orderType.isEmpty else { throw TradingError.apiError("Invalid signal type: none") }
 
-        // A market POST is deliberately sent to one canonical endpoint only.
-        // Retrying a POST against a second endpoint after a timeout can duplicate a live order.
         guard let url = URL(string: baseURL + "/v1/order") else { throw TradingError.apiError("Invalid MT5 order URL") }
+
+        // The V10.5 EA exposes /v1/order as a MARKET ENTRY endpoint only.
+        // `executionMode` is an app-side execution preference, not the bridge action.
+        // Sending values such as "instant" makes the EA reject an otherwise valid signal
+        // with "Unsupported order action". Always send the bridge action as "market".
+        let executionPreference = signal.executionMode?.rawValue.lowercased() ?? "market"
         var body: [String: Any] = [
-            "action": signal.executionMode?.rawValue.lowercased() ?? "market",
+            "action": "market",
             "symbol": symbol,
             "order_type": signal.orderType?.rawValue.lowercased() ?? orderType,
             "volume": stepped,
@@ -245,6 +236,8 @@ actor MT5Service {
         ]
         if signal.stopLoss == nil { body.removeValue(forKey: "sl") }
         if signal.takeProfit == nil { body.removeValue(forKey: "tp") }
+
+        godLog("🚀 MT5 EXECUTION | \(symbol) | side=\(orderType.uppercased()) | action=market | preference=\(executionPreference) | volume=\(String(format: "%.4f", stepped)) | price=\(String(format: "%.5f", signal.price)) | SL=\(signal.stopLoss.map { String(format: "%.5f", $0) } ?? "none") | TP=\(signal.takeProfit.map { String(format: "%.5f", $0) } ?? "none")", level: .info)
 
         do {
             let (data, response) = try await request(url, method: "POST", body: body, timeout: 15)
@@ -296,8 +289,6 @@ actor MT5Service {
         return false
     }
 
-    // MARK: - History
-
     func getTradeHistory(days: Int = 30) async throws -> [MT5HistoryPosition] {
         let safeDays = max(1, min(days, 3650))
         let to = Int64(Date().timeIntervalSince1970)
@@ -324,8 +315,6 @@ actor MT5Service {
         }
         return []
     }
-
-    // MARK: - Symbol Info
 
     func isSymbolTradable(_ symbol: String) async -> Bool {
         let clean = symbol.replacingOccurrences(of: "/", with: "")

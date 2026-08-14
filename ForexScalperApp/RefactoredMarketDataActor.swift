@@ -5,7 +5,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
     private var candleStore: [String: [Kline]] = [:]
     private var latestPrices: [String: Double] = [:]
     private var isHydrated: Set<String> = []
-    
+
     private let maxCandles = 3000
     private let priceCache = NSCache<NSString, NSNumber>()
 
@@ -19,10 +19,10 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         "D1": 15,
         "W1": 1
     ]
-    
+
     func addCandles(symbol: String, timeframe: String, newCandles: [Kline]) async {
         let key = "\(symbol)_\(timeframe)"
-        
+
         if !isHydrated.contains(key) {
             let cached = await CandlePersistenceManager.shared.loadCandles(for: symbol, timeframe: timeframe)
             candleStore[key] = normalizeCandles(cached)
@@ -30,11 +30,11 @@ actor RefactoredMarketDataActor: MarketDataProvider {
 
             godLog("💧 CANDLE HYDRATE | \(symbol) | \(timeframe) | persisted=\(cached.count)", level: cached.isEmpty ? .warning : .diagnostic)
         }
-        
+
         var array = candleStore[key] ?? []
         let normalizedIncoming = normalizeCandles(newCandles)
         var addedCount = 0
-        
+
         for candle in normalizedIncoming {
             if let index = array.lastIndex(where: { $0.closeTime == candle.closeTime }) {
                 array[index] = candle
@@ -43,18 +43,18 @@ actor RefactoredMarketDataActor: MarketDataProvider {
                 addedCount += 1
             }
         }
-        
+
         array.sort { $0.closeTime < $1.closeTime }
         if array.count > maxCandles {
             array.removeFirst(array.count - maxCandles)
         }
-        
+
         candleStore[key] = array
-        
+
         if addedCount > 0 {
             await CandlePersistenceManager.shared.saveCandles(normalizedIncoming, for: symbol, timeframe: timeframe)
         }
-        
+
         if timeframe == "1m", let last = array.last {
             latestPrices[symbol] = last.close
             priceCache.setObject(NSNumber(value: last.close), forKey: symbol as NSString)
@@ -62,31 +62,31 @@ actor RefactoredMarketDataActor: MarketDataProvider {
 
         logCandleInventory(symbol: symbol, timeframe: timeframe, candles: array, added: addedCount)
     }
-    
+
     func addCandle(symbol: String, timeframe: String, candle: Kline) async {
         await addCandles(symbol: symbol, timeframe: timeframe, newCandles: [candle])
     }
-    
+
     func getCandles(symbol: String, timeframe: String) async -> [Kline] {
         let key = "\(symbol)_\(timeframe)"
         let candles = candleStore[key] ?? []
         logCandleInventory(symbol: symbol, timeframe: timeframe, candles: candles, added: nil)
         return candles
     }
-    
+
+    /// Normalizes Kline.closeTime, which is stored as an Int, to milliseconds since 1970.
+    /// Supports both epoch seconds (~1.7e9) and epoch milliseconds (~1.7e12).
+    /// Older code incorrectly converted seconds using 1,000,000, producing dates around 1970.
     private func normalizeCandles(_ candles: [Kline]) -> [Kline] {
         candles.map { candle in
-            let date = candle.closeTime
-            let epochSeconds = date.timeIntervalSince1970
+            let rawTimestamp = candle.closeTime
             let milliseconds: Int
 
-            // Kline's integer closeTime initializer represents milliseconds.
-            // Some existing feeds supplied epoch seconds, which were therefore
-            // interpreted as milliseconds and appeared around January 1970.
-            if date < Date(timeIntervalSince1970: 946684800) {
-                milliseconds = Int(epochSeconds * 1_000_000)
+            // Current Unix epoch timestamps are ~1e9 seconds or ~1e12 milliseconds.
+            if rawTimestamp > 0 && rawTimestamp < 1_000_000_000_000 {
+                milliseconds = rawTimestamp * 1_000
             } else {
-                milliseconds = Int(epochSeconds * 1_000)
+                milliseconds = rawTimestamp
             }
 
             return Kline(
@@ -101,7 +101,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
             )
         }
     }
-    
+
     private func logCandleInventory(symbol: String, timeframe: String, candles: [Kline], added: Int?) {
         let minimum = diagnosticMinimums[timeframe] ?? 1
         let count = candles.count
@@ -117,19 +117,21 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         godLog("🕯️ CANDLE \(status) | \(symbol) | TF=\(timeframe) | received=\(count) | required=\(minimum) | missing=\(missing) | oldest=\(oldest) | latest=\(latest)\(delta)", level: level)
     }
 
-    private func formatCandleDate(_ time: Date) -> String {
+    private func formatCandleDate(_ timestamp: Int) -> String {
+        let seconds = Double(timestamp) / 1_000.0
+        let date = Date(timeIntervalSince1970: seconds)
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: time)
+        return formatter.string(from: date)
     }
-    
+
     func getLatestPrice(symbol: String) async -> Double? {
         if let cached = priceCache.object(forKey: symbol as NSString) {
             return cached.doubleValue
         }
         return latestPrices[symbol]
     }
-    
+
     func getCandlesBulk(symbols: [String], timeframe: String) async -> [String: [Kline]] {
         var result: [String: [Kline]] = [:]
         for symbol in symbols {
@@ -138,11 +140,11 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         }
         return result
     }
-    
+
     func isReadyForSignals(symbol: String) async -> Bool {
         let tfs = ["1m", "5m", "15m", "1h", "4h", "D1"]
         let requirements = [100, 50, 30, 20, 20, 15]
-        
+
         for (i, tf) in tfs.enumerated() {
             let key = "\(symbol)_\(tf)"
             if (candleStore[key]?.count ?? 0) < requirements[i] {
