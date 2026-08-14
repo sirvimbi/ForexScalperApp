@@ -27,14 +27,17 @@ enum NetworkDiagnostics {
 private final class DiagnosticsURLProtocol: URLProtocol {
     private static let handledKey = "ForexScalperApp.DiagnosticsURLProtocol.handled"
     private var session: URLSession?
-    private var task: URLSessionDataTask?
+    // URLProtocol already exposes an inherited `task` property. Do not declare a
+    // stored property with that name; keep our concrete data task separately.
+    private var dataTask: URLSessionDataTask?
     private var startTime = Date()
 
     override class func canInit(with request: URLRequest) -> Bool {
         guard let scheme = request.url?.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             return false
         }
-        return !property(forKey: handledKey, in: request)
+        // URLProtocol.property(forKey:in:) returns Any?, so explicitly test for nil.
+        return URLProtocol.property(forKey: handledKey, in: request) == nil
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -46,14 +49,27 @@ private final class DiagnosticsURLProtocol: URLProtocol {
         let bodyBytes = request.httpBody?.count ?? 0
         NetworkDiagnostics.logTask("→ \(method) \(url) body=\(bodyBytes)b")
 
-        var forwarded = request
-        URLProtocol.setProperty(true, forKey: Self.handledKey, in: &forwarded)
+        // URLProtocol.setProperty(_:forKey:in:) requires NSMutableURLRequest.
+        // Make a mutable copy so the original request remains untouched.
+        guard let forwarded = request.mutableCopy() as? NSMutableURLRequest else {
+            let error = NSError(
+                domain: "ForexScalperApp.NetworkDiagnostics",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to create mutable URLRequest for diagnostics"]
+            )
+            NetworkDiagnostics.logTask("✖ \(method) \(url) FAILED before request: \(error.localizedDescription)", level: .error)
+            client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
+
+        URLProtocol.setProperty(true, forKey: Self.handledKey, in: forwarded)
 
         let configuration = URLSessionConfiguration.ephemeral
+        // Prevent this URLProtocol from recursively intercepting its own request.
         configuration.protocolClasses = []
         let session = URLSession(configuration: configuration)
         self.session = session
-        task = session.dataTask(with: forwarded) { [weak self] data, response, error in
+        dataTask = session.dataTask(with: forwarded as URLRequest) { [weak self] data, response, error in
             guard let self else { return }
             let elapsed = Int(Date().timeIntervalSince(self.startTime) * 1000)
             let bytes = data?.count ?? 0
@@ -79,12 +95,12 @@ private final class DiagnosticsURLProtocol: URLProtocol {
             }
             self.client?.urlProtocolDidFinishLoading(self)
         }
-        task?.resume()
+        dataTask?.resume()
     }
 
     override func stopLoading() {
-        task?.cancel()
-        task = nil
+        dataTask?.cancel()
+        dataTask = nil
         session?.invalidateAndCancel()
         session = nil
     }
