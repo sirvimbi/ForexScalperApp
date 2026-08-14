@@ -15,6 +15,7 @@ actor MT5WebSocketService {
     private var seenEventIDs: [String: Date] = [:]
     private var lastPriceTimestamp: [String: Int64] = [:]
     private var l2Cache: [String: (buyVol: Double, sellVol: Double, timestamp: Date)] = [:]
+    private var failureWasReported = false
 
     private let maxReconnectDelay: UInt64 = 30
     private let wsURL = URL(string: "ws://127.0.0.1:8890")!
@@ -22,8 +23,11 @@ actor MT5WebSocketService {
     func connect(symbols: [String]) {
         self.symbols = symbols
         stopped = false
+        reconnectAttempt = 0
+        failureWasReported = false
         reconnectTask?.cancel()
         reconnectTask = nil
+        godLog("🌐 MT5 WS: connect requested → \(wsURL.absoluteString) | symbols=\(symbols.count)", level: .diagnostic)
         openSocket()
     }
 
@@ -36,22 +40,31 @@ actor MT5WebSocketService {
         session?.invalidateAndCancel()
         session = nil
         isConnected = false
+        failureWasReported = false
+        godLog("🌐 MT5 WS: disconnected by application", level: .diagnostic)
     }
 
     func connected() -> Bool { isConnected }
 
     private func openSocket() {
         guard !stopped else { return }
+
         webSocket?.cancel(with: .goingAway, reason: nil)
         session?.invalidateAndCancel()
 
         let configuration = URLSessionConfiguration.default
-        configuration.waitsForConnectivity = true
+        // This is a local loopback endpoint. Waiting for a general network path can
+        // produce noisy nw_path diagnostics and delays failure detection.
+        configuration.waitsForConnectivity = false
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 20
+
         let newSession = URLSession(configuration: configuration)
         session = newSession
         let task = newSession.webSocketTask(with: wsURL)
         webSocket = task
         task.resume()
+        godLog("🌐 MT5 WS: socket task started (attempt \(max(reconnectAttempt, 1)))", level: .diagnostic)
         receiveLoop(task)
     }
 
@@ -70,8 +83,14 @@ actor MT5WebSocketService {
 
         switch result {
         case .success(let message):
+            let wasConnected = isConnected
             isConnected = true
             reconnectAttempt = 0
+            if !wasConnected {
+                godLog("🟢 MT5 WS: connection established/recovered", level: .success)
+            }
+            failureWasReported = false
+
             switch message {
             case .string(let text): handleMessage(text)
             case .data(let data):
@@ -79,18 +98,33 @@ actor MT5WebSocketService {
             @unknown default: break
             }
             receiveLoop(task)
+
         case .failure(let error):
             isConnected = false
-            godLog("❌ MT5 WS: \(error.localizedDescription)", level: .warning)
+            let nsError = error as NSError
+
+            // Keep the first failure prominent, but don't turn a broken local bridge
+            // into a wall of identical warnings while the backoff loop is working.
+            if !failureWasReported {
+                godLog("❌ MT5 WS: receive failed [\(nsError.code)] \(error.localizedDescription)", level: .warning)
+                failureWasReported = true
+            } else {
+                godLog("🔁 MT5 WS: reconnect cycle continues — \(error.localizedDescription)", level: .diagnostic)
+            }
+
             scheduleReconnect()
         }
     }
 
     private func scheduleReconnect() {
         guard !stopped, reconnectTask == nil else { return }
+
         reconnectAttempt += 1
         let exponent = min(reconnectAttempt - 1, 5)
         let delay = min(UInt64(1 << exponent), maxReconnectDelay)
+
+        godLog("🔄 MT5 WS: scheduling reconnect #\(reconnectAttempt) in \(delay)s", level: .diagnostic)
+
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
             guard !Task.isCancelled, let self else { return }
@@ -104,7 +138,10 @@ actor MT5WebSocketService {
     private func handleMessage(_ text: String) {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let type = json["type"] as? String else { return }
+              let type = json["type"] as? String else {
+            godLog("⚠️ MT5 WS: received non-JSON/unknown payload (\(text.prefix(120)))", level: .warning)
+            return
+        }
 
         if let version = json["version"] as? String, !version.isEmpty,
            !version.hasPrefix("10.") { return }
@@ -120,7 +157,8 @@ actor MT5WebSocketService {
         case "trade_event": handleTradeEvent(json)
         case "track_mbook": handleMbookUpdate(json)
         case "ohlc_update": handleOhlcUpdate(json)
-        default: break
+        case "pong": godLog("🏓 MT5 WS: pong received", level: .diagnostic)
+        default: godLog("🔍 MT5 WS: unhandled event type=\(type)", level: .diagnostic)
         }
     }
 
@@ -164,6 +202,7 @@ actor MT5WebSocketService {
             "reason": string(json["reason"]) ?? "Unknown",
             "time": int64(json["time"]) ?? Int64(Date().timeIntervalSince1970)
         ]
+        godLog("📥 MT5 WS: trade_event ticket=\(ticket) symbol=\(symbol)", level: .diagnostic)
         NotificationCenter.default.post(name: .mt5TradeClosed, object: nil, userInfo: userInfo)
     }
 
