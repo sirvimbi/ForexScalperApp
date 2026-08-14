@@ -317,6 +317,8 @@ class DashboardViewModel: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "mt5Server")
         
         UserDefaults.standard.set(Array(activeSymbols), forKey: "activeSymbols")
+        coordinator?.updateActiveSymbols()
+
         UserDefaults.standard.set(isAutoTradeEnabled, forKey: "isAutoTradeEnabled")
         UserDefaults.standard.set(minAutoTradeConfidence, forKey: "minAutoTradeConfidence")
         

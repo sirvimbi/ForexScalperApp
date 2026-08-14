@@ -1185,4 +1185,11 @@ class RefactoredAppCoordinator: ObservableObject {
             godLog("❌ Signal denied: \(signal.symbol)", level: .info)
         }
     }
+
+    func updateActiveSymbols() {
+        Task {
+            godLog("🔄 Symbols updated: Re-subscribing data feeds...", level: .info)
+            await connectToDataSources()
+        }
+    }
 }
