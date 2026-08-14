@@ -2,7 +2,7 @@ import Foundation
 
 /// Structured signal-evaluation telemetry. This is intentionally observational:
 /// it does not change trade authority or scoring.
-struct SignalEvaluationAudit: Sendable {
+struct SignalEvaluationAudit {
     let symbol: String
     let direction: String
     let rawConfidence: Double
@@ -17,21 +17,15 @@ struct SignalEvaluationAudit: Sendable {
     func emit() {
         guard SignalAuditSettings.shared.enabled else { return }
 
-        let passed = passedPillars
-            .map { "\($0.name)=+\(String(format: "%.1f", $0.contribution))" }
-            .joined(separator: " | ")
-        let failed = failedPillars
-            .map { "\($0.name): \($0.reason)" }
-            .joined(separator: " | ")
+        let detailLevel = SignalAuditSettings.shared.detailLevel
+        let passed = passedPillars.map { "\($0.name)=+\(String(format: "%.1f", $0.contribution))" }.joined(separator: " | ")
+        let failed = failedPillars.map { "\($0.name): \($0.reason)" }.joined(separator: " | ")
 
-        godLog(
-            "🧾 SIGNAL CALC | \(symbol) | PILLARS PASS [\(passed.isEmpty ? "none" : passed)] | FAIL [\(failed.isEmpty ? "none" : failed)]",
-            level: .info
-        )
-        godLog(
-            "🧮 SIGNAL CALC | \(symbol) | Raw=\(String(format: "%.1f", rawConfidence))% → Historical=\(historicalAdjustment >= 0 ? "+" : "")\(String(format: "%.1f", historicalAdjustment)) → Final=\(String(format: "%.1f", finalConfidence))% | Threshold=\(String(format: "%.1f", threshold))% | R:R=\(riskRewardPassed ? "PASS" : "FAIL") | Decision=\(decision)",
-            level: .info
-        )
+        if detailLevel >= 1 {
+            godLog("🧾 SIGNAL CALC | \(symbol) | PILLARS PASS [\(passed.isEmpty ? "none" : passed)] | FAIL [\(failed.isEmpty ? "none" : failed)]", level: .info)
+        }
+
+        godLog("🧮 SIGNAL CALC | \(symbol) | Direction=\(direction) | Raw=\(String(format: "%.1f", rawConfidence))% → Historical=\(historicalAdjustment >= 0 ? "+" : "")\(String(format: "%.1f", historicalAdjustment)) → Final=\(String(format: "%.1f", finalConfidence))% | Threshold=\(String(format: "%.1f", threshold))% | R:R=\(riskRewardPassed ? "PASS" : "FAIL") | Decision=\(decision)", level: .info)
     }
 }
 
@@ -50,16 +44,13 @@ final class SignalAuditSettings {
         set { defaults.set(newValue, forKey: enabledKey) }
     }
 
-    /// 0 = summary, 1 = pillars, 2 = full calculation trace.
+    /// 0 = summary only, 1 = summary + pillar PASS/FAIL, 2 = reserved for future full trace.
     var detailLevel: Int {
-        get { defaults.object(forKey: detailKey) as? Int ?? 2 }
+        get { defaults.object(forKey: detailKey) as? Int ?? 1 }
         set { defaults.set(max(0, min(2, newValue)), forKey: detailKey) }
     }
 
     func logSettings() {
-        godLog(
-            "⚙️ SIGNAL AUDIT SETTINGS | enabled=\(enabled) | detailLevel=\(detailLevel)",
-            level: .diagnostic
-        )
+        godLog("⚙️ SIGNAL AUDIT SETTINGS | enabled=\(enabled) | detailLevel=\(detailLevel)", level: .diagnostic)
     }
 }
