@@ -9,6 +9,7 @@ class ConsoleLogger: ObservableObject {
 
     @Published var logs: [LogEntryUI] = []
     private let maxLogs = 5000
+    private let automaticClearInterval: TimeInterval = 30 * 60
     private var lastMessage: String?
     private var lastMessageTime = Date.distantPast
 
@@ -49,27 +50,28 @@ class ConsoleLogger: ObservableObject {
     }
 
     private func startCleanupTimer() {
-        Timer.publish(every: 300, on: .main, in: .common)
-        .autoconnect()
-        .sink { [weak self] _ in
-            Task { @MainActor in
-                self?.cleanupOldLogs()
+        Timer.publish(every: automaticClearInterval, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.automaticClearLogs()
+                }
             }
-        }
-        .store(in: &cancellables)
+            .store(in: &cancellables)
     }
 
     private var cancellables = Set<AnyCancellable>()
 
-    private func cleanupOldLogs() {
-        let oneHourAgo = Date().addingTimeInterval(-3600)
-        let originalCount = logs.count
-        logs.removeAll { $0.timestamp < oneHourAgo }
-
-        let removed = originalCount - logs.count
-        if removed > 0 {
-            appendLog("🧹 Log Cleanup: Removed \(removed) entries older than 60 minutes", level: .diagnostic, printToConsole: true)
-        }
+    /// The in-app log buffer is intentionally cleared every 30 minutes.
+    /// This keeps the SwiftUI log view from growing indefinitely while exported
+    /// files remain available through the existing export action.
+    private func automaticClearLogs() {
+        guard !logs.isEmpty else { return }
+        let removed = logs.count
+        logs.removeAll(keepingCapacity: true)
+        lastMessage = nil
+        lastMessageTime = .distantPast
+        godLog("🧹 Log Buffer: automatically cleared \(removed) entries after 30 minutes", level: .diagnostic)
     }
 
     private func setupObservers() {
@@ -90,8 +92,6 @@ class ConsoleLogger: ObservableObject {
             case .diagnostic: uiLevel = .diagnostic
             }
 
-            // godLog() already prints to stdout. Do not print again here; this was the
-            // source of the duplicated lines visible in the runtime logs.
             self.appendLog(entry.message, level: uiLevel, printToConsole: false)
         }
     }
@@ -125,7 +125,7 @@ class ConsoleLogger: ObservableObject {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
 
         return logs.map { "[\(formatter.string(from: $0.timestamp))] \($0.message)" }
-        .joined(separator: "\n")
+            .joined(separator: "\n")
     }
 
     func clearLogs() {
