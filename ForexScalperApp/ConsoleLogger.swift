@@ -1,4 +1,4 @@
-// ConsoleLogger.swift - FIXED ACTOR ISOLATION
+// ConsoleLogger.swift - FIXED ACTOR ISOLATION + 30-MINUTE BUFFER ROTATION
 import Foundation
 import SwiftUI
 import Combine
@@ -20,28 +20,16 @@ class ConsoleLogger: ObservableObject {
 
         enum LogLevelUI: Sendable {
             case info, warning, error, success, diagnostic
-
             var icon: String {
-                switch self {
-                case .info: return "ℹ️"
-                case .warning: return "⚠️"
-                case .error: return "❌"
-                case .success: return "✅"
-                case .diagnostic: return "🔍"
-                }
+                switch self { case .info: return "ℹ️"; case .warning: return "⚠️"; case .error: return "❌"; case .success: return "✅"; case .diagnostic: return "🔍" }
             }
-
             var color: Color {
-                switch self {
-                case .info: return .textPrimary
-                case .warning: return .accentGold
-                case .error: return .accentRed
-                case .success: return .accentGreen
-                case .diagnostic: return .accentCyan
-                }
+                switch self { case .info: return .textPrimary; case .warning: return .accentGold; case .error: return .accentRed; case .success: return .accentGreen; case .diagnostic: return .accentCyan }
             }
         }
     }
+
+    private var cancellables = Set<AnyCancellable>()
 
     private init() {
         setupObservers()
@@ -49,49 +37,31 @@ class ConsoleLogger: ObservableObject {
     }
 
     private func startCleanupTimer() {
-        Timer.publish(every: 300, on: .main, in: .common)
-        .autoconnect()
-        .sink { [weak self] _ in
-            Task { @MainActor in
-                self?.cleanupOldLogs()
+        // Rotate the in-app log buffer every 30 minutes. This prevents the SwiftUI
+        // log view from retaining a large amount of diagnostic text indefinitely.
+        Timer.publish(every: 1800, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.rotateLogBuffer() }
             }
-        }
-        .store(in: &cancellables)
+            .store(in: &cancellables)
     }
 
-    private var cancellables = Set<AnyCancellable>()
-
-    private func cleanupOldLogs() {
-        let oneHourAgo = Date().addingTimeInterval(-3600)
-        let originalCount = logs.count
-        logs.removeAll { $0.timestamp < oneHourAgo }
-
-        let removed = originalCount - logs.count
-        if removed > 0 {
-            appendLog("🧹 Log Cleanup: Removed \(removed) entries older than 60 minutes", level: .diagnostic, printToConsole: true)
-        }
+    private func rotateLogBuffer() {
+        let removed = logs.count
+        logs.removeAll(keepingCapacity: true)
+        lastMessage = nil
+        lastMessageTime = .distantPast
+        // Xcode's system console is owned by Xcode and cannot be cleared by the app.
+        // This rotates the app's retained/in-app ConsoleLogger buffer instead.
+        print("🧹 In-app log buffer rotated after 30 minutes (\(removed) entries released)")
     }
 
     private func setupObservers() {
-        NotificationCenter.default.addObserver(
-            forName: .newLogEntry,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self,
-                  let entry = notification.object as? LogEntry else { return }
-
+        NotificationCenter.default.addObserver(forName: .newLogEntry, object: nil, queue: .main) { [weak self] notification in
+            guard let self, let entry = notification.object as? LogEntry else { return }
             let uiLevel: LogEntryUI.LogLevelUI
-            switch entry.level {
-            case .info, .trade: uiLevel = .info
-            case .success: uiLevel = .success
-            case .warning: uiLevel = .warning
-            case .error: uiLevel = .error
-            case .diagnostic: uiLevel = .diagnostic
-            }
-
-            // godLog() already prints to stdout. Do not print again here; this was the
-            // source of the duplicated lines visible in the runtime logs.
+            switch entry.level { case .info, .trade: uiLevel = .info; case .success: uiLevel = .success; case .warning: uiLevel = .warning; case .error: uiLevel = .error; case .diagnostic: uiLevel = .diagnostic }
             self.appendLog(entry.message, level: uiLevel, printToConsole: false)
         }
     }
@@ -102,30 +72,18 @@ class ConsoleLogger: ObservableObject {
 
     private func appendLog(_ message: String, level: LogEntryUI.LogLevelUI, printToConsole: Bool) {
         let now = Date()
-        if message == lastMessage && now.timeIntervalSince(lastMessageTime) < 0.30 {
-            return
-        }
+        if message == lastMessage && now.timeIntervalSince(lastMessageTime) < 0.30 { return }
         lastMessage = message
         lastMessageTime = now
-
-        let entry = LogEntryUI(timestamp: now, message: message, level: level)
-        logs.append(entry)
-
-        if logs.count > maxLogs {
-            logs.removeFirst(logs.count - maxLogs)
-        }
-
-        if printToConsole {
-            print(message)
-        }
+        logs.append(LogEntryUI(timestamp: now, message: message, level: level))
+        if logs.count > maxLogs { logs.removeFirst(logs.count - maxLogs) }
+        if printToConsole { print(message) }
     }
 
     func exportLogs() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-
-        return logs.map { "[\(formatter.string(from: $0.timestamp))] \($0.message)" }
-        .joined(separator: "\n")
+        return logs.map { "[\(formatter.string(from: $0.timestamp))] \($0.message)" }.joined(separator: "\n")
     }
 
     func clearLogs() {
