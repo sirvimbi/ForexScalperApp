@@ -1,0 +1,192 @@
+name: Apply agent trade-management fixes
+on:
+  push:
+    branches:
+      - agent/secure-trade-management-and-settings
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply fixes
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          root = Path('.')
+          app = root / 'ForexScalperApp'
+          def patch(path, old, new, count=None):
+              p = root / path
+              s = p.read_text()
+              if old not in s: raise SystemExit(f'Missing patch anchor in {path}: {old[:120]!r}')
+              p.write_text(s.replace(old, new, count if count is not None else -1))
+          (app / 'SecureCredentialStore.swift').write_text(r'''import Foundation
+import Security
+
+struct SecureCredentialStore {
+    static let shared = SecureCredentialStore()
+    private let service = "com.sirvimbi.ForexScalperApp.mt5"
+    private func key(_ name: String) -> String { "mt5.\(name)" }
+    func read(_ name: String) -> String? {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: key(name), kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+    @discardableResult func write(_ value: String, for name: String) -> Bool {
+        let account = key(name), data = Data(value.utf8)
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound { var add = query; add[kSecValueData as String] = data; return SecItemAdd(add as CFDictionary, nil) == errSecSuccess }
+        return status == errSecSuccess
+    }
+    func delete(_ name: String) { let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: key(name)]; SecItemDelete(query as CFDictionary) }
+    @MainActor func migrateLegacyUserDefaults() {
+        let defaults = UserDefaults.standard
+        for name in ["mt5AuthToken", "mt5Login", "mt5Password", "mt5Server"] {
+            if let legacy = defaults.string(forKey: name), !legacy.isEmpty { if read(name) == nil { _ = write(legacy, for: name) }; defaults.removeObject(forKey: name) }
+        }
+    }
+}
+''')
+          p = app / 'DashboardViewModel.swift'; s = p.read_text()
+          s = s.replace('@Published var maxConcurrentTrades: Int = 2 { didSet { syncRiskParameters() } }','@Published var maxConcurrentTrades: Int = 2 { didSet { syncRiskParameters() } }\n    @Published var dailyTradeLimit: Int = 8')
+          for old,new in [('@Published var mt5AuthToken: String = "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"','@Published var mt5AuthToken: String = ""'),('@Published var mt5Login: String = "134522550"','@Published var mt5Login: String = ""'),('@Published var mt5Password: String = "Kenya@254"','@Published var mt5Password: String = ""'),('@Published var mt5Server: String = "ExnessKE-MT5Trial9"','@Published var mt5Server: String = ""')]: s=s.replace(old,new)
+          s=s.replace('loadSettings()\n        setupNotificationObservers()','loadSettings()\n        SecureCredentialStore.shared.migrateLegacyUserDefaults()\n        loadSecureMT5Credentials()\n        setupNotificationObservers()')
+          s=s.replace('maxConcurrentTrades = UserDefaults.standard.integer(forKey: "maxConcurrentTrades") != 0 ?\n            UserDefaults.standard.integer(forKey: "maxConcurrentTrades") : 2','maxConcurrentTrades = UserDefaults.standard.integer(forKey: "maxConcurrentTrades") != 0 ?\n            UserDefaults.standard.integer(forKey: "maxConcurrentTrades") : 2\n        dailyTradeLimit = UserDefaults.standard.integer(forKey: "dailyTradeLimit") != 0 ? UserDefaults.standard.integer(forKey: "dailyTradeLimit") : scalpingConfig.maxDailyTrades\n        scalpingConfig.maxDailyTrades = dailyTradeLimit')
+          old='''        mt5AuthToken = UserDefaults.standard.string(forKey: "mt5AuthToken") ?? "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"\n        mt5MagicNumber = UserDefaults.standard.integer(forKey: "mt5MagicNumber") != 0 ?\n            UserDefaults.standard.integer(forKey: "mt5MagicNumber") : 888888\n        mt5Login = UserDefaults.standard.string(forKey: "mt5Login") ?? "134522550"\n        mt5Password = UserDefaults.standard.string(forKey: "mt5Password") ?? "Kenya@254"\n        mt5Server = UserDefaults.standard.string(forKey: "mt5Server") ?? "ExnessKE-MT5Trial9"'''
+          new='''        mt5MagicNumber = UserDefaults.standard.integer(forKey: "mt5MagicNumber") != 0 ?\n            UserDefaults.standard.integer(forKey: "mt5MagicNumber") : 888888\n        loadSecureMT5Credentials()'''
+          s=s.replace(old,new)
+          s=s.replace('UserDefaults.standard.set(maxConcurrentTrades, forKey: "maxConcurrentTrades")','UserDefaults.standard.set(maxConcurrentTrades, forKey: "maxConcurrentTrades")\n        UserDefaults.standard.set(dailyTradeLimit, forKey: "dailyTradeLimit")\n        scalpingConfig.maxDailyTrades = dailyTradeLimit')
+          old='''        UserDefaults.standard.set(mt5AuthToken, forKey: "mt5AuthToken")\n        UserDefaults.standard.set(mt5MagicNumber, forKey: "mt5MagicNumber")\n        UserDefaults.standard.set(mt5Login, forKey: "mt5Login")\n        UserDefaults.standard.set(mt5Password, forKey: "mt5Password")\n        UserDefaults.standard.set(mt5Server, forKey: "mt5Server")'''
+          new='''        UserDefaults.standard.set(mt5MagicNumber, forKey: "mt5MagicNumber")\n        _ = SecureCredentialStore.shared.write(mt5AuthToken, for: "mt5AuthToken")\n        _ = SecureCredentialStore.shared.write(mt5Login, for: "mt5Login")\n        _ = SecureCredentialStore.shared.write(mt5Password, for: "mt5Password")\n        _ = SecureCredentialStore.shared.write(mt5Server, for: "mt5Server")\n        UserDefaults.standard.removeObject(forKey: "mt5AuthToken")\n        UserDefaults.standard.removeObject(forKey: "mt5Login")\n        UserDefaults.standard.removeObject(forKey: "mt5Password")\n        UserDefaults.standard.removeObject(forKey: "mt5Server")'''
+          s=s.replace(old,new)
+          marker='    func connectToIG() {'
+          methods='''    private func loadSecureMT5Credentials() {\n        mt5AuthToken = SecureCredentialStore.shared.read("mt5AuthToken") ?? ""\n        mt5Login = SecureCredentialStore.shared.read("mt5Login") ?? ""\n        mt5Password = SecureCredentialStore.shared.read("mt5Password") ?? ""\n        mt5Server = SecureCredentialStore.shared.read("mt5Server") ?? ""\n    }\n\n    func disconnectFromMT5() async {\n        isConnecting = true\n        godLog("🔌 MT5: Disconnect requested", level: .info)\n        await MT5Service.shared.disconnect()\n        mt5Connected = false\n        isConnecting = false\n        godLog("🔌 MT5: Disconnected", level: .success)\n    }\n\n'''
+          s=s.replace(marker,methods+marker) if methods not in s else s
+          s=s.replace('''        refreshTimer = Timer.publish(every: interval, on: .main, in: .common)\n            .autoconnect()\n            .sink { [weak self] _ in\n                self?.refreshData()\n            }''','''        refreshTimer = Timer.publish(every: interval, on: .main, in: .common)\n            .autoconnect()\n            .sink { [weak self] _ in\n                Task { @MainActor in\n                    await self?.refreshAccountInfo()\n                    self?.refreshData()\n                }\n            }''')
+          p.write_text(s)
+          p=app/'RefactoredAppCoordinator.swift'; s=p.read_text()
+          s=s.replace('let mt5Login = UserDefaults.standard.string(forKey: "mt5Login") ?? "436886946"\n        let mt5Password = UserDefaults.standard.string(forKey: "mt5Password") ?? "Kenya@254"\n        let mt5Server = UserDefaults.standard.string(forKey: "mt5Server") ?? "ExnessKE-MT5Trial9"','let mt5Login = SecureCredentialStore.shared.read("mt5Login") ?? ""\n        let mt5Password = SecureCredentialStore.shared.read("mt5Password") ?? ""\n        let mt5Server = SecureCredentialStore.shared.read("mt5Server") ?? ""')
+          marker='    func acceptSignal(_ signal: Signal) {'
+          deny='''    func denySignal(_ signal: Signal) {\n        signals.removeAll { $0.id == signal.id }\n        godLog("🚫 Signal denied and dismissed | \\(signal.symbol) | id=\\(signal.id)", level: .info)\n        objectWillChange.send()\n    }\n\n'''
+          s=s.replace(marker,deny+marker) if 'func denySignal' not in s else s
+          old='''            await tradeHistory.addTrade(trade)\n\n            godLog("✅ Trade opened: \\(normalizedSymbol) - Risk: KES \\(String(format: "%.2f", positionSize.riskAmount))", level: .success)'''
+          new='''            await tradeHistory.addTrade(trade)\n\n            await MainActor.run {\n                self.signals.removeAll { $0.id == normalizedSignal.id }\n                self.objectWillChange.send()\n            }\n\n            godLog("✅ Trade opened: \\(normalizedSymbol) - Risk: KES \\(String(format: "%.2f", positionSize.riskAmount))", level: .success)'''
+          s=s.replace(old,new); p.write_text(s)
+          p=app/'MT5Service.swift'; s=p.read_text()
+          s=s.replace('let saved = UserDefaults.standard.string(forKey: "mt5AuthToken") ?? "al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY"','let saved = SecureCredentialStore.shared.read("mt5AuthToken") ?? ""')
+          marker='    func initialize(login: Int, password: String, server: String) async throws {'
+          method='''    func disconnect() {\n        _isConnected = false\n        lastWorkingPath = nil\n        godLog("🔌 MT5Service: connection state cleared", level: .diagnostic)\n    }\n\n'''
+          s=s.replace(marker,method+marker) if 'func disconnect()' not in s else s; p.write_text(s)
+          (app/'ScalpingTradeMonitor.swift').write_text(r'''// ScalpingTradeMonitor.swift - V10.6 coordinated EA/app trade management
+import Foundation
+
+actor ScalpingTradeMonitor {
+    private var activeTrades: [UUID: TradeRecord] = [:]
+    private var tradeEntryIndicators: [UUID: IndicatorSet] = [:]
+    private var partialStages: [UUID: Int] = [:]
+    private let marketData: MarketDataProvider
+    private let tradeHistory: RefactoredTradeHistoryManager
+    private let signalEngine: ScalpingSignalEngine
+    private var onPendingReconciliation: ((TradeRecord) async -> Void)?
+    private var onTradeClosed: ((TradeRecord) async -> Void)?
+    private var onPartialClose: ((TradeRecord) async -> Void)?
+    init(marketData: MarketDataProvider, tradeHistory: RefactoredTradeHistoryManager, signalEngine: ScalpingSignalEngine, config: ScalpingConfig) { self.marketData=marketData; self.tradeHistory=tradeHistory; self.signalEngine=signalEngine }
+    func updatePrice(symbol: String, price: Double, indicators: IndicatorSet?) async {
+        for trade in activeTrades.values.filter({$0.symbol == symbol}) {
+            let pips = profitPips(trade, price); let profitable = pips > 0
+            await managePartialsAndRunner(trade: trade, price: price, profitPips: pips)
+            if profitable { continue }
+            if await checkTimeExit(trade) { await closeTrade(trade, reason: "Time Expiry (unprofitable)"); continue }
+            if let indicators, await shouldExitViaIndicatorReversal(trade, indicators: indicators) { await closeTrade(trade, reason: "Indicator Reversal (unprofitable)"); continue }
+            if await emergency(trade, price) { await closeTrade(trade, reason: "Emergency Fallback") }
+        }
+    }
+    private func managePartialsAndRunner(trade: TradeRecord, price: Double, profitPips: Double) async {
+        guard let id=trade.externalDealId, let ticket=Int64(id), let original=trade.originalVolume ?? trade.positionSize, original > 0 else{return}
+        let c=await MainActor.run{ScalpingConfig.shared}; var stage=partialStages[trade.id] ?? 0
+        if stage<1 && profitPips >= c.partialTP1_Pips { if await partial(ticket, original*c.partialTP1_Percent, stage:1, symbol:trade.symbol){stage=1;partialStages[trade.id]=1;await protect(trade,ticket,price)} }
+        if stage<2 && profitPips >= c.partialTP2_Pips { if await partial(ticket, original*c.partialTP2_Percent, stage:2, symbol:trade.symbol){stage=2;partialStages[trade.id]=2;await protect(trade,ticket,price)} }
+        if profitPips >= 5 {
+            let d = profitPips>=30 ? 10.0 : profitPips>=20 ? 8.0 : profitPips>=10 ? 6.0 : 4.0
+            let pip=trade.symbol.contains("JPY") ? 0.01 : 0.0001
+            let sl=trade.type == .buy ? price-d*pip : price+d*pip
+            try? await MT5Service.shared.modifyPosition(ticket:ticket,sl:sl,tp:trade.takeProfit ?? 0)
+            godLog("🛡️ TRAILING SL | \(trade.symbol) | profit=\(String(format:"%.1f",profitPips))p | distance=\(d)p | SL=\(String(format:"%.5f",sl))",level:.diagnostic)
+        }
+        if stage>=2 && profitPips >= c.partialTP3_Pips { _=try? await MT5Service.shared.modifyPosition(ticket:ticket,sl:trade.stopLoss ?? 0,tp:0); godLog("🏃 RUNNER ACTIVE | \(trade.symbol) | TP removed | unlimited hold with trailing SL",level:.success) }
+    }
+    private func partial(_ ticket:Int64,_ volume:Double,stage:Int,symbol:String) async -> Bool { let v=max(0.01,(volume*100).rounded()/100); do { if try await MT5Service.shared.closePosition(ticket:ticket,volume:v){godLog("💰 PARTIAL TP\(stage) | \(symbol) | closed=\(String(format:"%.2f",v)) lots",level:.success); NotificationCenter.default.post(name:.tradePartiallyClosed,object:symbol); return true} }catch{godLog("⚠️ PARTIAL TP\(stage) failed | \(symbol) | \(error.localizedDescription)",level:.warning)}; return false }
+    private func protect(_ trade:TradeRecord,_ ticket:Int64,_ price:Double) async { let pip=trade.symbol.contains("JPY") ? 0.01 : 0.0001; let sl=trade.type == .buy ? trade.entryPrice+pip : trade.entryPrice-pip; try? await MT5Service.shared.modifyPosition(ticket:ticket,sl:sl,tp:trade.takeProfit ?? 0) }
+    private func profitPips(_ trade:TradeRecord,_ price:Double)->Double { let pip=trade.symbol.contains("JPY") ? 0.01 : 0.0001; return trade.type == .buy ? (price-trade.entryPrice)/pip : (trade.entryPrice-price)/pip }
+    private func emergency(_ trade:TradeRecord,_ price:Double) async -> Bool { guard let sl=trade.stopLoss else{return false}; let pip=trade.symbol.contains("JPY") ? 0.01 : 0.0001; return trade.type == .buy ? price <= sl-5*pip : price >= sl+5*pip }
+    private func shouldExitViaIndicatorReversal(_ trade:TradeRecord,indicators:IndicatorSet) async -> Bool { guard await MainActor.run({ScalpingConfig.shared.enableIndicatorExit}),let e=tradeEntryIndicators[trade.id] else{return false}; if trade.type == .buy{return (indicators.rsi>70 && indicators.rsi<e.rsi-3)||(indicators.bbPosition>1 && indicators.stochasticK>80)}; return (indicators.rsi<30 && indicators.rsi>e.rsi+3)||(indicators.bbPosition<0 && indicators.stochasticK<20) }
+    private func checkTimeExit(_ trade:TradeRecord) async -> Bool { let m=await MainActor.run{ScalpingConfig.shared.maxHoldMinutes}; return Date().timeIntervalSince(trade.entryTime)>m*60 }
+    private func closeTrade(_ trade:TradeRecord,reason:String) async { guard let id=trade.externalDealId,let t=Int64(id) else{return}; godLog("🎯 EXIT FALLBACK | \(trade.symbol) | reason=\(reason)",level:.info); _=try? await MT5Service.shared.closePosition(ticket:t) }
+    func addTrade(_ trade:TradeRecord,indicators:IndicatorSet?){var c=trade;c.originalVolume=trade.positionSize;c.remainingVolume=trade.positionSize;activeTrades[trade.id]=c;partialStages[trade.id]=0;if let indicators{tradeEntryIndicators[trade.id]=indicators};godLog("📊 Trade opened: \(trade.symbol) \(trade.type) @ \(trade.entryPrice)",level:.trade)}
+    func removeTrade(id:UUID){activeTrades.removeValue(forKey:id);tradeEntryIndicators.removeValue(forKey:id);partialStages.removeValue(forKey:id)}
+    func getActiveTrades()->[TradeRecord]{Array(activeTrades.values)}
+    func getLastTradeTime(symbol:String)->Date?{activeTrades.values.filter{$0.symbol==symbol}.map{$0.entryTime}.max()}
+    func setPendingReconciliationCallback(_ callback:@escaping(TradeRecord)async->Void){onPendingReconciliation=callback}
+    func setOnTradeClosedCallback(_ callback:@escaping(TradeRecord)async->Void){onTradeClosed=callback}
+    func setOnPartialCloseCallback(_ callback:@escaping(TradeRecord)async->Void){onPartialClose=callback}
+}
+''')
+          (app/'NotificationManager.swift').write_text(r'''@preconcurrency import UserNotifications
+import SwiftUI
+import Combine
+#if os(macOS)
+import AppKit
+#endif
+@MainActor
+class NotificationManager:NSObject,ObservableObject{
+ static let shared=NotificationManager();@Published var isAuthorized=false
+ enum SoundKind{case jackpot,urgent,passive,win,loss,partial}
+ private override init(){super.init();_ = TradeNotificationBridge.shared;UNUserNotificationCenter.current().delegate=self;requestAuthorization()}
+ func requestAuthorization(){UNUserNotificationCenter.current().requestAuthorization(options:[.alert,.sound,.badge]){g,_ in Task{@MainActor in self.isAuthorized=g}}}
+ private func sound(_ k:SoundKind)->UNNotificationSound{let n:String;switch k{case .jackpot:n="jackpot.aiff";case .urgent:n="urgent.aiff";case .passive:n="passive.aiff";case .win:n="win.aiff";case .loss:n="loss.aiff";case .partial:n="partial.aiff"};return UNNotificationSound(named:UNNotificationSoundName(n))}
+ private func foreground(_ k:SoundKind){#if os(macOS);let n:NSSound.Name;switch k{case .jackpot:n=NSSound.Name("Glass");case .urgent:n=NSSound.Name("Ping");case .passive:n=NSSound.Name("Pop");case .win:n=NSSound.Name("Hero");case .loss:n=NSSound.Name("Basso");case .partial:n=NSSound.Name("Tink")};NSSound(named:n)?.play();#endif}
+ func sendSignalNotification(_ s:Signal){guard isAuthorized else{return};let k:SoundKind=s.confidence>=85 ? .jackpot : s.confidence>=80 ? .urgent : .passive;let c=UNMutableNotificationContent();c.title="🚨 \(s.symbol) \(s.type.displayName) SIGNAL";c.body=String(format:"Price: %.5f | Confidence: %.0f%% | Expires: %@",s.price,s.confidence,fmt(s.expiryTime));c.sound=sound(k);c.interruptionLevel=s.confidence>=80 ? .timeSensitive : .active;UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:"signal_\(s.id)",content:c,trigger:UNTimeIntervalNotificationTrigger(timeInterval:1,repeats:false)));foreground(k)}
+ func sendTradeClosedNotification(_ t:TradeRecord){guard isAuthorized,t.status == .completed,(t.remainingVolume ?? 0)<=0 else{return};let p=t.pnl ?? 0,k:SoundKind=p>=0 ? .win:.loss;let c=UNMutableNotificationContent();c.title="\(p>=0 ? "✅":"❌") \(t.symbol) Trade Closed";c.body=String(format:"P&L: %@KES %.2f (%.2f%%)",p>=0 ? "+":"",p,t.pnlPercent ?? 0);c.sound=sound(k);UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:"trade_\(t.id)",content:c,trigger:UNTimeIntervalNotificationTrigger(timeInterval:1,repeats:false)));foreground(k)}
+ func sendPartialCloseNotification(symbol:String){guard isAuthorized else{return};let c=UNMutableNotificationContent();c.title="💰 \(symbol) Partial Close";c.body="Partial TP executed; remaining position is protected by trailing SL.";c.sound=sound(.partial);UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:"partial_\(symbol)_\(UUID())",content:c,trigger:UNTimeIntervalNotificationTrigger(timeInterval:1,repeats:false)));foreground(.partial)}
+ private func fmt(_ d:Date)->String{let f=DateFormatter();f.dateFormat="HH:mm:ss";return f.string(from:d)}
+ func removeAllNotifications(){UNUserNotificationCenter.current().removeAllDeliveredNotifications();UNUserNotificationCenter.current().removeAllPendingNotificationRequests()}
+ func sendTestNotification(){let c=UNMutableNotificationContent();c.title="Stellas System Check";c.body="Notification pipe is active.";c.sound=.default;UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:"system_test_\(UUID())",content:c,trigger:nil))}
+}
+extension NotificationManager:@preconcurrency UNUserNotificationCenterDelegate{func userNotificationCenter(_ c:UNUserNotificationCenter,willPresent n:UNNotification,withCompletionHandler h:@escaping(UNNotificationPresentationOptions)->Void){h([.banner,.sound,.badge])};func userNotificationCenter(_ c:UNUserNotificationCenter,didReceive r:UNNotificationResponse,withCompletionHandler h:@escaping()->Void){if r.notification.request.identifier.hasPrefix("signal_"){NotificationCenter.default.post(name:.showSignalDashboard,object:nil)};h()}}
+''')
+          p=app/'SettingsView.swift';s=p.read_text()
+          anchor='''                                    settingsRow("Max Concurrent Trades") {\n                                        HStack(spacing: 12) {\n                                            Text("\\(viewModel.maxConcurrentTrades)")\n                                                .font(.system(size: 12, weight: .bold, design: .monospaced))\n                                                .foregroundColor(.accentCyan)\n                                                .frame(width: 30, alignment: .trailing)\n                                            Stepper("", value: $viewModel.maxConcurrentTrades, in: 1...10)\n                                                .labelsHidden()\n                                        }\n                                    }'''
+          if 'settingsRow("Daily Trade Limit")' not in s:s=s.replace(anchor,anchor+'''\n\n                                    settingsRow("Daily Trade Limit") {\n                                        HStack(spacing: 12) {\n                                            Text("\\(viewModel.dailyTradeLimit)").font(.system(size: 12, weight: .bold, design: .monospaced)).foregroundColor(.accentGold).frame(width: 30, alignment: .trailing)\n                                            Stepper("", value: $viewModel.dailyTradeLimit, in: 1...100).labelsHidden()\n                                        }\n                                    }''')
+          s=s.replace('ScalpingConfig.shared.enableHourlyLimit = viewModel.enableHourlyLimit','ScalpingConfig.shared.enableHourlyLimit = viewModel.enableHourlyLimit\n        ScalpingConfig.shared.maxDailyTrades = viewModel.dailyTradeLimit')
+          old='''                                    HStack(spacing: 10) {\n                                        Button(action: {\n                                            Task {\n                                                await viewModel.connectToMT5()\n                                            }\n                                        }) {'''
+          if 'Text("DISCONNECT")' not in s:
+              start=s.find(old)
+              if start==-1: raise SystemExit('MT5 button anchor not found')
+              # Replace the whole HStack block using a targeted regex from the opening HStack to its closing before card padding.
+              pattern=re.compile(r'                                    HStack\(spacing: 10\) \{\n                                        Button\(action: \{\n                                            Task \{\n                                                await viewModel\.connectToMT5\(\)\n                                            \}\n                                        \}\) \{.*?                                    \}\n                                \}\\n                                \.padding\(16\)\n                            \}',re.S)
+              repl='''                                    HStack(spacing: 10) {\n                                        Button(action: { Task { await viewModel.connectToMT5() } }) {\n                                            HStack(spacing: 6) { if viewModel.isConnecting { ProgressView().scaleEffect(0.5).tint(.bgPrimary) } else { Image(systemName: "bolt.fill") }; Text(viewModel.isConnecting ? "CONNECTING..." : (viewModel.mt5Connected ? "RECHECK MT5" : "CONNECT MT5")).font(.system(size: 11, weight: .bold, design: .monospaced)) }\n                                                .frame(maxWidth: .infinity).padding(.vertical, 10).background(Color.accentCyan).foregroundColor(.bgPrimary).cornerRadius(7)\n                                        }.buttonStyle(.plain).disabled(viewModel.isConnecting)\n                                        Button(action: { Task { await viewModel.disconnectFromMT5() } }) { HStack(spacing: 6) { Image(systemName: "bolt.slash.fill"); Text("DISCONNECT") }.font(.system(size: 11, weight: .bold, design: .monospaced)).frame(maxWidth: .infinity).padding(.vertical, 10).background(viewModel.mt5Connected ? Color.accentRed.opacity(0.18) : Color.bgSecondary).foregroundColor(viewModel.mt5Connected ? .accentRed : .textMuted).cornerRadius(7) }.buttonStyle(.plain).disabled(viewModel.isConnecting || !viewModel.mt5Connected)\n                                    }\n                                }\n                                .padding(16)\n                            }'''
+              s2=pattern.sub(repl,s,count=1)
+              if s2==s: raise SystemExit('MT5 button regex did not match')
+              s=s2
+          p.write_text(s)
+          (app/'TradeNotificationExtensions.swift').write_text('''import Foundation\nextension Notification.Name { static let tradePartiallyClosed = Notification.Name("tradePartiallyClosed") }\n@MainActor final class TradeNotificationBridge { static let shared=TradeNotificationBridge(); private var token:NSObjectProtocol?; private init(){ token=NotificationCenter.default.addObserver(forName:.tradePartiallyClosed,object:nil,queue:.main){ n in if let symbol=n.object as? String { NotificationManager.shared.sendPartialCloseNotification(symbol:symbol) } } } }\n''')
+          for name in ['DashboardViewModel.swift','RefactoredAppCoordinator.swift','MT5Service.swift']:
+              text=(app/name).read_text()
+              for secret in ['Kenya@254','al3RUuur7PCUjNiE1ja/Dzx5tpWz0EeqGUA618k6VY','"134522550"','"ExnessKE-MT5Trial9"']:
+                  if secret in text: raise SystemExit(f'Security check failed: {secret} remains in {name}')
+          wf=root/'.github/workflows/apply-agent-trade-fixes.yml'
+          if wf.exists(): wf.unlink()
+          print('Patch application complete')
+      - name: Commit patched files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ForexScalperApp .github/workflows/apply-agent-trade-fixes.yml || true
+          git diff --cached --check
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Secure MT5 credentials and harden trade management"
+          git push
