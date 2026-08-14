@@ -815,6 +815,28 @@ class RefactoredAppCoordinator: ObservableObject {
         let pipSize = symbol.contains("JPY") ? 0.01 : 0.0001
         let atrPips = atrVal / pipSize
 
+        // Smart entry: do not chase an extended candle. When pullback mode is enabled,
+        // wait briefly for price to return toward the fast EMA/ATR entry zone. This is
+        // intentionally client-side because the current V10.5 EA /v1/order endpoint is
+        // a MARKET-only action; sending pending actions would reproduce the earlier
+        // "Unsupported order action" failure.
+        if await shouldWaitForPullback(symbol: symbol, signal: signal, atr: atrVal) {
+            godLog("📌 SMART ENTRY | \(symbol) | pullback zone not reached yet | waiting up to 12s", level: .info)
+            godLog("📌 PENDING LIMIT | \(symbol) | deferred safely: current EA bridge exposes market action only", level: .diagnostic)
+            var reached = false
+            for second in 1...12 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if await isPullbackEntryReady(symbol: symbol, signal: signal, atr: atrVal) {
+                    reached = true
+                    godLog("🎯 SMART ENTRY READY | \(symbol) | pullback reached after \(second)s", level: .success)
+                    break
+                }
+            }
+            if !reached {
+                godLog("⏱️ SMART ENTRY TIMEOUT | \(symbol) | using spread/volatility-aware market execution", level: .warning)
+            }
+        }
+
         var executionMode: MT5ExecutionMode = .market
         var deviation: Int = 10
         var filler: MT5FillingType = .ioc
@@ -854,6 +876,27 @@ class RefactoredAppCoordinator: ObservableObject {
             godLog("❌ Smart order failed: \(error.localizedDescription)", level: .error)
             return nil
         }
+    }
+
+    private func shouldWaitForPullback(symbol: String, signal: Signal, atr: Double) async -> Bool {
+        guard await MainActor.run({ ScalpingConfig.shared.enablePullbackEntry }) else { return false }
+        guard let actor = marketData as? RefactoredMarketDataActor else { return false }
+        let candles = await actor.getCandles(symbol: symbol, timeframe: "1m")
+        guard candles.count >= 25, let current = candles.last?.close else { return false }
+        let ema = Indicators.ema(candles.map { $0.close }, period: 21).last ?? current
+        let distance = abs(current - ema)
+        return distance > max(atr * 0.35, symbol.contains("JPY") ? 0.0035 : 0.00035)
+    }
+
+    private func isPullbackEntryReady(symbol: String, signal: Signal, atr: Double) async -> Bool {
+        guard let actor = marketData as? RefactoredMarketDataActor else { return true }
+        let candles = await actor.getCandles(symbol: symbol, timeframe: "1m")
+        guard candles.count >= 25, let current = candles.last?.close else { return false }
+        let ema = Indicators.ema(candles.map { $0.close }, period: 21).last ?? current
+        let tolerance = max(atr * 0.15, symbol.contains("JPY") ? 0.0015 : 0.00015)
+        let nearEMA = abs(current - ema) <= tolerance
+        let directionAligned = signal.type == .buy ? current >= ema - tolerance : current <= ema + tolerance
+        return nearEMA && directionAligned
     }
 
     private func calculateLatestIndicators(symbol: String) async -> IndicatorSet? {
