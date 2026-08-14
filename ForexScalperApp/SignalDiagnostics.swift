@@ -3,16 +3,7 @@ import Foundation
 /// Makes the signal engine's existing evaluation output explicit and easy to follow in real time.
 /// The engine remains the authority for the decision; this component only observes and explains logs.
 enum SignalDiagnostics {
-    private static let lock = NSLock()
-    private static var installed = false
-    private static var recentMessages: [String: Date] = [:]
-
     static func install() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !installed else { return }
-        installed = true
-
         NotificationCenter.default.addObserver(
             forName: .newLogEntry,
             object: nil,
@@ -35,17 +26,6 @@ enum SignalDiagnostics {
     }
 
     private static func emitTrace(from message: String, kind: String) {
-        let fingerprint = "\(kind)|\(message)"
-        lock.lock()
-        let now = Date()
-        if let last = recentMessages[fingerprint], now.timeIntervalSince(last) < 0.25 {
-            lock.unlock()
-            return
-        }
-        recentMessages[fingerprint] = now
-        recentMessages = recentMessages.filter { now.timeIntervalSince($0.value) < 30 }
-        lock.unlock()
-
         if let range = message.range(of: "📊 EVAL:") {
             let evaluation = String(message[range.lowerBound...])
             godLog("🧭 SIGNAL TRACE [EVALUATION] \(evaluation)", level: .diagnostic)
