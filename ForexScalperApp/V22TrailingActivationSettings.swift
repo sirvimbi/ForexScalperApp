@@ -113,10 +113,12 @@ actor MT5V22TrailingSettingsService {
     nonisolated static let shared = MT5V22TrailingSettingsService()
     private let session = URLSession(configuration: .default)
 
-    private var baseURL: String {
-        var raw = UserDefaults.standard.string(forKey: "mt5BridgeURL") ?? "http://127.0.0.1:8890"
-        if raw.hasSuffix("/") { raw.removeLast() }
-        return raw
+    private func bridgeBaseURL() async -> String {
+        await MainActor.run {
+            var raw = UserDefaults.standard.string(forKey: "mt5BridgeURL") ?? "http://127.0.0.1:8890"
+            if raw.hasSuffix("/") { raw.removeLast() }
+            return raw
+        }
     }
 
     private func authToken() async -> String {
@@ -135,6 +137,7 @@ actor MT5V22TrailingSettingsService {
     }
 
     private func request(method: String, pips: Double?) async throws -> Double {
+        let baseURL = await bridgeBaseURL()
         guard let url = URL(string: baseURL + "/v1/settings/trailing") else { throw URLError(.badURL) }
         var request = URLRequest(url: url)
         request.httpMethod = method
