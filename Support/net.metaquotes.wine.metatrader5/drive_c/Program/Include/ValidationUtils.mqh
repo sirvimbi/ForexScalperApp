@@ -60,33 +60,13 @@ ValidationResponse ValidateSymbol(string &symbol) {
         }
     }
 
-    // 3. Try removing "T" from "USDT" if present
-    if (StringFind(symbol, "USDT") > 0) {
-        string trial = symbol;
-        StringReplace(trial, "USDT", "USD");
-        if (SymbolSelect(trial, true)) {
-            Print("ℹ️ Symbol adjusted (USDT->USD): ", symbol, " -> ", trial);
-            symbol = trial;
-            return res;
-        }
-        // Also try with suffixes for the new base
-        for(int i=0; i<ArraySize(suffixes); i++) {
-            string trialWithSuffix = trial + suffixes[i];
-            if (SymbolSelect(trialWithSuffix, true)) {
-                Print("ℹ️ Symbol adjusted (USDT->USD+suffix): ", symbol, " -> ", trialWithSuffix);
-                symbol = trialWithSuffix;
-                return res;
-            }
-        }
-    }
-
-    // 4. Last resort: iterate over all available broker symbols to find a prefix match
-    int total = SymbolsTotal(false);
+    // 3. Last resort: iterate over all available broker symbols to find a prefix match
+    int total = SymbolsTotal(true);
     for(int i=0; i<total; i++) {
-        string s = SymbolName(i, false);
+        string s = SymbolName(i, true);
         if(StringFind(s, symbol) == 0) { // Starts with
             if(SymbolSelect(s, true)) {
-                Print("ℹ️ Symbol found and added to Market Watch: ", symbol, " -> ", s);
+                Print("ℹ️ Symbol found in broker list: ", symbol, " -> ", s);
                 symbol = s;
                 return res;
             }
@@ -110,9 +90,9 @@ bool IsValidISO8601Format(const string &str) {
     if (str[4] != '-' || str[7] != '-')
         return false;
 
-    int year  = (int)StringToInteger(StringSubstr(str, 0, 4));
-    int month = (int)StringToInteger(StringSubstr(str, 5, 2));
-    int day   = (int)StringToInteger(StringSubstr(str, 8, 2));
+    int year  = StringToInteger(StringSubstr(str, 0, 4));
+    int month = StringToInteger(StringSubstr(str, 5, 2));
+    int day   = StringToInteger(StringSubstr(str, 8, 2));
 
     if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31)
         return false;
@@ -127,7 +107,7 @@ bool IsValidISO8601Format(const string &str) {
 
     // Parse time components
     if (len >= 13) {
-        hour = (int)StringToInteger(StringSubstr(str, 11, 2));
+        hour = StringToInteger(StringSubstr(str, 11, 2));
         if (hour < 0 || hour > 23)
             return false;
     }
@@ -135,7 +115,7 @@ bool IsValidISO8601Format(const string &str) {
     if (len >= 16) {
         if (str[13] != ':')
             return false;
-        minute = (int)StringToInteger(StringSubstr(str, 14, 2));
+        minute = StringToInteger(StringSubstr(str, 14, 2));
         if (minute < 0 || minute > 59)
             return false;
     }
@@ -143,7 +123,7 @@ bool IsValidISO8601Format(const string &str) {
     if (len >= 19) {
         if (str[16] != ':' && str[17] != ':')
             return false;
-        second = (int)StringToInteger(StringSubstr(str, 17, 2));
+        second = StringToInteger(StringSubstr(str, 17, 2));
         if (second < 0 || second > 59)
             return false;
     }
@@ -295,78 +275,3 @@ ENUM_ORDER_TYPE_FILLING parseFillingType(string fill) {
     } 
     return (ENUM_ORDER_TYPE_FILLING)-1;
 }
-
-//+------------------------------------------------------------------+
-//| Price Normalization and Stop Validation                          |
-//+------------------------------------------------------------------+
-
-// Normalizes price based on Symbol's tick size
-double NormalizePrice(string symbol, double price) {
-   double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
-   if(tickSize <= 0) return price;
-   return MathRound(price / tickSize) * tickSize;
-}
-
-// Normalizes volume based on Symbol's volume step and min/max
-double NormalizeVolume(string symbol, double volume) {
-   double step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
-   double minVol = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
-   double maxVol = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
-
-   if(step <= 0) return volume;
-
-   // Calculate digits for volume rounding (e.g. step 0.01 -> 2 digits)
-   int volDigits = 0;
-   if(step < 1.0) volDigits = (int)MathCeil(-MathLog10(step));
-
-   double normalized = MathRound(volume / step) * step;
-   normalized = NormalizeDouble(normalized, volDigits);
-
-   if(normalized < minVol) normalized = minVol;
-   if(normalized > maxVol) normalized = maxVol;
-
-   return normalized;
-}
-
-// Repairs SL/TP to be at least StopLevel away from the current price
-// Accounts for spread and freeze levels for elite execution
-void RepairStops(string symbol, ENUM_ORDER_TYPE type, double openPrice, double &sl, double &tp) {
-   long stopLevel = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   long freezeLevel = SymbolInfoInteger(symbol, SYMBOL_TRADE_FREEZE_LEVEL);
-   double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
-   double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
-   double spread = ask - bid;
-
-   // Buffer for absolute safety: Max of (StopLevel, FreezeLevel, 30 points/3 pips)
-   double safeDistance = MathMax((double)stopLevel, (double)freezeLevel);
-   safeDistance = MathMax(safeDistance, 30.0) * point;
-
-   if(type == ORDER_TYPE_BUY || type == ORDER_TYPE_BUY_LIMIT || type == ORDER_TYPE_BUY_STOP) {
-      // For BUY: SL/TP checked against BID
-      // If we are at ASK (market), use current BID
-      double basePrice = (MathAbs(openPrice - ask) < point * 2) ? bid : openPrice - spread;
-
-      if(sl > 0 && basePrice - sl < safeDistance) {
-         sl = NormalizePrice(symbol, basePrice - safeDistance);
-         Print("🔧 GodMode: Adjusted BUY SL to ", sl, " (Base: ", basePrice, " MinDist: ", safeDistance, ")");
-      }
-      if(tp > 0 && tp - basePrice < safeDistance) {
-         tp = NormalizePrice(symbol, basePrice + safeDistance);
-         Print("🔧 GodMode: Adjusted BUY TP to ", tp, " (Base: ", basePrice, " MinDist: ", safeDistance, ")");
-      }
-   } else {
-      // For SELL: SL/TP checked against ASK
-      double basePrice = (MathAbs(openPrice - bid) < point * 2) ? ask : openPrice + spread;
-
-      if(sl > 0 && sl - basePrice < safeDistance) {
-         sl = NormalizePrice(symbol, basePrice + safeDistance);
-         Print("🔧 GodMode: Adjusted SELL SL to ", sl, " (Base: ", basePrice, " MinDist: ", safeDistance, ")");
-      }
-      if(tp > 0 && basePrice - tp < safeDistance) {
-         tp = NormalizePrice(symbol, basePrice - safeDistance);
-         Print("🔧 GodMode: Adjusted SELL TP to ", tp, " (Base: ", basePrice, " MinDist: ", safeDistance, ")");
-      }
-   }
-}
-
