@@ -4,24 +4,15 @@ import Combine
 @MainActor
 final class NewsService: ObservableObject {
 
-    // MARK: - Singleton
-
     static let shared = NewsService()
-
-    // MARK: - Published State
 
     @Published private(set) var upcomingEvents: [NewsEvent] = []
     @Published private(set) var isFetching = false
 
-    // MARK: - Internal State
-
     private var lastFetch: Date?
     private var broadcastedEventIds = Set<String>()
 
-    // Prevent excessive requests.
-    private let minimumRefreshInterval: TimeInterval = 300 // 5 minutes
-
-    // MARK: - URLSession
+    private let minimumRefreshInterval: TimeInterval = 300
 
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
@@ -32,21 +23,18 @@ final class NewsService: ObservableObject {
         return URLSession(configuration: config)
     }()
 
-    // MARK: - Data Sources
-
+    // Forex Factory's current weekly XML export is served by Fair Economy.
+    // The legacy nfs.forexfactory.com and cdn-nfs.faireconomy.media hosts
+    // are no longer reliable and produce NSURLError -1003 on macOS.
     private let calendarURLs: [URL] = [
-        URL(string: "https://nfs.forexfactory.com/ffcal_week_this.xml")!,
-        URL(string: "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.xml")!
+        URL(string: "https://nfs.faireconomy.media/ff_calendar_thisweek.xml")!
     ]
 
-    // MARK: - Initialization
-
     private init() {
-        Task {
-            await fetchNews()
+        Task { [weak self] in
+            await self?.fetchNews()
         }
 
-        // Refresh every hour.
         Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { _ in
             Task { @MainActor in
                 await NewsService.shared.fetchNews()
@@ -54,14 +42,9 @@ final class NewsService: ObservableObject {
         }
     }
 
-    // MARK: - Public API
-
     func fetchNews(force: Bool = false) async {
-
-        // Prevent duplicate simultaneous requests.
         guard !isFetching else { return }
 
-        // Avoid hammering the calendar server.
         if !force, let lastFetch, Date().timeIntervalSince(lastFetch) < minimumRefreshInterval {
             return
         }
@@ -71,49 +54,53 @@ final class NewsService: ObservableObject {
 
         godLog("🌍 NewsService: Fetching economic calendar...", level: .diagnostic)
 
-        // Try every configured remote source.
         for url in calendarURLs {
             do {
                 godLog("🌐 NewsService: Trying calendar source: \(url.host ?? "unknown")", level: .diagnostic)
-                
+
                 var request = URLRequest(url: url)
-                request.setValue("GodMode/1.0", forHTTPHeaderField: "User-Agent")
+                request.setValue("ForexScalperApp/10.6", forHTTPHeaderField: "User-Agent")
+                request.setValue("application/xml,text/xml;q=0.9,*/*;q=0.1", forHTTPHeaderField: "Accept")
                 request.timeoutInterval = 12
 
                 let (data, response) = try await session.data(for: request)
 
-                if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-                    godLog("⚠️ NewsService: Source \(url.host ?? "") returned HTTP \(httpResponse.statusCode)", level: .warning)
+                if let httpResponse = response as? HTTPURLResponse,
+                   !(200...299).contains(httpResponse.statusCode) {
+                    godLog("⚠️ NewsService: Calendar source returned HTTP \(httpResponse.statusCode)", level: .warning)
                     continue
                 }
 
-                guard !data.isEmpty else { continue }
+                guard !data.isEmpty else {
+                    godLog("⚠️ NewsService: Calendar source returned an empty response", level: .warning)
+                    continue
+                }
 
                 let events = parseForexFactoryXML(data)
 
                 if !events.isEmpty {
-                    self.upcomingEvents = events.sorted { $0.time < $1.time }
-                    self.lastFetch = Date()
+                    upcomingEvents = events.sorted { $0.time < $1.time }
+                    lastFetch = Date()
                     godLog("✅ NewsService: Loaded \(events.count) economic events", level: .success)
                     generateNewsBroadcasts()
                     return
                 }
 
+                godLog("⚠️ NewsService: Calendar response contained no parseable events", level: .warning)
+
+            } catch let error as URLError {
+                godLog("⚠️ NewsService: Calendar request failed (\(error.code.rawValue)): \(error.localizedDescription)", level: .warning)
             } catch {
-                godLog("⚠️ NewsService: Source \(url.host ?? "") failed: \(error.localizedDescription)", level: .warning)
-                continue
+                godLog("⚠️ NewsService: Calendar request failed: \(error.localizedDescription)", level: .warning)
             }
         }
 
-        // Fallback if all sources failed
         if upcomingEvents.isEmpty {
-            godLog("⚠️ NewsService: Using fallback institutional calendar", level: .warning)
-            self.upcomingEvents = generateFallbackEvents()
+            godLog("⚠️ NewsService: Remote calendar unavailable; using fallback institutional calendar", level: .warning)
+            upcomingEvents = generateFallbackEvents()
             generateNewsBroadcasts()
         }
     }
-
-    // MARK: - News Broadcasts
 
     private func generateNewsBroadcasts() {
         let now = Date()
@@ -141,19 +128,17 @@ final class NewsService: ObservableObject {
 
             NotificationCenter.default.post(name: .newGodModeInsight, object: insight)
             broadcastedEventIds.insert(eventKey)
-            
+
             godLog("📡 NEWS BROADCAST: \(event.title) (\(event.currency))", level: .info)
         }
     }
-
-    // MARK: - Event Analysis
 
     private func analyzeEvent(_ event: NewsEvent) -> (summary: String, sentiment: SignalType, pairs: [String]) {
         let title = event.title.lowercased()
         let curr = event.currency.uppercased()
         var summary = "Institutional volatility expected for \(curr). "
         var sentiment: SignalType = .none
-        
+
         if title.contains("interest rate") || title.contains("rate decision") || title.contains("cpi") || title.contains("inflation") {
             summary += "Hawkish expectations can support \(curr), while dovish expectations can weaken it."
             sentiment = .buy
@@ -172,8 +157,6 @@ final class NewsService: ObservableObject {
 
         return (summary, sentiment, pairs)
     }
-
-    // MARK: - Fallback Calendar
 
     private func generateFallbackEvents() -> [NewsEvent] {
         let now = Date()
@@ -206,11 +189,9 @@ final class NewsService: ObservableObject {
         return events
     }
 
-    // MARK: - XML Parsing (Robust CDATA & Date Handling)
-
     private func parseForexFactoryXML(_ data: Data) -> [NewsEvent] {
         guard let xmlString = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else { return [] }
-        
+
         var events: [NewsEvent] = []
         let itemPattern = "<event>(.*?)</event>"
 
@@ -230,7 +211,6 @@ final class NewsService: ObservableObject {
                 let impactStr = cleanValue(extract(tag: "impact", from: content))
 
                 if title.isEmpty || currency.isEmpty || dateStr.isEmpty || timeStr.isEmpty { continue }
-
                 guard let eventTime = parseDate(dateStr: dateStr, timeStr: timeStr) else { continue }
 
                 let impact: NewsImpact
@@ -273,7 +253,7 @@ final class NewsService: ObservableObject {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "America/New_York")
-        
+
         let fullStr = "\(dateStr) \(timeStr)"
         let formats = [
             "MM-dd-yyyy h:mma",
@@ -281,7 +261,7 @@ final class NewsService: ObservableObject {
             "MM-dd-yyyy HH:mm",
             "yyyy-MM-dd HH:mm"
         ]
-        
+
         for format in formats {
             formatter.dateFormat = format
             if let date = formatter.date(from: fullStr) {
@@ -291,15 +271,13 @@ final class NewsService: ObservableObject {
         return nil
     }
 
-    // MARK: - Symbol Impact
-
     func getImpactForSymbol(_ symbol: String, timeframeMinutes: Int) -> (impact: NewsImpact, event: String?) {
         let now = Date()
         let windowEnd = now.addingTimeInterval(TimeInterval(timeframeMinutes * 60))
         let normalizedSymbol = symbol.uppercased().filter { $0.isLetter }
-        
+
         guard normalizedSymbol.count >= 6 else { return (.none, nil) }
-        
+
         let base = String(normalizedSymbol.prefix(3))
         let quote = String(normalizedSymbol.suffix(3))
 
