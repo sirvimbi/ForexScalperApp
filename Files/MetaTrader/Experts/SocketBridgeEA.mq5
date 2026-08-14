@@ -202,12 +202,10 @@ string HandleValidatedModifyRequest(const string body)
       const ENUM_POSITION_TYPE liveType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       const double liveSL = PositionGetDouble(POSITION_SL);
       const double liveTP = PositionGetDouble(POSITION_TP);
-
       if(keepSL == "true" || keepSL == "1") targetSL = liveSL;
       if(keepTP == "true" || keepTP == "1") targetTP = liveTP;
 
       BuildSafeStops(symbol, liveType, targetSL, targetTP, safeSL, safeTP, changedSL, changedTP);
-
       string liveReason = "";
       if(!StopsAreValid(symbol, liveType, safeSL, safeTP, liveReason))
       {
@@ -219,7 +217,6 @@ string HandleValidatedModifyRequest(const string body)
       ResetLastError();
       modified = tradeControl.PositionModify(ticket, safeSL, safeTP);
       retcode = tradeControl.ResultRetcode();
-
       if(modified && (retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_DONE_PARTIAL))
       {
          Print("[EA V21.1] MODIFY accepted ticket=", ticket, " symbol=", symbol,
@@ -234,7 +231,6 @@ string HandleValidatedModifyRequest(const string body)
    }
 
    const bool success = modified && (retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_DONE_PARTIAL);
-
    CJAVal result;
    result["success"] = success;
    result["retryable"] = !success;
@@ -414,14 +410,16 @@ void ProcessHttpClients()
          if(request.path == "/v1/order/modify" || request.path == "/api/mt5/modify" || request.path == "/modify")
          {
             string response = HandleValidatedModifyRequest(request.body);
-            SendHttpResponse(socket, HttpResponse(200, response));
+            string http = HttpResponse(200, response);
+            char responseBytes[];
+            int responseLength = StringToCharArray(http, responseBytes, 0, StringLen(http));
+            if(responseLength > 0) send(socket, responseBytes, StringLen(http), 0);
             closesocket(socket);
             ArrayRemove(httpClientSockets, i);
             continue;
          }
 
-         if(commandHandler != NULL)
-            commandHandler.HandleCommand(socket, request);
+         if(commandHandler != NULL) commandHandler.HandleCommand(socket, request);
          closesocket(socket);
          ArrayRemove(httpClientSockets, i);
          continue;
