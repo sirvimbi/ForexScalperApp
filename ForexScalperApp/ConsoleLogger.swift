@@ -8,6 +8,9 @@ class ConsoleLogger: ObservableObject {
     static let shared = ConsoleLogger()
 
     @Published var logs: [LogEntryUI] = []
+    @Published var isPaused = false
+    private var bufferWhilePaused: [LogEntryUI] = []
+
     private let maxLogs = 5000
     private let automaticClearInterval: TimeInterval = 30 * 60
     private var lastMessage: String?
@@ -114,14 +117,34 @@ class ConsoleLogger: ObservableObject {
             self.lastMessageTime = now
 
             let entry = LogEntryUI(timestamp: now, message: message, level: level)
-            self.logs.append(entry)
-
-            if self.logs.count > self.maxLogs {
-                self.logs.removeFirst(self.logs.count - self.maxLogs)
+            
+            if self.isPaused {
+                self.bufferWhilePaused.append(entry)
+                if self.bufferWhilePaused.count > self.maxLogs {
+                    self.bufferWhilePaused.removeFirst()
+                }
+            } else {
+                self.logs.append(entry)
+                if self.logs.count > self.maxLogs {
+                    self.logs.removeFirst(self.logs.count - self.maxLogs)
+                }
             }
 
             if printToConsole {
                 print(message)
+            }
+        }
+    }
+
+    func togglePause() {
+        isPaused.toggle()
+        if !isPaused {
+            // Flush buffer when unpausing
+            logs.append(contentsOf: bufferWhilePaused)
+            bufferWhilePaused.removeAll()
+            
+            if logs.count > maxLogs {
+                logs.removeFirst(logs.count - maxLogs)
             }
         }
     }

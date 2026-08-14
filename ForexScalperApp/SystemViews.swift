@@ -432,6 +432,18 @@ struct SystemLogsView: View {
                 Spacer()
                 
                 Button(action: {
+                    consoleLogger.togglePause()
+                }) {
+                    Label(consoleLogger.isPaused ? "RESUME" : "PAUSE", systemImage: consoleLogger.isPaused ? "play.fill" : "pause.fill")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(consoleLogger.isPaused ? .accentGreen : .accentGold)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background((consoleLogger.isPaused ? Color.accentGreen : Color.accentGold).opacity(0.1))
+                .cornerRadius(4)
+
+                Button(action: {
                     ConsoleLogger.shared.clearLogs()
                 }) {
                     Label("CLEAR", systemImage: "trash.fill")
