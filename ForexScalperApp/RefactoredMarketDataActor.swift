@@ -81,6 +81,8 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         let status = count == 0 ? "MISSING" : (depthOK ? "READY" : "PARTIAL")
         let level: LogLevel = count == 0 ? .warning : (depthOK ? .success : .diagnostic)
 
+        // Kline.closeTime is an epoch timestamp (milliseconds), not a Date.
+        // Convert it to Date only for human-readable diagnostic output.
         let latest = candles.last.map { formatCandleDate($0.closeTime) } ?? "none"
         let oldest = candles.first.map { formatCandleDate($0.closeTime) } ?? "none"
         let missing = max(0, minimum - count)
@@ -89,10 +91,12 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         godLog("🕯️ CANDLE \(status) | \(symbol) | TF=\(timeframe) | received=\(count) | required=\(minimum) | missing=\(missing) | oldest=\(oldest) | latest=\(latest)\(delta)", level: level)
     }
 
-    private func formatCandleDate(_ time: Date) -> String {
+    private func formatCandleDate(_ timestamp: Int) -> String {
+        // Binance-style timestamps are milliseconds since Unix epoch.
+        let date = Date(timeIntervalSince1970: TimeInterval(timestamp) / 1000.0)
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: time)
+        return formatter.string(from: date)
     }
     
     func getLatestPrice(symbol: String) async -> Double? {
