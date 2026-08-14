@@ -120,6 +120,16 @@ struct SettingsView: View {
                                         }
                                     }
 
+                                    settingsRow("Daily Trade Limit") {
+                                        HStack(spacing: 12) {
+                                            Text("\(viewModel.dailyTradeLimit)")
+                                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                                .foregroundColor(.accentGold)
+                                                .frame(width: 30, alignment: .trailing)
+                                            Stepper("", value: $viewModel.dailyTradeLimit, in: 1...100).labelsHidden()
+                                        }
+                                    }
+
                                     Divider().background(Color.borderSubtle)
 
                                     settingsRow("Enable Hourly Limit") {
@@ -504,30 +514,20 @@ struct SettingsView: View {
                                     }
                                     
                                     HStack(spacing: 10) {
-                                        Button(action: {
-                                            Task {
-                                                await viewModel.connectToMT5()
-                                            }
-                                        }) {
-                                            HStack(spacing: 6) {
-                                                if viewModel.isConnecting {
-                                                    ProgressView()
-                                                        .scaleEffect(0.5)
-                                                        .tint(.bgPrimary)
-                                                } else {
-                                                    Image(systemName: "bolt.fill")
-                                                }
-                                                Text(viewModel.isConnecting ? "CONNECTING..." : (viewModel.mt5Connected ? "RECHECK MT5" : "CONNECT MT5"))
-                                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                            }
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 10)
-                                            .background(viewModel.isConnecting ? Color.accentCyan.opacity(0.5) : Color.accentCyan)
-                                            .foregroundColor(.bgPrimary)
-                                            .cornerRadius(7)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .disabled(viewModel.isConnecting)
+                                        Button(action: { Task { await viewModel.connectToMT5() } }) {
+                                            HStack(spacing: 6) { Image(systemName: "bolt.fill"); Text(viewModel.mt5Connected ? "RECHECK MT5" : "CONNECT MT5") }
+                                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                                .background(Color.accentCyan).foregroundColor(.bgPrimary).cornerRadius(7)
+                                        }.buttonStyle(.plain).disabled(viewModel.isConnecting)
+                                        Button(action: { Task { await viewModel.disconnectFromMT5() } }) {
+                                            HStack(spacing: 6) { Image(systemName: "bolt.slash.fill"); Text("DISCONNECT") }
+                                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                                .background(viewModel.mt5Connected ? Color.accentRed.opacity(0.18) : Color.bgSecondary)
+                                                .foregroundColor(viewModel.mt5Connected ? .accentRed : .textMuted).cornerRadius(7)
+                                        }.buttonStyle(.plain).disabled(viewModel.isConnecting || !viewModel.mt5Connected)
+                                    }
                                     }
                                 }
                                 .padding(16)
@@ -710,6 +710,7 @@ struct SettingsView: View {
         ScalpingConfig.shared.minConfluencePillars = viewModel.scalpingConfig.minConfluencePillars
         ScalpingConfig.shared.brokerSuffix = viewModel.scalpingConfig.brokerSuffix
         ScalpingConfig.shared.enableHourlyLimit = viewModel.enableHourlyLimit
+        ScalpingConfig.shared.maxDailyTrades = viewModel.dailyTradeLimit
         ScalpingConfig.shared.maxHourlyTrades = Int(viewModel.maxHourlyTrades)
         
         // V10.0 Save Sync
