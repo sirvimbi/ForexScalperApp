@@ -22,11 +22,6 @@ final class AppRuntimeMaintenance: ObservableObject {
         start()
     }
 
-    deinit {
-        task?.cancel()
-        signalCancellable?.cancel()
-    }
-
     private func observeSignalLifecycle(_ coordinator: RefactoredAppCoordinator) {
         signalCancellable = coordinator.$signals
             .receive(on: DispatchQueue.main)
@@ -34,22 +29,12 @@ final class AppRuntimeMaintenance: ObservableObject {
                 guard let self else { return }
                 let current = Dictionary(uniqueKeysWithValues: signals.map { ($0.id, $0.status) })
                 var shouldDismiss = false
-
                 for (id, oldStatus) in previousSignalStates where oldStatus == .pending {
-                    if let newStatus = current[id], newStatus != .pending {
-                        shouldDismiss = true
-                        break
-                    }
-                    if current[id] == nil {
-                        shouldDismiss = true
-                        break
-                    }
+                    if let newStatus = current[id], newStatus != .pending { shouldDismiss = true; break }
+                    if current[id] == nil { shouldDismiss = true; break }
                 }
-
                 previousSignalStates = current
-                if shouldDismiss {
-                    NotificationCenter.default.post(name: .dismissSignalOverlay, object: nil)
-                }
+                if shouldDismiss { NotificationCenter.default.post(name: .dismissSignalOverlay, object: nil) }
             }
     }
 
@@ -61,12 +46,10 @@ final class AppRuntimeMaintenance: ObservableObject {
                 try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
                 guard !Task.isCancelled, let self else { return }
                 cycle += 1
-
                 if let viewModel = self.viewModel {
                     await viewModel.refreshAccountInfo()
                     viewModel.refreshData()
                 }
-
                 if cycle % 3 == 0, let coordinator = self.coordinator {
                     await coordinator.syncMT5Trades()
                     self.viewModel?.refreshData()
@@ -84,11 +67,9 @@ enum MT5HistoryRefreshService {
             let manager = RefactoredTradeHistoryManager.shared
             let existing = await manager.getAllTrades()
             let existingIDs = Set(existing.compactMap { $0.externalDealId })
-
             for position in history {
                 let ticket = String(position.ticket)
                 guard !existingIDs.contains(ticket) else { continue }
-
                 let normalizedSymbol = normalizeSymbol(position.symbol)
                 let record = TradeRecord(
                     id: UUID(),
@@ -109,7 +90,6 @@ enum MT5HistoryRefreshService {
                 )
                 await manager.addTrade(record)
             }
-
             NotificationCenter.default.post(name: .tradeHistoryUpdated, object: nil)
             godLog("🔄 History Refresh: fetched \(history.count) broker records", level: .success)
         } catch {
@@ -119,9 +99,7 @@ enum MT5HistoryRefreshService {
 
     private static func normalizeSymbol(_ symbol: String) -> String {
         var value = symbol.replacingOccurrences(of: "m", with: "")
-        if let dot = value.firstIndex(of: ".") {
-            value = String(value[..<dot])
-        }
+        if let dot = value.firstIndex(of: ".") { value = String(value[..<dot]) }
         return value
     }
 }
@@ -132,23 +110,13 @@ struct MT5DisconnectControl: View {
     @State private var isDisconnecting = false
 
     var body: some View {
-        Button {
-            disconnect()
-        } label: {
+        Button { disconnect() } label: {
             HStack(spacing: 6) {
-                if isDisconnecting {
-                    ProgressView().scaleEffect(0.5)
-                } else {
-                    Image(systemName: "bolt.slash.fill")
-                }
-                Text("DISCONNECT MT5")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                if isDisconnecting { ProgressView().scaleEffect(0.5) } else { Image(systemName: "bolt.slash.fill") }
+                Text("DISCONNECT MT5").font(.system(size: 10, weight: .bold, design: .monospaced))
             }
-            .foregroundColor(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Color.accentRed.opacity(0.85))
-            .cornerRadius(6)
+            .foregroundColor(.white).padding(.horizontal, 10).padding(.vertical, 7)
+            .background(Color.accentRed.opacity(0.85)).cornerRadius(6)
         }
         .buttonStyle(.plain)
         .disabled(isDisconnecting || !viewModel.mt5Connected)
