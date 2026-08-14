@@ -1,0 +1,68 @@
+name: V23 Reversal Entry Validation
+
+on:
+  push:
+    branches:
+      - agent/v23-reversal-confirmed-entry
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Validate V23 Swift/EA integration markers
+        shell: python3 {0}
+        run: |
+          from pathlib import Path
+
+          required = {
+              "ForexScalperApp/V22TrailingActivationSettings.swift": [
+                  "import Combine",
+                  "ObservableObject",
+                  "MT5V22TrailingSettingsService",
+              ],
+              "ForexScalperApp/SecureCredentialStore.swift": [
+                  "import Combine",
+                  "nonisolated static let shared",
+                  "nonisolated func read",
+              ],
+              "ForexScalperApp/MT5Service.swift": [
+                  "actor MT5Service",
+              ],
+              "Files/MetaTrader/Include/CommandHandlerV22.mqh": [
+                  "BUY_LIMIT",
+                  "SELL_LIMIT",
+              ],
+          }
+
+          missing = []
+          for filename, markers in required.items():
+              path = Path(filename)
+              if not path.exists():
+                  missing.append(f"{filename}: file missing")
+                  continue
+              text = path.read_text(errors="replace")
+              for marker in markers:
+                  if marker not in text:
+                      missing.append(f"{filename}: missing marker {marker!r}")
+
+          if missing:
+              print("V23 validation FAILED")
+              for item in missing:
+                  print(f" - {item}")
+              raise SystemExit(1)
+
+          print("V23 validation PASSED")
+          print(" - Swift 6 Combine imports present")
+          print(" - SecureCredentialStore isolation annotations present")
+          print(" - V22 pending BUY_LIMIT/SELL_LIMIT support present")
+          print(" - MT5Service present")
+
+      - name: Report
+        run: echo "V23 branch validation completed; Xcode/macOS compilation remains the authoritative Swift build check."
