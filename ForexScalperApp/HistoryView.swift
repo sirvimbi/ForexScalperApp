@@ -4,6 +4,7 @@ struct HistoryView: View {
     @ObservedObject var viewModel: DashboardViewModel
     @Binding var selectedTrade: TradeRecord?
     @Binding var showTradeSheet: Bool
+    @State private var isRefreshingHistory = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -14,12 +15,31 @@ struct HistoryView: View {
                     .foregroundColor(.accentCyan)
                     .tracking(2)
                 Spacer()
+
+                Button(action: refreshHistory) {
+                    HStack(spacing: 5) {
+                        if isRefreshingHistory {
+                            ProgressView().scaleEffect(0.5)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        Text("REFRESH")
+                    }
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Color.accentCyan.opacity(0.1))
+                .foregroundColor(.accentCyan)
+                .cornerRadius(4)
+                .disabled(isRefreshingHistory)
+                
                 Button(action: {
                     Task {
+                        // prepareCSVExport presents NSSavePanel directly on macOS.
+                        // Do not wrap it in a SwiftUI sheet: that was the source of the
+                        // non-dismissible white overlay in the old implementation.
                         await viewModel.prepareCSVExport()
-                        await MainActor.run {
-                            viewModel.isShowingShareSheet = true
-                        }
                     }
                 }) {
                     Label("EXPORT", systemImage: "square.and.arrow.up")
@@ -31,22 +51,17 @@ struct HistoryView: View {
                 .foregroundColor(.accentCyan)
                 .cornerRadius(4)
                 
-                Button(action: { viewModel.tradeHistory.removeAll() }) {
-                    Text("CLEAR ALL").font(.system(size: 10, weight: .bold)).foregroundColor(.accentRed)
-                }.buttonStyle(.plain)
+                Button(action: {
+                    viewModel.clearAllHistory()
+                }) {
+                    Text("CLEAR ALL")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.accentRed)
+                }
+                .buttonStyle(.plain)
             }
             .padding(20)
             .background(Color.bgSecondary)
-            .sheet(isPresented: $viewModel.isShowingShareSheet) {
-                if let url = viewModel.exportURL {
-                    #if os(macOS)
-                    Text("CSV exported to \(url.path)").padding()
-                    #else
-                    ShareSheet(activityItems: [url])
-                    #endif
-                }
-            }
-            
             Divider().background(Color.borderSubtle)
             #endif
             
@@ -60,10 +75,16 @@ struct HistoryView: View {
                             Text("No past trades to display.")
                                 .foregroundColor(.textMuted)
                                 .font(.subheadline)
+                            Button("FETCH CURRENT MT5 HISTORY") {
+                                refreshHistory()
+                            }
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(.accentCyan)
+                            .buttonStyle(.plain)
+                            .padding(.top, 4)
                         }
                         .padding(.top, 100)
                     } else {
-                        // Limiting to last 500 trades for performance, use Clear All for cleanup
                         ForEach(viewModel.tradeHistory.prefix(500)) { trade in
                             Button(action: {
                                 selectedTrade = trade
@@ -86,6 +107,21 @@ struct HistoryView: View {
             }
         }
         .background(Color.bgPrimary)
+        .task {
+            viewModel.loadTradeHistory()
+        }
+    }
+
+    private func refreshHistory() {
+        guard !isRefreshingHistory else { return }
+        isRefreshingHistory = true
+        Task {
+            await MT5HistoryRefreshService.refresh()
+            viewModel.loadTradeHistory()
+            await MainActor.run {
+                isRefreshingHistory = false
+            }
+        }
     }
     
     @ViewBuilder
@@ -115,7 +151,6 @@ struct HistoryView: View {
                         Text(String(format: "%@%.2f", pnl >= 0 ? "+" : "", pnl))
                             .font(.system(size: 18, weight: .bold, design: .monospaced))
                             .foregroundColor(color)
-                        
                         Text(trade.status.rawValue.capitalized)
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(.textMuted)
@@ -129,8 +164,8 @@ struct HistoryView: View {
                     StatLabel(title: "ENTRY", value: String(format: "%.5f", trade.entryPrice))
                     StatLabel(title: "EXIT", value: String(format: "%.5f", trade.exitPrice ?? 0))
                     Spacer()
-                    if let entry = Optional(trade.entryTime), let exit = trade.exitTime {
-                        StatLabel(title: "DUR", value: formatDuration(exit.timeIntervalSince(entry)))
+                    if let exit = trade.exitTime {
+                        StatLabel(title: "DUR", value: formatDuration(exit.timeIntervalSince(trade.entryTime)))
                     }
                 }
             }
