@@ -19,6 +19,7 @@ struct ForexScalperApp: App {
         // Install runtime diagnostics before services start so startup/network activity is visible.
         NetworkDiagnostics.install()
         SignalDiagnostics.install()
+        _ = DailyNewsIntelligence.shared
         
         // Request notification permissions via the manager
         NotificationManager.shared.requestAuthorization()
