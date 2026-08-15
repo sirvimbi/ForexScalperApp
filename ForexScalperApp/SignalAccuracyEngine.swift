@@ -9,8 +9,8 @@ enum SignalAccuracyEngine {
         let hurst: Double
         let reasons: [String]
         var insight: String {
-            let reasonText = reasons.isEmpty ? "No exceptional confirmation factors." : reasons.joined(separator: "; ")
-            return "Accuracy layer | regime=\(regime) | H=\(String(format: "%.2f", hurst)) | chop=\(String(format: "%.1f", choppiness)) | \(reasonText)"
+            let text = reasons.isEmpty ? "No exceptional confirmation factors." : reasons.joined(separator: "; ")
+            return "Accuracy layer | regime=\(regime) | H=\(String(format: "%.2f", hurst)) | chop=\(String(format: "%.1f", choppiness)) | \(text)"
         }
     }
     private enum Divergence { case supporting, opposing, none }
@@ -29,9 +29,9 @@ enum SignalAccuracyEngine {
         var reasons: [String] = []
         var approved = true
         let regime: String
+
         if chop >= settings.choppinessWarningThreshold {
-            regime = "choppy"; reasons.append("high choppiness")
-            if chop >= settings.choppinessVetoThreshold { approved = false }
+            regime = "choppy"; reasons.append("high choppiness"); if chop >= settings.choppinessVetoThreshold { approved = false }
         } else if hurst >= settings.hurstTrendingThreshold {
             regime = "trending"; adjustment += settings.trendingRegimeAdjustment; reasons.append("persistent trend")
         } else if hurst <= settings.hurstMeanReversionThreshold {
@@ -43,19 +43,14 @@ enum SignalAccuracyEngine {
         case .opposing: adjustment += settings.opposingDivergenceAdjustment; reasons.append("opposing RSI/price divergence"); approved = false
         case .none: break
         }
-        if reversal.confirmed {
-            adjustment += settings.reversalConfirmedAdjustment; reasons.append(reversal.reason)
-        } else {
-            adjustment += regime == "trending" ? settings.reversalWaitingTrendPenalty : settings.reversalWaitingOtherPenalty; reasons.append(reversal.reason)
-        }
-        if session > 1.0 {
-            adjustment += (session - 1.0) * abs(settings.reversalConfirmedAdjustment); reasons.append("session momentum favorable")
-        } else if session < 1.0 {
-            adjustment += (session - 1.0) * abs(settings.reversalConfirmedAdjustment); reasons.append("session quality reduced")
-        }
-        let posteriorWinRate = 0.5 + SignalAccuracyBayesianRuntime.snapshot(key: "\(symbol.uppercased()):\(direction)", priorWins: settings.bayesianPriorWins, priorLosses: settings.bayesianPriorLosses) - 0.5
-        adjustment += (posteriorWinRate - 0.5) * settings.bayesianAdjustmentScale
-        reasons.append("Bayesian prior=\(Int(posteriorWinRate * 100))%")
+        if reversal.confirmed { adjustment += settings.reversalConfirmedAdjustment; reasons.append(reversal.reason) }
+        else { adjustment += regime == "trending" ? settings.reversalWaitingTrendPenalty : settings.reversalWaitingOtherPenalty; reasons.append(reversal.reason) }
+        if session > 1 { adjustment += (session - 1) * abs(settings.reversalConfirmedAdjustment); reasons.append("session momentum favorable") }
+        else if session < 1 { adjustment += (session - 1) * abs(settings.reversalConfirmedAdjustment); reasons.append("session quality reduced") }
+
+        let posterior = SignalAccuracyBayesianRuntime.snapshot(key: "\(symbol.uppercased()):\(direction)", priorWins: settings.bayesianPriorWins, priorLosses: settings.bayesianPriorLosses)
+        adjustment += (posterior - 0.5) * settings.bayesianAdjustmentScale
+        reasons.append("Bayesian prior=\(Int(posterior * 100))%")
         return Assessment(approved: approved,
                           confidenceAdjustment: max(settings.confidenceAdjustmentFloor, min(settings.confidenceAdjustmentCeiling, adjustment)),
                           regime: regime, choppiness: chop, hurst: hurst, reasons: reasons)
@@ -75,13 +70,11 @@ enum SignalAccuracyEngine {
     private static func divergenceState(_ candles: [Kline], direction: SignalType, settings: SignalAccuracyConfiguration) -> Divergence {
         let recent = Array(candles.suffix(settings.divergenceLookback)); guard recent.count >= 20 else { return .none }
         let rsi = relativeStrengthIndex(recent, period: settings.choppinessPeriod); guard rsi.count >= 10 else { return .none }
-        let midpoint = max(1, recent.count / 2), first = Array(recent.prefix(midpoint)), second = Array(recent.suffix(midpoint))
-        let firstPriceHigh = first.map(\.close).max() ?? 0, secondPriceHigh = second.map(\.close).max() ?? 0
-        let firstPriceLow = first.map(\.close).min() ?? 0, secondPriceLow = second.map(\.close).min() ?? 0
-        let half = max(1, rsi.count / 2), firstRSIHigh = rsi.prefix(half).max() ?? 50, secondRSIHigh = rsi.suffix(half).max() ?? 50
-        let firstRSILow = rsi.prefix(half).min() ?? 50, secondRSILow = rsi.suffix(half).min() ?? 50
-        let bearish = secondPriceHigh > firstPriceHigh && secondRSIHigh < firstRSIHigh - settings.divergenceRSIMargin
-        let bullish = secondPriceLow < firstPriceLow && secondRSILow > firstRSILow + settings.divergenceRSIMargin
+        let halfCandles = max(1, recent.count / 2), first = Array(recent.prefix(halfCandles)), second = Array(recent.suffix(halfCandles))
+        let firstHigh = first.map(\.close).max() ?? 0, secondHigh = second.map(\.close).max() ?? 0, firstLow = first.map(\.close).min() ?? 0, secondLow = second.map(\.close).min() ?? 0
+        let halfRSI = max(1, rsi.count / 2), firstRSIHigh = rsi.prefix(halfRSI).max() ?? 50, secondRSIHigh = rsi.suffix(halfRSI).max() ?? 50, firstRSILow = rsi.prefix(halfRSI).min() ?? 50, secondRSILow = rsi.suffix(halfRSI).min() ?? 50
+        let bearish = secondHigh > firstHigh && secondRSIHigh < firstRSIHigh - settings.divergenceRSIMargin
+        let bullish = secondLow < firstLow && secondRSILow > firstRSILow + settings.divergenceRSIMargin
         if direction == .buy { return bullish ? .supporting : (bearish ? .opposing : .none) }
         if direction == .sell { return bearish ? .supporting : (bullish ? .opposing : .none) }
         return .none
@@ -106,103 +99,62 @@ enum SignalAccuracyEngine {
     private static func relativeStrengthIndex(_ candles: [Kline], period: Int) -> [Double] {
         guard candles.count > period else { return [] }
         var gains = 0.0, losses = 0.0
-        for i in 1...period { let delta = candles[i].close - candles[i - 1].close; if delta >= 0 { gains += delta } else { losses -= delta } }
+        for i in 1...period { let d = candles[i].close - candles[i - 1].close; if d >= 0 { gains += d } else { losses -= d } }
         var result: [Double] = [], avgGain = gains / Double(period), avgLoss = losses / Double(period)
         result.append(avgLoss == 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss))
         if candles.count > period + 1 {
-            for i in (period + 1)..<candles.count {
-                let delta = candles[i].close - candles[i - 1].close, gain = max(delta, 0), loss = max(-delta, 0)
-                avgGain = (avgGain * Double(period - 1) + gain) / Double(period); avgLoss = (avgLoss * Double(period - 1) + loss) / Double(period)
-                result.append(avgLoss == 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss))
-            }
+            for i in (period + 1)..<candles.count { let d = candles[i].close - candles[i - 1].close; avgGain = (avgGain * Double(period - 1) + max(d, 0)) / Double(period); avgLoss = (avgLoss * Double(period - 1) + max(-d, 0)) / Double(period); result.append(avgLoss == 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss)) }
         }
         return result
     }
 
     private static func choppinessIndex(_ candles: [Kline], period: Int) -> Double {
         guard candles.count > period else { return 50 }
-        let recent = Array(candles.suffix(period + 1)); var trSum = 0.0
-        for i in 1..<recent.count { trSum += max(recent[i].high - recent[i].low, abs(recent[i].high - recent[i - 1].close), abs(recent[i].low - recent[i - 1].close)) }
-        let high = recent.map(\.high).max() ?? 0, low = recent.map(\.low).min() ?? 0, range = high - low
-        guard trSum > 0, range > 0 else { return 100 }
-        return 100 * log10(trSum / range) / log10(Double(period))
+        let recent = Array(candles.suffix(period + 1)); var tr = 0.0
+        for i in 1..<recent.count { tr += max(recent[i].high - recent[i].low, abs(recent[i].high - recent[i - 1].close), abs(recent[i].low - recent[i - 1].close)) }
+        let range = (recent.map(\.high).max() ?? 0) - (recent.map(\.low).min() ?? 0); guard tr > 0, range > 0 else { return 100 }
+        return 100 * log10(tr / range) / log10(Double(period))
     }
 
     private static func hurstExponent(_ prices: [Double]) -> Double {
         guard prices.count >= 40 else { return 0.5 }
         let sample = Array(prices.suffix(100)); var xs: [Double] = [], ys: [Double] = []; let maxLag = min(sample.count / 4, 20); guard maxLag >= 5 else { return 0.5 }
         for lag in 5...maxLag {
-            var rsValues: [Double] = [], start = 0
+            var rs: [Double] = []; var start = 0
             while start + lag <= sample.count {
-                let segment = Array(sample[start..<(start + lag)]), mean = segment.reduce(0, +) / Double(segment.count)
-                var cumulative = 0.0, minC = 0.0, maxC = 0.0
+                let segment = Array(sample[start..<(start + lag)]), mean = segment.reduce(0, +) / Double(segment.count); var cumulative = 0.0, minC = 0.0, maxC = 0.0
                 for value in segment { cumulative += value - mean; minC = min(minC, cumulative); maxC = max(maxC, cumulative) }
-                let variance = segment.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(segment.count), sd = sqrt(variance)
-                if sd > 0 { rsValues.append((maxC - minC) / sd) }; start += lag
+                let variance = segment.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(segment.count), sd = sqrt(variance); if sd > 0 { rs.append((maxC - minC) / sd) }; start += lag
             }
-            if !rsValues.isEmpty { xs.append(log(Double(lag))); ys.append(log(rsValues.reduce(0, +) / Double(rsValues.count))) }
+            if !rs.isEmpty { xs.append(log(Double(lag))); ys.append(log(rs.reduce(0, +) / Double(rs.count))) }
         }
-        guard xs.count >= 3 else { return 0.5 }
-        let mx = xs.reduce(0, +) / Double(xs.count), my = ys.reduce(0, +) / Double(ys.count)
-        let numerator = zip(xs, ys).map { ($0 - mx) * ($1 - my) }.reduce(0, +), denominator = xs.map { ($0 - mx) * ($0 - mx) }.reduce(0, +)
-        guard denominator > 0 else { return 0.5 }; return max(0, min(1, numerator / denominator))
+        guard xs.count >= 3 else { return 0.5 }; let mx = xs.reduce(0, +) / Double(xs.count), my = ys.reduce(0, +) / Double(ys.count); let num = zip(xs, ys).map { ($0 - mx) * ($1 - my) }.reduce(0, +), den = xs.map { ($0 - mx) * ($0 - mx) }.reduce(0, +); guard den > 0 else { return 0.5 }; return max(0, min(1, num / den))
     }
 
     private static func sessionMultiplier(for date: Date, settings: SignalAccuracyConfiguration) -> Double {
         let hour = Calendar(identifier: .gregorian).component(.hour, from: date)
-        let favorable1 = hour >= settings.favorableSession1StartHour && hour <= settings.favorableSession1EndHour
-        let favorable2 = hour >= settings.favorableSession2StartHour && hour <= settings.favorableSession2EndHour
+        let favorable = (hour >= settings.favorableSession1StartHour && hour <= settings.favorableSession1EndHour) || (hour >= settings.favorableSession2StartHour && hour <= settings.favorableSession2EndHour)
         let reduced = settings.reducedSessionStartHour <= settings.reducedSessionEndHour ? hour >= settings.reducedSessionStartHour && hour <= settings.reducedSessionEndHour : hour >= settings.reducedSessionStartHour || hour <= settings.reducedSessionEndHour
-        if favorable1 || favorable2 { return settings.favorableSessionMultiplier }; if reduced { return settings.reducedSessionMultiplier }; return 1.0
+        if favorable { return settings.favorableSessionMultiplier }; if reduced { return settings.reducedSessionMultiplier }; return 1
     }
 }
 
-/// Synchronous read-only view of the Bayesian posterior for the hot signal path.
-/// Writes remain actor-isolated and authoritative; this cache is updated after every recorded outcome.
-enum SignalAccuracyBayesianRuntime {
-    private static let lock = NSLock()
-    private static var buckets: [String: (wins: Double, losses: Double)] = [:]
-    private static var loaded = false
-
-    static func snapshot(key: String, priorWins: Double, priorLosses: Double) -> Double {
-        lock.lock(); defer { lock.unlock() }
-        if !loaded { loaded = true }
-        let bucket = buckets[key] ?? (priorWins, priorLosses)
-        return bucket.wins / max(0.000001, bucket.wins + bucket.losses)
-    }
-
-    static func update(key: String, profitable: Bool, priorWins: Double, priorLosses: Double) {
-        lock.lock(); defer { lock.unlock() }
-        var bucket = buckets[key] ?? (priorWins, priorLosses)
-        if profitable { bucket.wins += 1 } else { bucket.losses += 1 }
-        buckets[key] = bucket
-    }
+final class SignalAccuracyBayesianRuntime: @unchecked Sendable {
+    static let shared = SignalAccuracyBayesianRuntime()
+    private struct Bucket: Codable { var wins: Double; var losses: Double }
+    private struct Persisted: Codable { var buckets: [String: Bucket] }
+    private let lock = NSLock(); private var buckets: [String: Bucket] = [:]
+    private init() { if let data = UserDefaults.standard.data(forKey: "signal.accuracy.bayesian.v2"), let persisted = try? JSONDecoder().decode(Persisted.self, from: data) { buckets = persisted.buckets } }
+    func snapshot(key: String, priorWins: Double, priorLosses: Double) -> Double { lock.lock(); defer { lock.unlock() }; let b = buckets[key] ?? Bucket(wins: priorWins, losses: priorLosses); return b.wins / max(0.000001, b.wins + b.losses) }
+    func update(key: String, profitable: Bool, priorWins: Double, priorLosses: Double) { lock.lock(); defer { lock.unlock() }; var b = buckets[key] ?? Bucket(wins: priorWins, losses: priorLosses); if profitable { b.wins += 1 } else { b.losses += 1 }; buckets[key] = b }
 }
 
 private actor SignalAccuracyBayesianStore {
     static let shared = SignalAccuracyBayesianStore()
     private struct Bucket: Codable { var wins: Double; var losses: Double }
     private struct Persisted: Codable { var buckets: [String: Bucket]; var recordedOutcomeIDs: Set<String> }
-    private var loaded = false
-    private var buckets: [String: Bucket] = [:]
-    private var recordedOutcomeIDs: Set<String> = []
-    private let storageKey = "signal.accuracy.bayesian.v2"
-
-    func posteriorWinRate(key: String, priorWins: Double, priorLosses: Double) -> Double {
-        loadIfNeeded(); let bucket = buckets[key] ?? Bucket(wins: priorWins, losses: priorLosses); return bucket.wins / max(0.000001, bucket.wins + bucket.losses)
-    }
-    func record(outcomeID: String, key: String, profitable: Bool, priorWins: Double, priorLosses: Double) {
-        loadIfNeeded(); guard !recordedOutcomeIDs.contains(outcomeID) else { return }
-        var bucket = buckets[key] ?? Bucket(wins: priorWins, losses: priorLosses); if profitable { bucket.wins += 1 } else { bucket.losses += 1 }
-        buckets[key] = bucket; recordedOutcomeIDs.insert(outcomeID); SignalAccuracyBayesianRuntime.update(key: key, profitable: profitable, priorWins: priorWins, priorLosses: priorLosses); persist()
-    }
-    private func loadIfNeeded() {
-        guard !loaded else { return }; loaded = true
-        guard let data = UserDefaults.standard.data(forKey: storageKey), let persisted = try? JSONDecoder().decode(Persisted.self, from: data) else { return }
-        buckets = persisted.buckets; recordedOutcomeIDs = persisted.recordedOutcomeIDs
-        for (key, bucket) in buckets { SignalAccuracyBayesianRuntime.update(key: key, profitable: true, priorWins: bucket.wins - 1, priorLosses: bucket.losses) }
-    }
-    private func persist() {
-        let persisted = Persisted(buckets: buckets, recordedOutcomeIDs: recordedOutcomeIDs); if let data = try? JSONEncoder().encode(persisted) { UserDefaults.standard.set(data, forKey: storageKey) }
-    }
+    private var loaded = false; private var buckets: [String: Bucket] = [:]; private var recordedOutcomeIDs: Set<String> = []; private let storageKey = "signal.accuracy.bayesian.v2"
+    func record(outcomeID: String, key: String, profitable: Bool, priorWins: Double, priorLosses: Double) { loadIfNeeded(); guard !recordedOutcomeIDs.contains(outcomeID) else { return }; var b = buckets[key] ?? Bucket(wins: priorWins, losses: priorLosses); if profitable { b.wins += 1 } else { b.losses += 1 }; buckets[key] = b; recordedOutcomeIDs.insert(outcomeID); SignalAccuracyBayesianRuntime.shared.update(key: key, profitable: profitable, priorWins: priorWins, priorLosses: priorLosses); persist() }
+    private func loadIfNeeded() { guard !loaded else { return }; loaded = true; guard let data = UserDefaults.standard.data(forKey: storageKey), let persisted = try? JSONDecoder().decode(Persisted.self, from: data) else { return }; buckets = persisted.buckets; recordedOutcomeIDs = persisted.recordedOutcomeIDs }
+    private func persist() { let persisted = Persisted(buckets: buckets, recordedOutcomeIDs: recordedOutcomeIDs); if let data = try? JSONEncoder().encode(persisted) { UserDefaults.standard.set(data, forKey: storageKey) } }
 }
