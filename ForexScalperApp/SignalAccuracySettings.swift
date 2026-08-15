@@ -2,8 +2,6 @@ import Foundation
 import SwiftUI
 import Combine
 
-/// User-adjustable signal-quality parameters. Algorithmic loop bounds remain implementation details;
-/// all strategy thresholds, scoring adjustments and regime gates are persisted here.
 struct SignalAccuracyConfiguration: Sendable, Equatable {
     var minimumHistoryCandles: Int = 60
     var choppinessPeriod: Int = 14
@@ -33,13 +31,9 @@ struct SignalAccuracyConfiguration: Sendable, Equatable {
     var confidenceAdjustmentFloor: Double = -20.0
     var confidenceAdjustmentCeiling: Double = 12.0
     var divergenceRSIMargin: Double = 0.0
-    
-    private static func double(_ defaults: UserDefaults, _ key: String, _ fallback: Double) -> Double {
-        defaults.object(forKey: key) == nil ? fallback : defaults.double(forKey: key)
-    }
-    private static func int(_ defaults: UserDefaults, _ key: String, _ fallback: Int) -> Int {
-        defaults.object(forKey: key) == nil ? fallback : defaults.integer(forKey: key)
-    }
+
+    private static func double(_ defaults: UserDefaults, _ key: String, _ fallback: Double) -> Double { defaults.object(forKey: key) == nil ? fallback : defaults.double(forKey: key) }
+    private static func int(_ defaults: UserDefaults, _ key: String, _ fallback: Int) -> Int { defaults.object(forKey: key) == nil ? fallback : defaults.integer(forKey: key) }
 
     static func load(from defaults: UserDefaults = .standard) -> SignalAccuracyConfiguration {
         var c = SignalAccuracyConfiguration()
@@ -106,25 +100,35 @@ struct SignalAccuracyConfiguration: Sendable, Equatable {
     }
 }
 
+/// Lock-protected runtime snapshot for the synchronous signal actor. This avoids crossing the
+/// MainActor or UserDefaults reference into the hot signal path while still applying saved values immediately.
+final class SignalAccuracyRuntimeCache: @unchecked Sendable {
+    static let shared = SignalAccuracyRuntimeCache()
+    private let lock = NSLock()
+    private var configuration: SignalAccuracyConfiguration
+
+    private init() { configuration = SignalAccuracyConfiguration.load() }
+
+    func snapshot() -> SignalAccuracyConfiguration {
+        lock.lock(); defer { lock.unlock() }
+        return configuration
+    }
+
+    func update(_ configuration: SignalAccuracyConfiguration) {
+        lock.lock(); self.configuration = configuration; lock.unlock()
+    }
+}
+
 actor SignalAccuracySettingsStore {
     static let shared = SignalAccuracySettingsStore()
-    func snapshot() -> SignalAccuracyConfiguration {
-        SignalAccuracyConfiguration.load()
-    }
+    func snapshot() -> SignalAccuracyConfiguration { SignalAccuracyConfiguration.load() }
 }
 
 @MainActor
 final class SignalAccuracySettingsController: ObservableObject {
     @Published var values: SignalAccuracyConfiguration
-
-    init() {
-        values = SignalAccuracyConfiguration.load()
-    }
-
-    func reload() {
-        values = SignalAccuracyConfiguration.load()
-    }
-
+    init() { values = SignalAccuracyRuntimeCache.shared.snapshot() }
+    func reload() { values = SignalAccuracyConfiguration.load(); SignalAccuracyRuntimeCache.shared.update(values) }
     func save() {
         values.minimumHistoryCandles = max(20, values.minimumHistoryCandles)
         values.choppinessPeriod = max(5, values.choppinessPeriod)
@@ -133,6 +137,7 @@ final class SignalAccuracySettingsController: ObservableObject {
         values.confidenceAdjustmentFloor = min(values.confidenceAdjustmentFloor, values.confidenceAdjustmentCeiling)
         values.divergenceLookback = max(values.divergenceLookback, 20)
         values.save()
+        SignalAccuracyRuntimeCache.shared.update(values)
         godLog("🧠 ACCURACY SETTINGS | saved | chop=\(values.choppinessWarningThreshold)/\(values.choppinessVetoThreshold) H=\(values.hurstMeanReversionThreshold)/\(values.hurstTrendingThreshold) Bayesian scale=\(values.bayesianAdjustmentScale)", level: .success)
     }
 }
