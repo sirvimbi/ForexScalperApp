@@ -1,0 +1,45 @@
+name: Apply signal accuracy integration
+
+on:
+  push:
+    branches:
+      - agent/phase1-3-signal-accuracy-and-daily-news-insight
+    paths:
+      - '.github/workflows/apply-signal-accuracy-integration.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: agent/phase1-3-signal-accuracy-and-daily-news-insight
+          fetch-depth: 0
+
+      - name: Apply source integration
+        run: python3 .github/automation/apply_signal_accuracy.py
+
+      - name: Build validation
+        run: |
+          xcodebuild \
+            -project ForexScalperApp.xcodeproj \
+            -scheme ForexScalperApp \
+            -configuration Debug \
+            -sdk macosx \
+            -derivedDataPath /tmp/ForexScalperAppDerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Commit validated integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/automation/apply_signal_accuracy.py .github/workflows/apply-signal-accuracy-integration.yml
+          git add -A
+          git commit -m "feat: integrate signal accuracy gates and daily news intelligence [bot]"
+          git push origin agent/phase1-3-signal-accuracy-and-daily-news-insight
