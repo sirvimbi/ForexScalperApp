@@ -1,11 +1,10 @@
 import Foundation
 
 /// Non-blocking/low-frequency signal quality layer used by the scalping engine.
-/// It deliberately separates market-regime confirmation from the existing pillar score.
-actor SignalAccuracyEngine {
-    static let shared = SignalAccuracyEngine()
-
-    struct Assessment: Sendable {
+/// Static analysis keeps Kline data on the caller's isolation domain, avoiding an
+/// unnecessary Swift 6 actor/sendability boundary.
+enum SignalAccuracyEngine {
+    struct Assessment {
         let approved: Bool
         let confidenceAdjustment: Double
         let regime: String
@@ -15,7 +14,7 @@ actor SignalAccuracyEngine {
 
         var insight: String {
             let reasonText = reasons.isEmpty ? "No exceptional confirmation factors." : reasons.joined(separator: "; ")
-            return "Accuracy layer | regime=\(regime) | H=\(String(format: \"%.2f\", hurst)) | chop=\(String(format: \"%.1f\", choppiness)) | \(reasonText)"
+            return "Accuracy layer | regime=\(regime) | H=\(String(format: "%.2f", hurst)) | chop=\(String(format: "%.1f", choppiness)) | \(reasonText)"
         }
     }
 
@@ -24,19 +23,11 @@ actor SignalAccuracyEngine {
         var losses: Double
     }
 
-    private var calibration: [String: BayesianBucket] = [:]
-    private let storageKey = "signal.accuracy.bayesian.v1"
+    private static let storageKey = "signal.accuracy.bayesian.v1"
 
-    private init() {
-        if let data = UserDefaults.standard.data(forKey: storageKey),
-           let decoded = try? JSONDecoder().decode([String: BayesianBucket].self, from: data) {
-            calibration = decoded
-        }
-    }
-
-    /// Phase 1-3 assessment. A signal is only hard-vetoed for severe chop or a clear
-    /// opposing divergence. Everything else adjusts confidence and supplies an Insight.
-    func assess(symbol: String, direction: SignalType, candles: [Kline]) -> Assessment {
+    /// Phase 1-3 assessment. A signal is hard-vetoed only for severe chop or a clear
+    /// opposing divergence. Other factors are retained as transparent diagnostics.
+    static func assess(symbol: String, direction: SignalType, candles: [Kline]) -> Assessment {
         guard candles.count >= 60, direction != .none else {
             return Assessment(approved: true, confidenceAdjustment: 0, regime: "unknown", choppiness: 50, hurst: 0.5, reasons: ["insufficient accuracy-layer history"])
         }
@@ -94,10 +85,10 @@ actor SignalAccuracyEngine {
         if session > 1.0 { reasons.append("session momentum favorable") }
         if session < 1.0 { reasons.append("session quality reduced") }
 
-        // Phase 4: Bayesian calibration. This is deliberately a soft multiplier;
-        // it cannot turn a good signal into a hard veto by itself.
+        // Phase 4: Bayesian calibration. This is deliberately a soft diagnostic
+        // adjustment; it cannot independently veto a signal.
         let key = "\(symbol.uppercased()):\(direction)"
-        let bucket = calibration[key] ?? BayesianBucket(wins: 1, losses: 1)
+        let bucket = loadBucket(forKey: key)
         let posteriorWinRate = (bucket.wins + 1.0) / (bucket.wins + bucket.losses + 2.0)
         adjustment += (posteriorWinRate - 0.5) * 8.0
         reasons.append("Bayesian prior=\(Int(posteriorWinRate * 100))%")
@@ -114,20 +105,31 @@ actor SignalAccuracyEngine {
 
     /// Called by the execution/history layer when a completed signal outcome is known.
     /// Positive/negative outcomes update a Beta posterior and persist across launches.
-    func recordOutcome(symbol: String, direction: SignalType, profitable: Bool) {
+    static func recordOutcome(symbol: String, direction: SignalType, profitable: Bool) {
         guard direction != .none else { return }
         let key = "\(symbol.uppercased()):\(direction)"
-        var bucket = calibration[key] ?? BayesianBucket(wins: 1, losses: 1)
+        var bucket = loadBucket(forKey: key)
         if profitable { bucket.wins += 1 } else { bucket.losses += 1 }
-        calibration[key] = bucket
-        if let data = try? JSONEncoder().encode(calibration) {
+        var all = loadAllBuckets()
+        all[key] = bucket
+        if let data = try? JSONEncoder().encode(all) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
     }
 
+    private static func loadAllBuckets() -> [String: BayesianBucket] {
+        guard let data = UserDefaults.standard.data(forKey: storageKey),
+              let decoded = try? JSONDecoder().decode([String: BayesianBucket].self, from: data) else { return [:] }
+        return decoded
+    }
+
+    private static func loadBucket(forKey key: String) -> BayesianBucket {
+        loadAllBuckets()[key] ?? BayesianBucket(wins: 1, losses: 1)
+    }
+
     private enum Divergence { case supporting, opposing, none }
 
-    private func divergenceState(_ candles: [Kline], direction: SignalType) -> Divergence {
+    private static func divergenceState(_ candles: [Kline], direction: SignalType) -> Divergence {
         let recent = Array(candles.suffix(40))
         guard recent.count >= 20 else { return .none }
         let rsi = relativeStrengthIndex(recent, period: 14)
@@ -150,7 +152,7 @@ actor SignalAccuracyEngine {
         return .none
     }
 
-    private func microReversalConfirmation(_ candles: [Kline], direction: SignalType) -> (confirmed: Bool, reason: String) {
+    private static func microReversalConfirmation(_ candles: [Kline], direction: SignalType) -> (confirmed: Bool, reason: String) {
         let recent = Array(candles.suffix(8))
         guard recent.count >= 5 else { return (false, "reversal confirmation unavailable") }
         let previous = recent.dropLast(2)
@@ -170,7 +172,7 @@ actor SignalAccuracyEngine {
         return (true, "no directional confirmation required")
     }
 
-    private func relativeStrengthIndex(_ candles: [Kline], period: Int) -> [Double] {
+    private static func relativeStrengthIndex(_ candles: [Kline], period: Int) -> [Double] {
         guard candles.count > period else { return [] }
         var gains = 0.0
         var losses = 0.0
@@ -195,7 +197,7 @@ actor SignalAccuracyEngine {
         return result
     }
 
-    private func choppinessIndex(_ candles: [Kline], period: Int) -> Double {
+    private static func choppinessIndex(_ candles: [Kline], period: Int) -> Double {
         guard candles.count > period else { return 50 }
         let recent = Array(candles.suffix(period + 1))
         var trSum = 0.0
@@ -209,7 +211,7 @@ actor SignalAccuracyEngine {
         return 100 * log10(trSum / range) / log10(Double(period))
     }
 
-    private func hurstExponent(_ prices: [Double]) -> Double {
+    private static func hurstExponent(_ prices: [Double]) -> Double {
         guard prices.count >= 40 else { return 0.5 }
         let sample = Array(prices.suffix(100))
         var xs: [Double] = []
@@ -235,10 +237,9 @@ actor SignalAccuracyEngine {
                 if sd > 0 { rsValues.append((maxC - minC) / sd) }
                 start += lag
             }
-            if let rs = rsValues.first(where: { $0 > 0 }) {
+            if !rsValues.isEmpty {
                 xs.append(log(Double(lag)))
                 ys.append(log(rsValues.reduce(0, +) / Double(rsValues.count)))
-                _ = rs
             }
         }
         guard xs.count >= 3 else { return 0.5 }
@@ -250,7 +251,7 @@ actor SignalAccuracyEngine {
         return max(0, min(1, numerator / denominator))
     }
 
-    private func sessionMultiplier(for date: Date) -> Double {
+    private static func sessionMultiplier(for date: Date) -> Double {
         let hour = Calendar(identifier: .gregorian).component(.hour, from: date)
         switch hour {
         case 7...10, 13...16: return 1.10
