@@ -8,8 +8,8 @@ needle = '''        var finalSignal = await generateSignal(symbol: symbol, indic
 insert = '''        var finalSignal = await generateSignal(symbol: symbol, indicators: indicators, candles1m: candlesByTimeframe["1m"]!)
 
         // V23 signal-accuracy layer: regime, divergence and micro-reversal confirmation.
-        // This layer is intentionally independent of the existing pillar score and ML gate.
-        let accuracy = await SignalAccuracyEngine.shared.assess(
+        // This remains on the engine's isolation domain; it does not cross an actor boundary.
+        let accuracy = SignalAccuracyEngine.assess(
             symbol: symbol,
             direction: finalSignal.type,
             candles: candlesByTimeframe["1m"]!
@@ -23,7 +23,7 @@ insert = '''        var finalSignal = await generateSignal(symbol: symbol, indic
 
 if needle not in text:
     raise SystemExit("ScalpingSignalEngine integration anchor not found; source layout changed and was not modified.")
-if "SignalAccuracyEngine.shared.assess" in text:
+if "SignalAccuracyEngine.assess(" in text:
     raise SystemExit("Signal accuracy integration already present; refusing duplicate insertion.")
 
 text = text.replace(needle, insert, 1)
