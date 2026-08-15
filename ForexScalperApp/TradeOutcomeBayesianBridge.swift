@@ -1,8 +1,6 @@
 import Foundation
 import Combine
 
-/// Connects the authoritative completed-trade history stream to the V23 Bayesian learner.
-/// It also hydrates the hot-path Bayesian snapshot from the persisted trade history at startup.
 @MainActor
 final class TradeOutcomeBayesianBridge {
     static let shared = TradeOutcomeBayesianBridge()
@@ -25,9 +23,8 @@ final class TradeOutcomeBayesianBridge {
         var hydrated = 0
         for trade in trades where trade.status == .completed {
             guard let pnl = trade.pnl, let direction = Self.direction(for: trade) else { continue }
-            // Hydration reconstructs the synchronous hot-path snapshot for this launch.
             SignalAccuracyBayesianRuntime.shared.update(key: "\(trade.symbol.uppercased()):\(direction)", profitable: pnl > 0, priorWins: settings.bayesianPriorWins, priorLosses: settings.bayesianPriorLosses)
-            await SignalAccuracyEngine.recordOutcome(outcomeID: trade.id.uuidString, symbol: trade.symbol, direction: direction, profitable: pnl > 0)
+            await SignalAccuracyEngine.recordOutcome(outcomeID: trade.id.uuidString, symbol: trade.symbol, direction: direction, profitable: pnl > 0, updateRuntime: false)
             hydrated += 1
         }
         godLog("🧠 BAYESIAN BRIDGE | hydrated completed outcomes=\(hydrated)", level: .info)
@@ -35,7 +32,6 @@ final class TradeOutcomeBayesianBridge {
 
     private static func processCompletedTrade(_ trade: TradeRecord) {
         guard let pnl = trade.pnl, let direction = direction(for: trade) else { return }
-        // The engine performs the idempotent posterior update and hot-path cache update exactly once.
         Task { await SignalAccuracyEngine.recordOutcome(outcomeID: trade.id.uuidString, symbol: trade.symbol, direction: direction, profitable: pnl > 0) }
     }
 
