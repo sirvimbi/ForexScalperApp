@@ -6,7 +6,15 @@ import Foundation
 final class DailyNewsIntelligence {
     static let shared = DailyNewsIntelligence()
     private var lastPublishedDay: Date?
-    private init() {}
+
+    private init() {
+        Task { @MainActor in
+            await self.publishIfNeeded()
+        }
+        Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { _ in
+            Task { @MainActor in await DailyNewsIntelligence.shared.publishIfNeeded() }
+        }
+    }
 
     func publishIfNeeded(force: Bool = false) async {
         let calendar = Calendar.current
@@ -23,8 +31,7 @@ final class DailyNewsIntelligence {
         var currencyScores: [String: Double] = [:]
         var drivers: [String: [String]] = [:]
         for event in events {
-            let score = eventScore(event)
-            currencyScores[event.currency, default: 0] += score
+            currencyScores[event.currency, default: 0] += eventScore(event)
             drivers[event.currency, default: []].append(event.title)
         }
 
@@ -39,14 +46,10 @@ final class DailyNewsIntelligence {
         }.joined(separator: " • ")
 
         let insight = GodModeInsight(
-            id: UUID(),
-            type: .newsBroadcast,
-            symbol: "MACRO",
+            id: UUID(), type: .newsBroadcast, symbol: "MACRO",
             title: "DAILY NEWS WATCHLIST",
             message: "Pair bias: \(top). Drivers: \(driverText). This is a scenario bias derived from today's calendar, not a trade guarantee.",
-            sentiment: .none,
-            affectedPairs: watchPairs.map(\.symbol),
-            timestamp: now
+            sentiment: .none, affectedPairs: watchPairs.map(\.symbol), timestamp: now
         )
         NotificationCenter.default.post(name: .newGodModeInsight, object: insight)
         lastPublishedDay = now
@@ -56,28 +59,18 @@ final class DailyNewsIntelligence {
     private func eventScore(_ event: NewsEvent) -> Double {
         let impact: Double = event.impact == .high ? 3.0 : event.impact == .medium ? 1.5 : 0.5
         let title = event.title.lowercased()
-        let previous = numeric(event.previous), forecast = numeric(event.forecast)
-        guard let f = forecast, let p = previous else {
-            if title.contains("rate") || title.contains("cpi") || title.contains("inflation") || title.contains("employment") || title.contains("nfp") {
-                return impact * 0.15
-            }
+        guard let f = numeric(event.forecast), let p = numeric(event.previous) else {
+            if title.contains("rate") || title.contains("cpi") || title.contains("inflation") || title.contains("employment") || title.contains("nfp") { return impact * 0.15 }
             return 0
         }
-        let delta = f - p
-        var direction = delta
-        // For inflation, stronger-than-previous data is generally more hawkish;
-        // for employment/growth, stronger is likewise supportive. The score is a bias,
-        // not an assertion that the market must react in that direction.
-        if title.contains("unemployment") || title.contains("jobless") {
-            direction = -delta
-        }
+        var direction = f - p
+        if title.contains("unemployment") || title.contains("jobless") { direction = -direction }
         return max(-4, min(4, direction)) * impact
     }
 
     private func numeric(_ value: String?) -> Double? {
         guard let value else { return nil }
-        let cleaned = value.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "%", with: "")
-        return Double(cleaned)
+        return Double(value.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "%", with: ""))
     }
 
     private func makePairBiases(_ currencies: [(String, Double)]) -> [(symbol: String, score: Double, bias: String)] {
