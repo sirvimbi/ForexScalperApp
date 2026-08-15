@@ -15,7 +15,6 @@ final class TradeOutcomeBayesianBridge {
             .filter { $0.status == .completed }
             .sink { trade in Self.processCompletedTrade(trade) }
             .store(in: &cancellables)
-
         Task { await self.hydrateFromAuthoritativeHistory() }
         godLog("🧠 BAYESIAN BRIDGE | authoritative trade-history outcome listener active", level: .info)
     }
@@ -26,7 +25,7 @@ final class TradeOutcomeBayesianBridge {
         var hydrated = 0
         for trade in trades where trade.status == .completed {
             guard let pnl = trade.pnl, let direction = Self.direction(for: trade) else { continue }
-            SignalAccuracyBayesianRuntime.update(key: "\(trade.symbol.uppercased()):\(direction)", profitable: pnl > 0, priorWins: settings.bayesianPriorWins, priorLosses: settings.bayesianPriorLosses)
+            SignalAccuracyBayesianRuntime.shared.update(key: "\(trade.symbol.uppercased()):\(direction)", profitable: pnl > 0, priorWins: settings.bayesianPriorWins, priorLosses: settings.bayesianPriorLosses)
             await SignalAccuracyEngine.recordOutcome(outcomeID: trade.id.uuidString, symbol: trade.symbol, direction: direction, profitable: pnl > 0)
             hydrated += 1
         }
@@ -36,10 +35,8 @@ final class TradeOutcomeBayesianBridge {
     private static func processCompletedTrade(_ trade: TradeRecord) {
         guard let pnl = trade.pnl, let direction = direction(for: trade) else { return }
         let settings = SignalAccuracyConfiguration.load()
-        SignalAccuracyBayesianRuntime.update(key: "\(trade.symbol.uppercased()):\(direction)", profitable: pnl > 0, priorWins: settings.bayesianPriorWins, priorLosses: settings.bayesianPriorLosses)
-        Task {
-            await SignalAccuracyEngine.recordOutcome(outcomeID: trade.id.uuidString, symbol: trade.symbol, direction: direction, profitable: pnl > 0)
-        }
+        SignalAccuracyBayesianRuntime.shared.update(key: "\(trade.symbol.uppercased()):\(direction)", profitable: pnl > 0, priorWins: settings.bayesianPriorWins, priorLosses: settings.bayesianPriorLosses)
+        Task { await SignalAccuracyEngine.recordOutcome(outcomeID: trade.id.uuidString, symbol: trade.symbol, direction: direction, profitable: pnl > 0) }
     }
 
     private static func direction(for trade: TradeRecord) -> SignalType? {
