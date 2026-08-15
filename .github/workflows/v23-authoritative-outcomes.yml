@@ -1,0 +1,27 @@
+name: V23 Authoritative Outcomes Validation
+
+on:
+  push:
+    branches:
+      - agent/v23-authoritative-outcomes-config
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ForexScalperApp
+        run: |
+          xcodebuild \
+            -project ForexScalperApp.xcodeproj \
+            -scheme ForexScalperApp \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build
