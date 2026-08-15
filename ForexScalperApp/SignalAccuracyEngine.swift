@@ -1,8 +1,7 @@
 import Foundation
 
-/// Non-blocking/low-frequency signal quality layer used by the scalping engine.
-/// Static analysis keeps Kline data on the caller's isolation domain, avoiding an
-/// unnecessary Swift 6 actor/sendability boundary.
+/// Deterministic signal-quality layer. Strategy thresholds and score adjustments are read from
+/// the user's saved Accuracy settings on every assessment, so saved values take effect immediately.
 enum SignalAccuracyEngine {
     struct Assessment {
         let approved: Bool
@@ -18,44 +17,37 @@ enum SignalAccuracyEngine {
         }
     }
 
-    private struct BayesianBucket: Codable {
-        var wins: Double
-        var losses: Double
-    }
+    private enum Divergence { case supporting, opposing, none }
 
-    private static let storageKey = "signal.accuracy.bayesian.v1"
-
-    /// Phase 1-3 assessment. A signal is hard-vetoed only for severe chop or a clear
-    /// opposing divergence. Other factors are retained as transparent diagnostics.
-    static func assess(symbol: String, direction: SignalType, candles: [Kline]) -> Assessment {
-        guard candles.count >= 60, direction != .none else {
+    static func assess(symbol: String, direction: SignalType, candles: [Kline]) async -> Assessment {
+        let settings = await SignalAccuracySettingsStore.shared.snapshot()
+        guard candles.count >= settings.minimumHistoryCandles, direction != .none else {
             return Assessment(approved: true, confidenceAdjustment: 0, regime: "unknown", choppiness: 50, hurst: 0.5, reasons: ["insufficient accuracy-layer history"])
         }
 
         let prices = candles.map(\.close)
         let hurst = hurstExponent(prices)
-        let chop = choppinessIndex(candles, period: 14)
-        let divergence = divergenceState(candles, direction: direction)
-        let reversal = microReversalConfirmation(candles, direction: direction)
-        let session = sessionMultiplier(for: Date())
+        let chop = choppinessIndex(candles, period: settings.choppinessPeriod)
+        let divergence = divergenceState(candles, direction: direction, settings: settings)
+        let reversal = microReversalConfirmation(candles, direction: direction, settings: settings)
+        let session = sessionMultiplier(for: Date(), settings: settings)
 
         var adjustment = 0.0
         var reasons: [String] = []
         var approved = true
-
         let regime: String
-        if chop >= 61.8 {
+
+        if chop >= settings.choppinessWarningThreshold {
             regime = "choppy"
-            adjustment -= 10
             reasons.append("high choppiness")
-            if chop >= 68.0 { approved = false }
-        } else if hurst >= 0.60 {
+            if chop >= settings.choppinessVetoThreshold { approved = false }
+        } else if hurst >= settings.hurstTrendingThreshold {
             regime = "trending"
-            adjustment += 3
+            adjustment += abs(settings.reversalConfirmedAdjustment) * 0.43
             reasons.append("persistent trend")
-        } else if hurst <= 0.45 {
+        } else if hurst <= settings.hurstMeanReversionThreshold {
             regime = "mean-reverting"
-            adjustment += 1
+            adjustment += abs(settings.supportingDivergenceAdjustment) * 0.20
             reasons.append("mean-reversion regime")
         } else {
             regime = "transitional"
@@ -63,10 +55,10 @@ enum SignalAccuracyEngine {
 
         switch divergence {
         case .supporting:
-            adjustment += 5
+            adjustment += settings.supportingDivergenceAdjustment
             reasons.append("directional RSI divergence")
         case .opposing:
-            adjustment -= 15
+            adjustment += settings.opposingDivergenceAdjustment
             reasons.append("opposing RSI/price divergence")
             approved = false
         case .none:
@@ -74,28 +66,32 @@ enum SignalAccuracyEngine {
         }
 
         if reversal.confirmed {
-            adjustment += 7
+            adjustment += settings.reversalConfirmedAdjustment
             reasons.append(reversal.reason)
         } else {
-            adjustment -= regime == "trending" ? 3 : 6
+            adjustment += regime == "trending" ? settings.reversalWaitingTrendPenalty : settings.reversalWaitingOtherPenalty
             reasons.append(reversal.reason)
         }
 
-        adjustment += (session - 1.0) * 5.0
-        if session > 1.0 { reasons.append("session momentum favorable") }
-        if session < 1.0 { reasons.append("session quality reduced") }
+        if session > 1.0 {
+            adjustment += (session - 1.0) * abs(settings.reversalConfirmedAdjustment)
+            reasons.append("session momentum favorable")
+        } else if session < 1.0 {
+            adjustment += (session - 1.0) * abs(settings.reversalConfirmedAdjustment)
+            reasons.append("session quality reduced")
+        }
 
-        // Phase 4: Bayesian calibration. This is deliberately a soft diagnostic
-        // adjustment; it cannot independently veto a signal.
-        let key = "\(symbol.uppercased()):\(direction)"
-        let bucket = loadBucket(forKey: key)
-        let posteriorWinRate = (bucket.wins + 1.0) / (bucket.wins + bucket.losses + 2.0)
-        adjustment += (posteriorWinRate - 0.5) * 8.0
+        let posteriorWinRate = await SignalAccuracyBayesianStore.shared.posteriorWinRate(
+            key: "\(symbol.uppercased()):\(direction)",
+            priorWins: settings.bayesianPriorWins,
+            priorLosses: settings.bayesianPriorLosses
+        )
+        adjustment += (posteriorWinRate - 0.5) * settings.bayesianAdjustmentScale
         reasons.append("Bayesian prior=\(Int(posteriorWinRate * 100))%")
 
         return Assessment(
             approved: approved,
-            confidenceAdjustment: max(-20, min(12, adjustment)),
+            confidenceAdjustment: max(settings.confidenceAdjustmentFloor, min(settings.confidenceAdjustmentCeiling, adjustment)),
             regime: regime,
             choppiness: chop,
             hurst: hurst,
@@ -103,56 +99,48 @@ enum SignalAccuracyEngine {
         )
     }
 
-    /// Called by the execution/history layer when a completed signal outcome is known.
-    /// Positive/negative outcomes update a Beta posterior and persist across launches.
-    static func recordOutcome(symbol: String, direction: SignalType, profitable: Bool) {
+    /// Authoritative completed-trade outcome hook. The Bayesian store is idempotent by outcome ID,
+    /// so repeated history refreshes cannot double-count the same closed trade.
+    static func recordOutcome(outcomeID: String, symbol: String, direction: SignalType, profitable: Bool) async {
         guard direction != .none else { return }
-        let key = "\(symbol.uppercased()):\(direction)"
-        var bucket = loadBucket(forKey: key)
-        if profitable { bucket.wins += 1 } else { bucket.losses += 1 }
-        var all = loadAllBuckets()
-        all[key] = bucket
-        if let data = try? JSONEncoder().encode(all) {
-            UserDefaults.standard.set(data, forKey: storageKey)
-        }
+        let settings = await SignalAccuracySettingsStore.shared.snapshot()
+        await SignalAccuracyBayesianStore.shared.record(
+            outcomeID: outcomeID,
+            key: "\(symbol.uppercased()):\(direction)",
+            profitable: profitable,
+            priorWins: settings.bayesianPriorWins,
+            priorLosses: settings.bayesianPriorLosses
+        )
+        godLog("🧠 BAYESIAN OUTCOME | \(symbol) | direction=\(direction) | result=\(profitable ? "WIN" : "LOSS") | id=\(outcomeID)", level: .info)
     }
 
-    private static func loadAllBuckets() -> [String: BayesianBucket] {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let decoded = try? JSONDecoder().decode([String: BayesianBucket].self, from: data) else { return [:] }
-        return decoded
-    }
-
-    private static func loadBucket(forKey key: String) -> BayesianBucket {
-        loadAllBuckets()[key] ?? BayesianBucket(wins: 1, losses: 1)
-    }
-
-    private enum Divergence { case supporting, opposing, none }
-
-    private static func divergenceState(_ candles: [Kline], direction: SignalType) -> Divergence {
-        let recent = Array(candles.suffix(40))
+    private static func divergenceState(_ candles: [Kline], direction: SignalType, settings: SignalAccuracyConfiguration) -> Divergence {
+        let recent = Array(candles.suffix(settings.divergenceLookback))
         guard recent.count >= 20 else { return .none }
-        let rsi = relativeStrengthIndex(recent, period: 14)
+        let rsi = relativeStrengthIndex(recent, period: settings.choppinessPeriod)
         guard rsi.count >= 10 else { return .none }
 
-        let firstPrice = recent.dropLast(10).map(\.close).max() ?? 0
-        let secondPrice = recent.suffix(10).map(\.close).max() ?? 0
-        let firstLow = recent.dropLast(10).map(\.close).min() ?? 0
-        let secondLow = recent.suffix(10).map(\.close).min() ?? 0
-        let firstRSI = rsi.prefix(max(1, rsi.count - 5)).max() ?? 50
-        let secondRSI = rsi.suffix(5).max() ?? 50
-        let firstRSILow = rsi.prefix(max(1, rsi.count - 5)).min() ?? 50
-        let secondRSILow = rsi.suffix(5).min() ?? 50
+        let midpoint = max(1, recent.count / 2)
+        let first = Array(recent.prefix(midpoint))
+        let second = Array(recent.suffix(midpoint))
+        let firstPriceHigh = first.map(\.close).max() ?? 0
+        let secondPriceHigh = second.map(\.close).max() ?? 0
+        let firstPriceLow = first.map(\.close).min() ?? 0
+        let secondPriceLow = second.map(\.close).min() ?? 0
+        let firstRSIHigh = rsi.prefix(max(1, rsi.count / 2)).max() ?? 50
+        let secondRSIHigh = rsi.suffix(max(1, rsi.count / 2)).max() ?? 50
+        let firstRSILow = rsi.prefix(max(1, rsi.count / 2)).min() ?? 50
+        let secondRSILow = rsi.suffix(max(1, rsi.count / 2)).min() ?? 50
 
-        let bearish = secondPrice > firstPrice && secondRSI < firstRSI
-        let bullish = secondLow < firstLow && secondRSILow > firstRSILow
+        let bearish = secondPriceHigh > firstPriceHigh && secondRSIHigh < firstRSIHigh - settings.divergenceRSIMargin
+        let bullish = secondPriceLow < firstPriceLow && secondRSILow > firstRSILow + settings.divergenceRSIMargin
 
         if direction == .buy { return bullish ? .supporting : (bearish ? .opposing : .none) }
         if direction == .sell { return bearish ? .supporting : (bullish ? .opposing : .none) }
         return .none
     }
 
-    private static func microReversalConfirmation(_ candles: [Kline], direction: SignalType) -> (confirmed: Bool, reason: String) {
+    private static func microReversalConfirmation(_ candles: [Kline], direction: SignalType, settings: SignalAccuracyConfiguration) -> (confirmed: Bool, reason: String) {
         let recent = Array(candles.suffix(8))
         guard recent.count >= 5 else { return (false, "reversal confirmation unavailable") }
         let previous = recent.dropLast(2)
@@ -251,12 +239,69 @@ enum SignalAccuracyEngine {
         return max(0, min(1, numerator / denominator))
     }
 
-    private static func sessionMultiplier(for date: Date) -> Double {
+    private static func sessionMultiplier(for date: Date, settings: SignalAccuracyConfiguration) -> Double {
         let hour = Calendar(identifier: .gregorian).component(.hour, from: date)
-        switch hour {
-        case 7...10, 13...16: return 1.10
-        case 22...23, 0...5: return 0.94
-        default: return 1.0
+        let favorable1 = hour >= settings.favorableSession1StartHour && hour <= settings.favorableSession1EndHour
+        let favorable2 = hour >= settings.favorableSession2StartHour && hour <= settings.favorableSession2EndHour
+        let reduced: Bool
+        if settings.reducedSessionStartHour <= settings.reducedSessionEndHour {
+            reduced = hour >= settings.reducedSessionStartHour && hour <= settings.reducedSessionEndHour
+        } else {
+            reduced = hour >= settings.reducedSessionStartHour || hour <= settings.reducedSessionEndHour
+        }
+        if favorable1 || favorable2 { return settings.favorableSessionMultiplier }
+        if reduced { return settings.reducedSessionMultiplier }
+        return 1.0
+    }
+}
+
+private actor SignalAccuracyBayesianStore {
+    static let shared = SignalAccuracyBayesianStore()
+
+    private struct Bucket: Codable {
+        var wins: Double
+        var losses: Double
+    }
+
+    private struct Persisted: Codable {
+        var buckets: [String: Bucket]
+        var recordedOutcomeIDs: Set<String>
+    }
+
+    private var loaded = false
+    private var buckets: [String: Bucket] = [:]
+    private var recordedOutcomeIDs: Set<String> = []
+    private let storageKey = "signal.accuracy.bayesian.v2"
+
+    func posteriorWinRate(key: String, priorWins: Double, priorLosses: Double) -> Double {
+        loadIfNeeded()
+        let bucket = buckets[key] ?? Bucket(wins: priorWins, losses: priorLosses)
+        return bucket.wins / max(0.000001, bucket.wins + bucket.losses)
+    }
+
+    func record(outcomeID: String, key: String, profitable: Bool, priorWins: Double, priorLosses: Double) {
+        loadIfNeeded()
+        guard !recordedOutcomeIDs.contains(outcomeID) else { return }
+        var bucket = buckets[key] ?? Bucket(wins: priorWins, losses: priorLosses)
+        if profitable { bucket.wins += 1 } else { bucket.losses += 1 }
+        buckets[key] = bucket
+        recordedOutcomeIDs.insert(outcomeID)
+        persist()
+    }
+
+    private func loadIfNeeded() {
+        guard !loaded else { return }
+        loaded = true
+        guard let data = UserDefaults.standard.data(forKey: storageKey),
+              let persisted = try? JSONDecoder().decode(Persisted.self, from: data) else { return }
+        buckets = persisted.buckets
+        recordedOutcomeIDs = persisted.recordedOutcomeIDs
+    }
+
+    private func persist() {
+        let persisted = Persisted(buckets: buckets, recordedOutcomeIDs: recordedOutcomeIDs)
+        if let data = try? JSONEncoder().encode(persisted) {
+            UserDefaults.standard.set(data, forKey: storageKey)
         }
     }
 }
