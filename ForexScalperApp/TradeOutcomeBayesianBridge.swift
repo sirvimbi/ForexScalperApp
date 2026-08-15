@@ -25,6 +25,7 @@ final class TradeOutcomeBayesianBridge {
         var hydrated = 0
         for trade in trades where trade.status == .completed {
             guard let pnl = trade.pnl, let direction = Self.direction(for: trade) else { continue }
+            // Hydration reconstructs the synchronous hot-path snapshot for this launch.
             SignalAccuracyBayesianRuntime.shared.update(key: "\(trade.symbol.uppercased()):\(direction)", profitable: pnl > 0, priorWins: settings.bayesianPriorWins, priorLosses: settings.bayesianPriorLosses)
             await SignalAccuracyEngine.recordOutcome(outcomeID: trade.id.uuidString, symbol: trade.symbol, direction: direction, profitable: pnl > 0)
             hydrated += 1
@@ -34,8 +35,7 @@ final class TradeOutcomeBayesianBridge {
 
     private static func processCompletedTrade(_ trade: TradeRecord) {
         guard let pnl = trade.pnl, let direction = direction(for: trade) else { return }
-        let settings = SignalAccuracyConfiguration.load()
-        SignalAccuracyBayesianRuntime.shared.update(key: "\(trade.symbol.uppercased()):\(direction)", profitable: pnl > 0, priorWins: settings.bayesianPriorWins, priorLosses: settings.bayesianPriorLosses)
+        // The engine performs the idempotent posterior update and hot-path cache update exactly once.
         Task { await SignalAccuracyEngine.recordOutcome(outcomeID: trade.id.uuidString, symbol: trade.symbol, direction: direction, profitable: pnl > 0) }
     }
 
