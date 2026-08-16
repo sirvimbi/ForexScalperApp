@@ -10,7 +10,6 @@ DerivedData/
 *.mode2v3
 !default.mode2v3
 *.perspectivev3
-!default.perspectivev3
 xcuserdata/
 *.xccheckout
 *.moved-aside
@@ -37,3 +36,6 @@ build_log.txt
 temp_model.pkl
 temp_model.onnx
 *.backup
+
+# Local Xcode build/check artifacts
+build_check/
