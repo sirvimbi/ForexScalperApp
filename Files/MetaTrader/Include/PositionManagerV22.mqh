@@ -61,10 +61,10 @@ private:
       double minVolume = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
       double maxVolume = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
       double step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
-      if(requested <= 0.0 || current <= 0.0) return 0.0;
+      if(requested <= 0.0 || current <= 0.0 || step <= 0.0) return 0.0;
       requested = MathMin(requested, current);
       if(maxVolume > 0.0) requested = MathMin(requested, maxVolume);
-      if(step > 0.0) requested = MathFloor((requested + step * 0.000001) / step) * step;
+      requested = MathFloor((requested + step * 0.000001) / step) * step;
       requested = NormalizeDouble(requested, VolumeDigits(step));
       if(requested < minVolume) return 0.0;
       return requested;
@@ -72,7 +72,7 @@ private:
 
    string StateKey(ulong ticket, string suffix)
    {
-      return PM_PREFIX + IntegerToString((int)ticket) + "_" + suffix;
+      return PM_PREFIX + IntegerToString((long)ticket) + "_" + suffix;
    }
 
    double OriginalVolume(ulong ticket, double current)
@@ -91,8 +91,7 @@ private:
    int TPStage(ulong ticket)
    {
       string key = StateKey(ticket, "TP_STAGE");
-      if(!GlobalVariableCheck(key)) return 0;
-      return (int)GlobalVariableGet(key);
+      return GlobalVariableCheck(key) ? (int)GlobalVariableGet(key) : 0;
    }
 
    void SetTPStage(ulong ticket, int stage)
@@ -133,8 +132,7 @@ private:
    bool ImproveOnly(ENUM_POSITION_TYPE type, double oldSL, double newSL)
    {
       if(oldSL <= 0.0) return true;
-      if(type == POSITION_TYPE_BUY) return newSL > oldSL;
-      return newSL < oldSL;
+      return type == POSITION_TYPE_BUY ? newSL > oldSL : newSL < oldSL;
    }
 
    bool ModifySL(ulong ticket, string symbol, ENUM_POSITION_TYPE type, double newSL, string reason)
@@ -144,7 +142,7 @@ private:
       double currentTP = PositionGetDouble(POSITION_TP);
       int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
       newSL = NormalizeDouble(newSL, digits);
-      if(!ImproveOnly(type, oldSL, newSL)) return false;
+      if(!ImproveOnly(type, oldSL, newSL)) return true;
       if(!IsStopDistanceValid(symbol, type, newSL))
       {
          PrintFormat("[EA V22 PM] SL SKIP | ticket=%I64d | reason=%s | requested=%s | broker stop/freeze distance not satisfied", ticket, reason, DoubleToString(newSL, digits));
@@ -155,43 +153,64 @@ private:
       m_trade.SetAsyncMode(false);
       bool callOK = m_trade.PositionModify(ticket, newSL, currentTP);
       uint retcode = m_trade.ResultRetcode();
-      bool serverOK = SuccessfulRetcode(retcode);
-      PrintFormat("[EA V22 PM] SL MODIFY | ticket=%I64d | reason=%s | old=%s | new=%s | retcode=%u | %s",
-                  ticket, reason, DoubleToString(oldSL, digits), DoubleToString(newSL, digits), retcode, m_trade.ResultRetcodeDescription());
-      return callOK && serverOK;
+      bool success = callOK && SuccessfulRetcode(retcode);
+      PrintFormat("[EA V22 PM] SL MODIFY | ticket=%I64d | reason=%s | old=%s | new=%s | retcode=%u | success=%s | %s",
+                  ticket, reason, DoubleToString(oldSL, digits), DoubleToString(newSL, digits), retcode,
+                  success ? "true" : "false", m_trade.ResultRetcodeDescription());
+      return success;
    }
 
    bool CloseVolume(ulong ticket, string symbol, ENUM_POSITION_TYPE type, double volume, string reason)
    {
       if(!PositionSelectByTicket(ticket)) return false;
       double currentVolume = PositionGetDouble(POSITION_VOLUME);
-      double closeVolume = NormalizeCloseVolume(symbol, volume, currentVolume);
-      if(closeVolume <= 0.0) return false;
       double step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
       double minVolume = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
-      int digits = VolumeDigits(step);
+      if(step <= 0.0 || minVolume <= 0.0 || currentVolume <= 0.0) return false;
+
+      double closeVolume = NormalizeCloseVolume(symbol, volume, currentVolume);
+      if(closeVolume <= 0.0) return false;
+
+      double remainder = currentVolume - closeVolume;
+      if(remainder > 0.0 && remainder < minVolume) closeVolume = currentVolume;
+      closeVolume = NormalizeDouble(closeVolume, VolumeDigits(step));
+
       m_trade.SetExpertMagicNumber(PM_MAGIC_NUMBER);
       m_trade.SetTypeFillingBySymbol(symbol);
       m_trade.SetAsyncMode(false);
+
       bool callOK = false;
       ENUM_ACCOUNT_MARGIN_MODE mode = (ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE);
-      double remainder = currentVolume - closeVolume;
-      if(remainder > 0.0 && minVolume > 0.0 && remainder < minVolume) closeVolume = currentVolume;
-      if(closeVolume >= currentVolume - (step > 0.0 ? step * 0.25 : 0.00000001)) callOK = m_trade.PositionClose(ticket);
-      else if(mode == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING) callOK = m_trade.PositionClosePartial(ticket, closeVolume);
-      else if(type == POSITION_TYPE_BUY) callOK = m_trade.Sell(closeVolume, symbol, 0.0, 0.0, 0.0, "GOD_MODE_V22_TP");
-      else callOK = m_trade.Buy(closeVolume, symbol, 0.0, 0.0, 0.0, "GOD_MODE_V22_TP");
+      if(closeVolume >= currentVolume - step * 0.25)
+      {
+         callOK = m_trade.PositionClose(ticket);
+      }
+      else if(mode == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
+      {
+         callOK = m_trade.PositionClosePartial(ticket, closeVolume);
+      }
+      else
+      {
+         // Netting accounts have one position per symbol. An opposite market
+         // order reduces that exact symbol position without touching another
+         // symbol. This path is intentionally unavailable for hedging.
+         if(type == POSITION_TYPE_BUY) callOK = m_trade.Sell(closeVolume, symbol, 0.0, 0.0, 0.0, "GOD_MODE_V22_TP");
+         else callOK = m_trade.Buy(closeVolume, symbol, 0.0, 0.0, 0.0, "GOD_MODE_V22_TP");
+      }
+
       uint retcode = m_trade.ResultRetcode();
-      bool serverOK = SuccessfulRetcode(retcode);
-      PrintFormat("[EA V22 PM] CLOSE | ticket=%I64d | reason=%s | requested=%s | retcode=%u | %s",
-                  ticket, reason, DoubleToString(closeVolume, digits), retcode, m_trade.ResultRetcodeDescription());
-      return callOK && serverOK;
+      bool success = callOK && SuccessfulRetcode(retcode);
+      PrintFormat("[EA V22 PM] CLOSE | ticket=%I64d | reason=%s | requested=%s | executed=%s | retcode=%u | success=%s | %s",
+                  ticket, reason, DoubleToString(volume, VolumeDigits(step)), DoubleToString(m_trade.ResultVolume(), VolumeDigits(step)),
+                  retcode, success ? "true" : "false", m_trade.ResultRetcodeDescription());
+      return success;
    }
 
    void ManagePosition(ulong ticket)
    {
       if(!PositionSelectByTicket(ticket)) return;
       if((long)PositionGetInteger(POSITION_MAGIC) != PM_MAGIC_NUMBER) return;
+
       string symbol = PositionGetString(POSITION_SYMBOL);
       ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       double currentVolume = PositionGetDouble(POSITION_VOLUME);
@@ -200,35 +219,54 @@ private:
       double existingSL = PositionGetDouble(POSITION_SL);
       double pip = PipSize(symbol);
       if(currentVolume <= 0.0 || entry <= 0.0 || current <= 0.0 || pip <= 0.0) return;
+
       double profitPips = type == POSITION_TYPE_BUY ? (current - entry) / pip : (entry - current) / pip;
       if(profitPips <= 0.0) return;
 
       double original = OriginalVolume(ticket, currentVolume);
       int stage = TPStage(ticket);
-      double tp1Pips = MathMax(0.0, ReadSetting("TP1_PIPS", 10.0));
-      double tp2Pips = MathMax(tp1Pips, ReadSetting("TP2_PIPS", 15.0));
-      double tp3Pips = MathMax(tp2Pips, ReadSetting("TP3_PIPS", 20.0));
-      double tp1Pct = Clamp(ReadSetting("TP1_PCT", 0.50), 0.0, 1.0);
-      double tp2Pct = Clamp(ReadSetting("TP2_PCT", 0.30), 0.0, 1.0);
-      double tp3Pct = Clamp(ReadSetting("TP3_PCT", 0.20), 0.0, 1.0);
+      double tp1Pips = MathMax(0.0, ReadSetting("TP1_PIPS", 0.0));
+      double tp2Pips = MathMax(tp1Pips, ReadSetting("TP2_PIPS", tp1Pips));
+      double tp3Pips = MathMax(tp2Pips, ReadSetting("TP3_PIPS", tp2Pips));
+      double tp1Pct = Clamp(ReadSetting("TP1_PCT", 0.0), 0.0, 1.0);
+      double tp2Pct = Clamp(ReadSetting("TP2_PCT", 0.0), 0.0, 1.0);
+      double tp3Pct = Clamp(ReadSetting("TP3_PCT", 0.0), 0.0, 1.0);
 
-      if(stage < PM_STAGE_TP1 && tp1Pips > 0.0 && profitPips >= tp1Pips)
+      if(stage < PM_STAGE_TP1 && tp1Pct > 0.0 && tp1Pips > 0.0 && profitPips >= tp1Pips)
       {
-         if(CloseVolume(ticket, symbol, type, original * tp1Pct, "TP1")) { SetTPStage(ticket, PM_STAGE_TP1); stage = PM_STAGE_TP1; }
-      }
-      if(stage >= PM_STAGE_TP1 && stage < PM_STAGE_TP2 && tp2Pips > 0.0 && profitPips >= tp2Pips && PositionSelectByTicket(ticket))
-      {
-         currentVolume = PositionGetDouble(POSITION_VOLUME);
-         if(CloseVolume(ticket, symbol, type, MathMin(currentVolume, original * tp2Pct), "TP2")) { SetTPStage(ticket, PM_STAGE_TP2); stage = PM_STAGE_TP2; }
-      }
-      if(stage >= PM_STAGE_TP2 && stage < PM_STAGE_TP3 && tp3Pips > 0.0 && profitPips >= tp3Pips && PositionSelectByTicket(ticket))
-      {
-         currentVolume = PositionGetDouble(POSITION_VOLUME);
-         if(CloseVolume(ticket, symbol, type, MathMin(currentVolume, original * tp3Pct), "TP3")) { SetTPStage(ticket, PM_STAGE_TP3); stage = PM_STAGE_TP3; }
+         if(CloseVolume(ticket, symbol, type, original * tp1Pct, "TP1"))
+         {
+            SetTPStage(ticket, PM_STAGE_TP1);
+            stage = PM_STAGE_TP1;
+         }
       }
 
-      bool breakevenEnabled = ReadBool("BE_ENABLED", true);
-      double beTrigger = MathMax(0.0, ReadSetting("BE_TRIGGER_PIPS", tp1Pips));
+      if(stage >= PM_STAGE_TP1 && stage < PM_STAGE_TP2 && tp2Pct > 0.0 && tp2Pips > 0.0 && profitPips >= tp2Pips && PositionSelectByTicket(ticket))
+      {
+         currentVolume = PositionGetDouble(POSITION_VOLUME);
+         if(CloseVolume(ticket, symbol, type, original * tp2Pct, "TP2"))
+         {
+            SetTPStage(ticket, PM_STAGE_TP2);
+            stage = PM_STAGE_TP2;
+         }
+      }
+
+      if(stage >= PM_STAGE_TP2 && stage < PM_STAGE_TP3 && tp3Pct > 0.0 && tp3Pips > 0.0 && profitPips >= tp3Pips && PositionSelectByTicket(ticket))
+      {
+         currentVolume = PositionGetDouble(POSITION_VOLUME);
+         if(CloseVolume(ticket, symbol, type, original * tp3Pct, "TP3"))
+         {
+            SetTPStage(ticket, PM_STAGE_TP3);
+            stage = PM_STAGE_TP3;
+         }
+      }
+
+      if(!PositionSelectByTicket(ticket)) return;
+      current = PositionGetDouble(POSITION_PRICE_CURRENT);
+      existingSL = PositionGetDouble(POSITION_SL);
+
+      bool breakevenEnabled = ReadBool("BE_ENABLED", false);
+      double beTrigger = MathMax(0.0, ReadSetting("BE_TRIGGER_PIPS", 0.0));
       double beOffset = ReadSetting("BE_OFFSET_PIPS", 0.0);
       if(breakevenEnabled && beTrigger > 0.0 && profitPips >= beTrigger && !BreakevenDone(ticket))
       {
@@ -236,28 +274,39 @@ private:
          if(ModifySL(ticket, symbol, type, beSL, "BREAKEVEN")) SetBreakevenDone(ticket);
       }
 
-      bool trailingEnabled = ReadBool("TRAIL_ENABLED", true);
-      double activation = MathMax(0.0, ReadSetting("TRAIL_ACTIVATION_PIPS", 5.0));
-      double distance = MathMax(0.0, ReadSetting("TRAIL_DISTANCE_PIPS", 6.0));
-      double step = MathMax(0.0, ReadSetting("TRAIL_STEP_PIPS", 1.0));
+      bool trailingEnabled = ReadBool("TRAIL_ENABLED", false);
+      double activation = MathMax(0.0, ReadSetting("TRAIL_ACTIVATION_PIPS", 0.0));
+      double distance = MathMax(0.0, ReadSetting("TRAIL_DISTANCE_PIPS", 0.0));
+      double step = MathMax(0.0, ReadSetting("TRAIL_STEP_PIPS", 0.0));
       if(trailingEnabled && activation > 0.0 && distance > 0.0 && profitPips >= activation)
       {
          double desired = type == POSITION_TYPE_BUY ? current - distance * pip : current + distance * pip;
-         if(existingSL <= 0.0 || MathAbs(desired - existingSL) >= step * pip) ModifySL(ticket, symbol, type, desired, "TRAILING");
+         desired = NormalizeDouble(desired, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS));
+         double movement = existingSL > 0.0 ? MathAbs(desired - existingSL) / pip : step;
+         if(existingSL <= 0.0 || movement >= step) ModifySL(ticket, symbol, type, desired, "TRAILING");
       }
    }
 
 public:
-   CPositionManagerV22() { m_trade.SetExpertMagicNumber(PM_MAGIC_NUMBER); m_trade.SetAsyncMode(false); }
+   CPositionManagerV22()
+   {
+      m_trade.SetExpertMagicNumber(PM_MAGIC_NUMBER);
+      m_trade.SetAsyncMode(false);
+   }
 
    void ManageAll()
    {
       if(!GlobalVariableCheck(PM_PREFIX + "CONFIG_READY") || GlobalVariableGet(PM_PREFIX + "CONFIG_READY") <= 0.5)
       {
          static bool logged = false;
-         if(!logged) { Print("[EA V22 PM] SAFETY HOLD | waiting for Swift position-management settings sync"); logged = true; }
+         if(!logged)
+         {
+            Print("[EA V22 PM] SAFETY HOLD | waiting for Swift position-management settings sync");
+            logged = true;
+         }
          return;
       }
+
       for(int i = PositionsTotal() - 1; i >= 0; i--)
       {
          ulong ticket = PositionGetTicket(i);
