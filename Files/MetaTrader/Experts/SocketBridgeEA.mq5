@@ -8,6 +8,7 @@
 #property strict
 
 #include <CommandHandlerV22.mqh>
+#include <PositionManagerV22.mqh>
 #include <Data.mqh>
 #include <WebSocketLib.mqh>
 #include <SocketManager.mqh>
@@ -26,6 +27,7 @@ ulong WebSocketClients[];
 CCommandHandlerV22 *commandHandler = NULL;
 CData *dataManager = NULL;
 CTrade tradeControl;
+CPositionManagerV22 positionManager;
 datetime lastServerInitAttempt = 0;
 datetime lastHeartbeat = 0;
 
@@ -56,9 +58,8 @@ int OnInit()
    Print("==================================================");
    Print(" FOREXSCALPERAPP MT5 EXECUTION BRIDGE V22.0");
    Print(" Strategy authority: SWIFT | Protection authority: EA V22");
-   Print(" Partial TP: 50% @ 1R | 30% @ 2R | remainder runner");
-   Print(" Trailing: configurable activation + volatility-aware curve");
-   Print(" Runner: unlimited hold; no fixed TP/time exit");
+   Print(" Position manager: TP1/TP2/TP3 + breakeven + forward-only trailing");
+   Print(" Runner: configuration-controlled; no Swift-side mutation");
    Print(" Hard SL: mandatory emergency protection");
    Print(" Bridge port: ", HTTP_PORT, " | Magic: ", MAGIC_NUMBER);
    Print(" Status: ONLINE");
@@ -76,6 +77,9 @@ void OnDeinit(const int reason)
 
 void OnTick()
 {
+   // Position management runs independently of WebSocket/UI connectivity.
+   positionManager.ManageAll();
+
    if(dataManager == NULL) return;
    if(ArraySize(WebSocketClients) > 0) SendUpdateToClients();
    else dataManager.SendCurrentPrices(EA_INVALID_SOCKET);
