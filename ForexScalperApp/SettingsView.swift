@@ -14,6 +14,7 @@ struct SettingsView: View {
             Form {
                 riskSection
                 scalpingConfigSection
+                runnerContinuationSection
                 elitePrecisionSection
                 tradingPairsSection
                 mt5APISection
@@ -87,6 +88,7 @@ struct SettingsView: View {
                                 }.padding(16)
                             }
                         }
+                        RunnerContinuationSettingsCard(config: viewModel.scalpingConfig)
                         VStack(spacing: 20) {
                             GlassCard {
                                 VStack(alignment: .leading, spacing: 16) {
