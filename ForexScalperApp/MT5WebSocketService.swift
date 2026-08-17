@@ -19,6 +19,7 @@ actor MT5WebSocketService {
     private var l2Cache: [String: (buyVol: Double, sellVol: Double, timestamp: Date)] = [:]
     private var failureWasReported = false
     private var customWSURL: URL?
+    private var brokerSuffix = ""
 
     private let maxReconnectDelay: UInt64 = 30
     private var wsURL: URL {
@@ -35,8 +36,9 @@ actor MT5WebSocketService {
         }
     }
 
-    func connect(symbols: [String]) {
+    func connect(symbols: [String]) async {
         self.symbols = symbols
+        self.brokerSuffix = await MainActor.run { ScalpingConfig.shared.brokerSuffix.trimmingCharacters(in: .whitespacesAndNewlines) }
         stopped = false
         reconnectAttempt = 0
         failureWasReported = false
@@ -44,7 +46,7 @@ actor MT5WebSocketService {
         reconnectTask = nil
         signalHeartbeatTask?.cancel()
         signalHeartbeatTask = nil
-        godLog("🌐 MT5 WS: connect requested → \(wsURL.absoluteString) | symbols=\(symbols.count)", level: .info)
+        godLog("🌐 MT5 WS: connect requested → \(wsURL.absoluteString) | symbols=\(symbols.count) | brokerSuffix='\(brokerSuffix)'", level: .info)
         openSocket()
         startSignalEvaluationHeartbeat()
     }
@@ -89,12 +91,12 @@ actor MT5WebSocketService {
         let requestedSymbols = symbols
         guard !requestedSymbols.isEmpty else { return }
         let settings = SignalRuntimeSettings.load()
-        let configuredSuffix = await MainActor.run { ScalpingConfig.shared.brokerSuffix.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let suffix = brokerSuffix
 
         for rawSymbol in requestedSymbols {
             if Task.isCancelled { return }
-            let strategySymbol = normalizeStrategySymbol(rawSymbol, brokerSuffix: configuredSuffix)
-            let brokerSymbol = resolveBrokerSymbol(rawSymbol, brokerSuffix: configuredSuffix)
+            let strategySymbol = normalizeStrategySymbol(rawSymbol, brokerSuffix: suffix)
+            let brokerSymbol = resolveBrokerSymbol(rawSymbol, brokerSuffix: suffix)
             do {
                 let candles = try await MT5Service.shared.getCandles(symbol: brokerSymbol, timeframe: "1m", count: settings.heartbeatCandleCount)
                 guard let last = candles.last else {
@@ -174,7 +176,6 @@ actor MT5WebSocketService {
     private func handleReceive(_ result: Result<URLSessionWebSocketTask.Message, Error>, task: URLSessionWebSocketTask) {
         guard !stopped else { return }
         guard webSocket === task else { return }
-
         switch result {
         case .success(let message):
             let wasConnected = isConnected
@@ -184,8 +185,7 @@ actor MT5WebSocketService {
             failureWasReported = false
             switch message {
             case .string(let text): handleMessage(text)
-            case .data(let data):
-                if let text = String(data: data, encoding: .utf8) { handleMessage(text) }
+            case .data(let data): if let text = String(data: data, encoding: .utf8) { handleMessage(text) }
             @unknown default: break
             }
             receiveLoop(task)
@@ -195,9 +195,7 @@ actor MT5WebSocketService {
             if !failureWasReported {
                 godLog("❌ MT5 WS: receive failed [\(nsError.code)] \(error.localizedDescription)", level: .warning)
                 failureWasReported = true
-            } else {
-                godLog("🔁 MT5 WS: reconnect cycle continues — \(error.localizedDescription)", level: .info)
-            }
+            } else { godLog("🔁 MT5 WS: reconnect cycle continues — \(error.localizedDescription)", level: .info) }
             scheduleReconnect()
         }
     }
@@ -246,8 +244,7 @@ actor MT5WebSocketService {
                 godLog("⚠️ MT5 WS: malformed price_update — missing symbol/bid/ask", level: .warning)
                 continue
             }
-            let configuredSuffix = ScalpingConfig.shared.brokerSuffix
-            let symbol = normalizeStrategySymbol(rawSymbol, brokerSuffix: configuredSuffix)
+            let symbol = normalizeStrategySymbol(rawSymbol, brokerSuffix: brokerSuffix)
             let timestamp = int64(item["time_msc"] ?? item["timestamp"] ?? item["time"]) ?? Int64(Date().timeIntervalSince1970 * 1000)
             if let previous = lastPriceTimestamp[rawSymbol], timestamp < previous { continue }
             lastPriceTimestamp[rawSymbol] = timestamp
@@ -260,15 +257,14 @@ actor MT5WebSocketService {
         let ticket = int64(json["ticket"] ?? json["position"] ?? json["position_id"] ?? json["deal"] ?? json["order"]) ?? 0
         let rawSymbol = string(json["symbol"]) ?? ""
         guard ticket > 0, !rawSymbol.isEmpty else { return }
-        let configuredSuffix = ScalpingConfig.shared.brokerSuffix
-        let userInfo: [String: Any] = ["event_id": string(json["event_id"]) ?? "", "ticket": ticket, "position_id": int64(json["position_id"] ?? json["position"]) ?? ticket, "deal": int64(json["deal"]) ?? 0, "order": int64(json["order"]) ?? 0, "symbol": normalizeStrategySymbol(rawSymbol, brokerSuffix: configuredSuffix), "brokerSymbol": rawSymbol, "volume": number(json["volume"]) ?? 0, "price": number(json["price"]) ?? 0, "profit": number(json["profit"]) ?? 0, "swap": number(json["swap"]) ?? 0, "commission": number(json["commission"]) ?? 0, "entry": int64(json["entry"]) ?? 0, "deal_type": int64(json["deal_type"]) ?? 0, "reason": string(json["reason"]) ?? "Unknown", "time": int64(json["time"]) ?? Int64(Date().timeIntervalSince1970)]
+        let userInfo: [String: Any] = ["event_id": string(json["event_id"]) ?? "", "ticket": ticket, "position_id": int64(json["position_id"] ?? json["position"]) ?? ticket, "deal": int64(json["deal"]) ?? 0, "order": int64(json["order"]) ?? 0, "symbol": normalizeStrategySymbol(rawSymbol, brokerSuffix: brokerSuffix), "brokerSymbol": rawSymbol, "volume": number(json["volume"]) ?? 0, "price": number(json["price"]) ?? 0, "profit": number(json["profit"]) ?? 0, "swap": number(json["swap"]) ?? 0, "commission": number(json["commission"]) ?? 0, "entry": int64(json["entry"]) ?? 0, "deal_type": int64(json["deal_type"]) ?? 0, "reason": string(json["reason"]) ?? "Unknown", "time": int64(json["time"]) ?? Int64(Date().timeIntervalSince1970)]
         godLog("📥 MT5 WS: trade_event ticket=\(ticket) symbol=\(rawSymbol)", level: .info)
         NotificationCenter.default.post(name: .mt5TradeClosed, object: nil, userInfo: userInfo)
     }
 
     private func handleMbookUpdate(_ json: [String: Any]) {
         guard let rawSymbol = string(json["symbol"]), let entries = json["market_book"] as? [[String: Any]] else { return }
-        let symbol = normalizeStrategySymbol(rawSymbol, brokerSuffix: ScalpingConfig.shared.brokerSuffix)
+        let symbol = normalizeStrategySymbol(rawSymbol, brokerSuffix: brokerSuffix)
         var buy = 0.0, sell = 0.0
         for entry in entries {
             let volume = number(entry["volume"]) ?? 0
@@ -280,7 +276,7 @@ actor MT5WebSocketService {
 
     private func handleOhlcUpdate(_ json: [String: Any]) {
         guard let rawSymbol = string(json["symbol"]), let timeframe = string(json["timeframe"]), let bars = json["bars"] as? [[String: Any]], let bar = bars.last, let open = number(bar["open"]), let high = number(bar["high"]), let low = number(bar["low"]), let close = number(bar["close"]) else { return }
-        let symbol = normalizeStrategySymbol(rawSymbol, brokerSuffix: ScalpingConfig.shared.brokerSuffix)
+        let symbol = normalizeStrategySymbol(rawSymbol, brokerSuffix: brokerSuffix)
         let volume = number(bar["volume"]) ?? 0
         let closeTime = Int(int64(bar["time_msc"] ?? bar["time"]) ?? Int64(Date().timeIntervalSince1970))
         let kline = Kline(open: open, high: high, low: low, close: close, volume: volume, closeTime: closeTime, spread: number(bar["spread"]), isClosed: true)
@@ -289,7 +285,7 @@ actor MT5WebSocketService {
     }
 
     func getDeltaVolume(for symbol: String) -> Double {
-        let normalized = normalizeStrategySymbol(symbol, brokerSuffix: ScalpingConfig.shared.brokerSuffix)
+        let normalized = normalizeStrategySymbol(symbol, brokerSuffix: brokerSuffix)
         guard let cache = l2Cache[normalized], Date().timeIntervalSince(cache.timestamp) < 5 else { return 0 }
         return cache.buyVol - cache.sellVol
     }
