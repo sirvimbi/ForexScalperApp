@@ -1,0 +1,1 @@
+Implementation note: RunnerContinuationGate is intended to be wired as the final pre-execution gate after RRLock and before duplicate execution acceptance. This file is temporary documentation and should be removed before merge.
