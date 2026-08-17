@@ -126,6 +126,6 @@ struct RunnerContinuationGate: Sendable {
     }
 
     private func result(_ passed: Bool, _ reason: String, _ aligned: Int, _ acceleration: Double, _ extensionATR: Double, _ body: Double, _ wick: Double, _ antiRunner: Bool) -> RunnerContinuationResult {
-        RunnerContinuationResult(passed: passed, reason: reason, alignedCandles: aligned, accelerationRatio: _acceleration, extensionATR: _extensionATR, latestBodyToRange: body, latestOpposingWickRatio: wick, antiRunnerTriggered: antiRunner)
+        RunnerContinuationResult(passed: passed, reason: reason, alignedCandles: aligned, accelerationRatio: _acceleration, extensionATR: _extensionATR, latestBodyToRange: body, latestOpposingWickRatio: wick, antiRunnerTriggered: _antiRunner)
     }
 }
