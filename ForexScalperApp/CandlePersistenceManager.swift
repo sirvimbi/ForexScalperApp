@@ -73,6 +73,9 @@ actor CandlePersistenceManager {
 
     private func normalizeEpochMilliseconds(_ timestamp: Int) -> Int {
         guard timestamp > 0 else { return timestamp }
+        // Legacy V10.5 persistence accidentally produced epoch microseconds (~1e15).
+        if timestamp >= 100_000_000_000_000 { return timestamp / 1_000 }
+        // Accept normal epoch seconds (~1e9) and convert them to milliseconds.
         if timestamp < 100_000_000_000 { return timestamp * 1_000 }
         return timestamp
     }
