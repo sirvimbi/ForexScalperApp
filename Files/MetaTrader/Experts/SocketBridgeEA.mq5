@@ -12,6 +12,7 @@
 #include <WebSocketLib.mqh>
 #include <SocketManager.mqh>
 #include <Trade/Trade.mqh>
+#include <PositionProtectionManager.mqh>
 
 #define HTTP_PORT             8890
 #define SOCKET_BUFFER_SIZE    65536
@@ -25,6 +26,7 @@ ulong httpClientSockets[];
 ulong WebSocketClients[];
 CCommandHandlerV22 *commandHandler = NULL;
 CData *dataManager = NULL;
+CPositionProtectionManager *protectionManager = NULL;
 CTrade tradeControl;
 datetime lastServerInitAttempt = 0;
 datetime lastHeartbeat = 0;
@@ -46,9 +48,17 @@ int OnInit()
    tradeControl.SetExpertMagicNumber(MAGIC_NUMBER);
    tradeControl.SetDeviationInPoints(DEFAULT_DEVIATION);
    tradeControl.SetAsyncMode(false);
+   protectionManager = new CPositionProtectionManager(MAGIC_NUMBER);
+   if(protectionManager == NULL)
+   {
+      Print("[EA V22.0] CRITICAL: protection manager allocation failed.");
+      WSACleanup();
+      return INIT_FAILED;
+   }
    if(!InitializeWebSocketServer())
    {
       Print("[EA V22.0] CRITICAL: bridge initialization failed on port ", HTTP_PORT);
+      CleanupHandlers();
       WSACleanup();
       return INIT_FAILED;
    }
@@ -56,9 +66,10 @@ int OnInit()
    Print("==================================================");
    Print(" FOREXSCALPERAPP MT5 EXECUTION BRIDGE V22.0");
    Print(" Strategy authority: SWIFT | Protection authority: EA V22");
-   Print(" Partial TP: 50% @ 1R | 30% @ 2R | remainder runner");
-   Print(" Trailing: configurable activation + volatility-aware curve");
-   Print(" Runner: unlimited hold; no fixed TP/time exit");
+   Print(" Partial TP: settings-driven staged closes");
+   Print(" Breakeven: TP1-triggered, forward-only");
+   Print(" Trailing: configurable activation + existing V22 volatility-aware curve");
+   Print(" Runner: managed by staged TP settings");
    Print(" Hard SL: mandatory emergency protection");
    Print(" Bridge port: ", HTTP_PORT, " | Magic: ", MAGIC_NUMBER);
    Print(" Status: ONLINE");
@@ -70,12 +81,18 @@ void OnDeinit(const int reason)
 {
    EventKillTimer();
    CleanupHandlers();
+   if(protectionManager != NULL)
+   {
+      delete protectionManager;
+      protectionManager = NULL;
+   }
    CloseAllConnections();
    Print("FOREXSCALPERAPP EA V22.0 STOPPED. Reason=", reason);
 }
 
 void OnTick()
 {
+   if(protectionManager != NULL) protectionManager.ManageAll();
    if(dataManager == NULL) return;
    if(ArraySize(WebSocketClients) > 0) SendUpdateToClients();
    else dataManager.SendCurrentPrices(EA_INVALID_SOCKET);
