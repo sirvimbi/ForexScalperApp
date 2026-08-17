@@ -5,62 +5,41 @@ actor RefactoredMarketDataActor: MarketDataProvider {
     private var candleStore: [String: [Kline]] = [:]
     private var latestPrices: [String: Double] = [:]
     private var isHydrated: Set<String> = []
-
-    private let maxCandles = 3000
     private let priceCache = NSCache<NSString, NSNumber>()
-
-    private let diagnosticMinimums: [String: Int] = [
-        "1m": 100,
-        "5m": 50,
-        "15m": 30,
-        "30m": 20,
-        "1h": 20,
-        "4h": 20,
-        "D1": 15,
-        "W1": 1
-    ]
 
     func addCandles(symbol: String, timeframe: String, newCandles: [Kline]) async {
         let key = "\(symbol)_\(timeframe)"
-
+        let settings = SignalRuntimeSettings.load()
         if !isHydrated.contains(key) {
             let cached = await CandlePersistenceManager.shared.loadCandles(for: symbol, timeframe: timeframe)
             candleStore[key] = normalizeCandles(cached)
             isHydrated.insert(key)
-
             godLog("💧 CANDLE HYDRATE | \(symbol) | \(timeframe) | persisted=\(cached.count)", level: cached.isEmpty ? .warning : .info)
+        }
+
+        guard !newCandles.isEmpty else {
+            logCandleInventory(symbol: symbol, timeframe: timeframe, candles: candleStore[key] ?? [], added: 0, minimum: settings.minimumHistoryCandles)
+            godLog("⚠️ CANDLE FETCH EMPTY | \(symbol) | TF=\(timeframe) | existing cache preserved", level: .warning)
+            return
         }
 
         var array = candleStore[key] ?? []
         let normalizedIncoming = normalizeCandles(newCandles)
         var addedCount = 0
-
         for candle in normalizedIncoming {
-            if let index = array.lastIndex(where: { $0.closeTime == candle.closeTime }) {
-                array[index] = candle
-            } else {
-                array.append(candle)
-                addedCount += 1
-            }
+            if let index = array.lastIndex(where: { $0.closeTime == candle.closeTime }) { array[index] = candle }
+            else { array.append(candle); addedCount += 1 }
         }
-
         array.sort { $0.closeTime < $1.closeTime }
-        if array.count > maxCandles {
-            array.removeFirst(array.count - maxCandles)
-        }
-
+        if array.count > settings.maxCachedCandles { array.removeFirst(array.count - settings.maxCachedCandles) }
         candleStore[key] = array
 
-        if addedCount > 0 {
-            await CandlePersistenceManager.shared.saveCandles(normalizedIncoming, for: symbol, timeframe: timeframe)
-        }
-
+        if addedCount > 0 { await CandlePersistenceManager.shared.saveCandles(normalizedIncoming, for: symbol, timeframe: timeframe) }
         if timeframe == "1m", let last = array.last {
             latestPrices[symbol] = last.close
             priceCache.setObject(NSNumber(value: last.close), forKey: symbol as NSString)
         }
-
-        logCandleInventory(symbol: symbol, timeframe: timeframe, candles: array, added: addedCount)
+        logCandleInventory(symbol: symbol, timeframe: timeframe, candles: array, added: addedCount, minimum: settings.minimumHistoryCandles)
     }
 
     func addCandle(symbol: String, timeframe: String, candle: Kline) async {
@@ -70,87 +49,59 @@ actor RefactoredMarketDataActor: MarketDataProvider {
     func getCandles(symbol: String, timeframe: String) async -> [Kline] {
         let key = "\(symbol)_\(timeframe)"
         let candles = candleStore[key] ?? []
-        logCandleInventory(symbol: symbol, timeframe: timeframe, candles: candles, added: nil)
+        logCandleInventory(symbol: symbol, timeframe: timeframe, candles: candles, added: nil, minimum: SignalRuntimeSettings.load().minimumHistoryCandles)
         return candles
     }
 
-    /// Normalizes Kline.closeTime, which is stored as an Int, to milliseconds since 1970.
-    /// Supports both epoch seconds (~1.7e9) and epoch milliseconds (~1.7e12).
-    /// Older code incorrectly converted seconds using 1,000,000, producing dates around 1970.
     private func normalizeCandles(_ candles: [Kline]) -> [Kline] {
         candles.map { candle in
-            let rawTimestamp = candle.closeTime
+            let raw = candle.closeTime
             let milliseconds: Int
-
-            // Current Unix epoch timestamps are ~1e9 seconds or ~1e12 milliseconds.
-            if rawTimestamp > 0 && rawTimestamp < 1_000_000_000_000 {
-                milliseconds = rawTimestamp * 1_000
-            } else {
-                milliseconds = rawTimestamp
-            }
-
-            return Kline(
-                open: candle.open,
-                high: candle.high,
-                low: candle.low,
-                close: candle.close,
-                volume: candle.volume,
-                closeTime: milliseconds,
-                spread: candle.spread,
-                isClosed: candle.isClosed
-            )
+            if raw >= 100_000_000_000_000 { milliseconds = raw / 1_000 }
+            else if raw > 0 && raw < 100_000_000_000 { milliseconds = raw * 1_000 }
+            else { milliseconds = raw }
+            return Kline(open: candle.open, high: candle.high, low: candle.low, close: candle.close,
+                         volume: candle.volume, closeTime: milliseconds, spread: candle.spread, isClosed: candle.isClosed)
         }
     }
 
-    private func logCandleInventory(symbol: String, timeframe: String, candles: [Kline], added: Int?) {
-        let minimum = diagnosticMinimums[timeframe] ?? 1
+    private func logCandleInventory(symbol: String, timeframe: String, candles: [Kline], added: Int?, minimum: Int) {
         let count = candles.count
-        let depthOK = count >= minimum
-        let status = count == 0 ? "MISSING" : (depthOK ? "READY" : "PARTIAL")
-        let level: LogLevel = count == 0 ? .warning : (depthOK ? .success : .info)
-
+        let status = count == 0 ? "MISSING" : (count >= minimum ? "READY" : "PARTIAL")
+        let level: LogLevel = count == 0 ? .warning : (count >= minimum ? .success : .info)
         let latest = candles.last.map { formatCandleDate($0.closeTime) } ?? "none"
         let oldest = candles.first.map { formatCandleDate($0.closeTime) } ?? "none"
         let missing = max(0, minimum - count)
         let delta = added.map { " | added=\($0)" } ?? ""
-
         godLog("🕯️ CANDLE \(status) | \(symbol) | TF=\(timeframe) | received=\(count) | required=\(minimum) | missing=\(missing) | oldest=\(oldest) | latest=\(latest)\(delta)", level: level)
     }
 
     private func formatCandleDate(_ timestamp: Int) -> String {
-        let seconds = Double(timestamp) / 1_000.0
-        let date = Date(timeIntervalSince1970: seconds)
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.string(from: date)
+        ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: Double(timestamp) / 1_000.0))
     }
 
     func getLatestPrice(symbol: String) async -> Double? {
-        if let cached = priceCache.object(forKey: symbol as NSString) {
-            return cached.doubleValue
-        }
+        if let cached = priceCache.object(forKey: symbol as NSString) { return cached.doubleValue }
         return latestPrices[symbol]
     }
 
     func getCandlesBulk(symbols: [String], timeframe: String) async -> [String: [Kline]] {
         var result: [String: [Kline]] = [:]
-        for symbol in symbols {
-            let key = "\(symbol)_\(timeframe)"
-            result[symbol] = candleStore[key] ?? []
-        }
+        for symbol in symbols { result[symbol] = candleStore["\(symbol)_\(timeframe)"] ?? [] }
         return result
     }
 
     func isReadyForSignals(symbol: String) async -> Bool {
-        let tfs = ["1m", "5m", "15m", "1h", "4h", "D1"]
-        let requirements = [100, 50, 30, 20, 20, 15]
-
-        for (i, tf) in tfs.enumerated() {
-            let key = "\(symbol)_\(tf)"
-            if (candleStore[key]?.count ?? 0) < requirements[i] {
-                return false
+        let minimum = SignalRuntimeSettings.load().minimumHistoryCandles
+        let timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "D1"]
+        var ready = true
+        for tf in timeframes {
+            let count = candleStore["\(symbol)_\(tf)"]?.count ?? 0
+            if count < minimum {
+                ready = false
+                godLog("🛑 SIGNAL DATA NOT READY | \(symbol) | TF=\(tf) | have=\(count) need=\(minimum)", level: .warning)
             }
         }
-        return true
+        return ready
     }
 }
