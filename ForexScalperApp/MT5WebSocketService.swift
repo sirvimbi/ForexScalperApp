@@ -1,7 +1,8 @@
 import Foundation
 
 /// V10.6 MT5 event consumer.
-/// Swift owns strategy/decision making; this actor only transports and reports broker state.
+/// Swift owns strategy/decision making; this actor transports broker state and provides
+/// a deterministic price heartbeat so signal evaluation does not depend solely on push events.
 actor MT5WebSocketService {
     static let shared = MT5WebSocketService()
 
@@ -10,6 +11,7 @@ actor MT5WebSocketService {
     private var symbols: [String] = []
     private var isConnected = false
     private var reconnectTask: Task<Void, Never>?
+    private var signalHeartbeatTask: Task<Void, Never>?
     private var reconnectAttempt = 0
     private var stopped = false
     private var seenEventIDs: [String: Date] = [:]
@@ -40,14 +42,19 @@ actor MT5WebSocketService {
         failureWasReported = false
         reconnectTask?.cancel()
         reconnectTask = nil
+        signalHeartbeatTask?.cancel()
+        signalHeartbeatTask = nil
         godLog("🌐 MT5 WS: connect requested → \(wsURL.absoluteString) | symbols=\(symbols.count)", level: .info)
         openSocket()
+        startSignalEvaluationHeartbeat()
     }
 
     func disconnect() {
         stopped = true
         reconnectTask?.cancel()
         reconnectTask = nil
+        signalHeartbeatTask?.cancel()
+        signalHeartbeatTask = nil
         webSocket?.cancel(with: .normalClosure, reason: nil)
         webSocket = nil
         session?.invalidateAndCancel()
@@ -59,9 +66,59 @@ actor MT5WebSocketService {
 
     func connected() -> Bool { isConnected }
 
+    private func startSignalEvaluationHeartbeat() {
+        signalHeartbeatTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.emitSignalEvaluationPrices()
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+            }
+        }
+        godLog("🧠 SIGNAL HEARTBEAT: started (15s) — evaluation no longer depends solely on WebSocket price pushes", level: .success)
+    }
+
+    private func emitSignalEvaluationPrices() async {
+        guard !stopped else { return }
+        let requestedSymbols = symbols
+        guard !requestedSymbols.isEmpty else { return }
+
+        for rawSymbol in requestedSymbols {
+            if Task.isCancelled { return }
+            let symbol = normalizeBrokerSymbol(rawSymbol)
+            do {
+                let candles = try await MT5Service.shared.getCandles(symbol: rawSymbol, timeframe: "1m", count: 2)
+                guard let last = candles.last else {
+                    godLog("🧠 SIGNAL HEARTBEAT | \(symbol) | NO 1m candle returned", level: .warning)
+                    continue
+                }
+                let timestamp = normalizeEpochMilliseconds(last.closeTime)
+                let bid = last.close
+                let ask = last.close
+                godLog("🧠 SIGNAL HEARTBEAT | \(symbol) | 1m candles=\(candles.count) | price=\(String(format: "%.5f", bid)) | ts=\(timestamp) | dispatch=evaluateFastSignal", level: .diagnostic)
+                NotificationCenter.default.post(name: .mt5PriceUpdated, object: nil, userInfo: [
+                    "symbol": symbol,
+                    "brokerSymbol": rawSymbol,
+                    "bid": bid,
+                    "ask": ask,
+                    "last": last.close,
+                    "timestamp": timestamp,
+                    "time_msc": timestamp,
+                    "source": "signal_heartbeat"
+                ])
+            } catch {
+                godLog("❌ SIGNAL HEARTBEAT | \(symbol) | candle fetch failed: \(error.localizedDescription)", level: .warning)
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+
+    private func normalizeEpochMilliseconds(_ timestamp: Int) -> Int64 {
+        if timestamp > 0 && timestamp < 100_000_000_000 { return Int64(timestamp) * 1_000 }
+        return Int64(timestamp)
+    }
+
     private func openSocket() {
         guard !stopped else { return }
-
         webSocket?.cancel(with: .goingAway, reason: nil)
         session?.invalidateAndCancel()
 
@@ -97,7 +154,6 @@ actor MT5WebSocketService {
             reconnectAttempt = 0
             if !wasConnected { godLog("🟢 MT5 WS: connection established/recovered", level: .success) }
             failureWasReported = false
-
             switch message {
             case .string(let text): handleMessage(text)
             case .data(let data):
@@ -125,7 +181,6 @@ actor MT5WebSocketService {
         let exponent = min(reconnectAttempt - 1, 5)
         let delay = min(UInt64(1 << exponent), maxReconnectDelay)
         godLog("🔄 MT5 WS: scheduling reconnect #\(reconnectAttempt) in \(delay)s", level: .info)
-
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
             guard !Task.isCancelled, let self else { return }
@@ -143,15 +198,12 @@ actor MT5WebSocketService {
             godLog("⚠️ MT5 WS: received non-JSON/unknown payload (\(text.prefix(120)))", level: .warning)
             return
         }
-
         if let version = json["version"] as? String, !version.isEmpty, !version.hasPrefix("10.") { return }
-
         if let eventID = string(json["event_id"]) {
             pruneSeenEvents()
             if seenEventIDs[eventID] != nil { return }
             seenEventIDs[eventID] = Date()
         }
-
         switch type {
         case "price_update": handlePriceUpdate(json)
         case "trade_event": handleTradeEvent(json)
@@ -165,84 +217,47 @@ actor MT5WebSocketService {
     private func handlePriceUpdate(_ json: [String: Any]) {
         let items = (json["data"] as? [[String: Any]]) ?? [json]
         for item in items {
-            guard let rawSymbol = string(item["symbol"]),
-                  let bid = number(item["bid"]),
-                  let ask = number(item["ask"]) else {
+            guard let rawSymbol = string(item["symbol"]), let bid = number(item["bid"]), let ask = number(item["ask"]) else {
                 godLog("⚠️ MT5 WS: malformed price_update — missing symbol/bid/ask", level: .warning)
                 continue
             }
-
             let symbol = normalizeBrokerSymbol(rawSymbol)
             let timestamp = int64(item["time_msc"] ?? item["timestamp"] ?? item["time"]) ?? Int64(Date().timeIntervalSince1970 * 1000)
             if let previous = lastPriceTimestamp[rawSymbol], timestamp < previous { continue }
             lastPriceTimestamp[rawSymbol] = timestamp
-
             godLog("💹 MT5 PRICE | broker=\(rawSymbol) strategy=\(symbol) bid=\(String(format: "%.5f", bid)) ask=\(String(format: "%.5f", ask)) | ts=\(timestamp)", level: .diagnostic)
-            NotificationCenter.default.post(name: .mt5PriceUpdated, object: nil, userInfo: [
-                "symbol": symbol, "brokerSymbol": rawSymbol, "bid": bid, "ask": ask,
-                "last": number(item["last"]) ?? 0,
-                "timestamp": timestamp,
-                "time_msc": timestamp
-            ])
+            NotificationCenter.default.post(name: .mt5PriceUpdated, object: nil, userInfo: ["symbol": symbol, "brokerSymbol": rawSymbol, "bid": bid, "ask": ask, "last": number(item["last"]) ?? 0, "timestamp": timestamp, "time_msc": timestamp])
         }
     }
 
     private func handleTradeEvent(_ json: [String: Any]) {
         let ticket = int64(json["ticket"] ?? json["position"] ?? json["position_id"] ?? json["deal"] ?? json["order"]) ?? 0
-        let symbol = string(json["symbol"]) ?? ""
-        guard ticket > 0, !symbol.isEmpty else { return }
-
-        let userInfo: [String: Any] = [
-            "event_id": string(json["event_id"]) ?? "",
-            "ticket": ticket,
-            "position_id": int64(json["position_id"] ?? json["position"]) ?? ticket,
-            "deal": int64(json["deal"]) ?? 0,
-            "order": int64(json["order"]) ?? 0,
-            "symbol": normalizeBrokerSymbol(symbol),
-            "brokerSymbol": symbol,
-            "volume": number(json["volume"]) ?? 0,
-            "price": number(json["price"]) ?? 0,
-            "profit": number(json["profit"]) ?? 0,
-            "swap": number(json["swap"]) ?? 0,
-            "commission": number(json["commission"]) ?? 0,
-            "entry": int64(json["entry"]) ?? 0,
-            "deal_type": int64(json["deal_type"]) ?? 0,
-            "reason": string(json["reason"]) ?? "Unknown",
-            "time": int64(json["time"]) ?? Int64(Date().timeIntervalSince1970)
-        ]
-        godLog("📥 MT5 WS: trade_event ticket=\(ticket) symbol=\(symbol)", level: .info)
+        let rawSymbol = string(json["symbol"]) ?? ""
+        guard ticket > 0, !rawSymbol.isEmpty else { return }
+        let userInfo: [String: Any] = ["event_id": string(json["event_id"]) ?? "", "ticket": ticket, "position_id": int64(json["position_id"] ?? json["position"]) ?? ticket, "deal": int64(json["deal"]) ?? 0, "order": int64(json["order"]) ?? 0, "symbol": normalizeBrokerSymbol(rawSymbol), "brokerSymbol": rawSymbol, "volume": number(json["volume"]) ?? 0, "price": number(json["price"]) ?? 0, "profit": number(json["profit"]) ?? 0, "swap": number(json["swap"]) ?? 0, "commission": number(json["commission"]) ?? 0, "entry": int64(json["entry"]) ?? 0, "deal_type": int64(json["deal_type"]) ?? 0, "reason": string(json["reason"]) ?? "Unknown", "time": int64(json["time"]) ?? Int64(Date().timeIntervalSince1970)]
+        godLog("📥 MT5 WS: trade_event ticket=\(ticket) symbol=\(rawSymbol)", level: .info)
         NotificationCenter.default.post(name: .mt5TradeClosed, object: nil, userInfo: userInfo)
     }
 
     private func handleMbookUpdate(_ json: [String: Any]) {
-        guard let rawSymbol = string(json["symbol"]),
-              let entries = json["market_book"] as? [[String: Any]] else { return }
+        guard let rawSymbol = string(json["symbol"]), let entries = json["market_book"] as? [[String: Any]] else { return }
         let symbol = normalizeBrokerSymbol(rawSymbol)
         var buy = 0.0, sell = 0.0
         for entry in entries {
             let volume = number(entry["volume"]) ?? 0
-            switch string(entry["type"]) {
-            case "BOOK_TYPE_BUY": buy += volume
-            case "BOOK_TYPE_SELL": sell += volume
-            default: break
-            }
+            switch string(entry["type"]) { case "BOOK_TYPE_BUY": buy += volume; case "BOOK_TYPE_SELL": sell += volume; default: break }
         }
         l2Cache[symbol] = (buy, sell, Date())
         godLog("📚 MT5 L2 | \(symbol) | buy=\(String(format: "%.2f", buy)) sell=\(String(format: "%.2f", sell)) delta=\(String(format: "%.2f", buy - sell))", level: .diagnostic)
     }
 
     private func handleOhlcUpdate(_ json: [String: Any]) {
-        guard let rawSymbol = string(json["symbol"]),
-              let timeframe = string(json["timeframe"]),
-              let bars = json["bars"] as? [[String: Any]],
-              let bar = bars.last,
-              let open = number(bar["open"]), let high = number(bar["high"]),
-              let low = number(bar["low"]), let close = number(bar["close"]) else { return }
+        guard let rawSymbol = string(json["symbol"]), let timeframe = string(json["timeframe"]), let bars = json["bars"] as? [[String: Any]], let bar = bars.last, let open = number(bar["open"]), let high = number(bar["high"]), let low = number(bar["low"]), let close = number(bar["close"]) else { return }
         let symbol = normalizeBrokerSymbol(rawSymbol)
         let volume = number(bar["volume"]) ?? 0
         let closeTime = Int(int64(bar["time_msc"] ?? bar["time"]) ?? Int64(Date().timeIntervalSince1970))
         let kline = Kline(open: open, high: high, low: low, close: close, volume: volume, closeTime: closeTime, spread: number(bar["spread"]), isClosed: true)
-        godLog("🕯️ MT5 OHLC | \(symbol) | TF=\(timeframe) | close=\(String(format: "%.5f", close)) | candles=\(bars.count)", level: .diagnostic)
+        godLog("🕯️ MT5 OHLC | \(symbol) | TF=\(timeframe) | close=\(String(format: "%.5f", close)) | bars=\(bars.count)", level: .diagnostic)
         NotificationCenter.default.post(name: .mt5OhlcUpdated, object: nil, userInfo: ["symbol": symbol, "brokerSymbol": rawSymbol, "timeframe": timeframe, "kline": kline])
     }
 
