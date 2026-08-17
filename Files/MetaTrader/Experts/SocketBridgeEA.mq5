@@ -1,14 +1,14 @@
 //+------------------------------------------------------------------+
 //| SocketBridgeEA.mq5                                               |
-//| ForexScalperApp MT5 Execution Bridge V22.0                     |
+//| ForexScalperApp MT5 Execution Bridge V23.0                     |
 //+------------------------------------------------------------------+
 #property copyright "God Mode Scalper"
-#property version   "22.0"
-#property description "ForexScalperApp Swift/MT5 Execution Bridge V22.0"
+#property version   "23.0"
+#property description "ForexScalperApp Swift/MT5 Execution Bridge V23.0"
 #property strict
 
 #include <CommandHandlerV22.mqh>
-#include <PositionManagerV22.mqh>
+#include <PositionManagerV23.mqh>
 #include <Data.mqh>
 #include <WebSocketLib.mqh>
 #include <SocketManager.mqh>
@@ -27,7 +27,7 @@ ulong WebSocketClients[];
 CCommandHandlerV22 *commandHandler = NULL;
 CData *dataManager = NULL;
 CTrade tradeControl;
-CPositionManagerV22 positionManager;
+CPositionManagerV23 positionManager;
 datetime lastServerInitAttempt = 0;
 datetime lastHeartbeat = 0;
 
@@ -35,14 +35,14 @@ int OnInit()
 {
    if(!TerminalInfoInteger(TERMINAL_DLLS_ALLOWED))
    {
-      Print("[EA V22.0] CRITICAL: DLL imports must be enabled.");
+      Print("[EA V23.0] CRITICAL: DLL imports must be enabled.");
       return INIT_FAILED;
    }
    char wsaData[];
    ArrayResize(wsaData, 400);
    if(WSAStartup(0x0202, wsaData) != 0)
    {
-      Print("[EA V22.0] CRITICAL: WSAStartup failed.");
+      Print("[EA V23.0] CRITICAL: WSAStartup failed.");
       return INIT_FAILED;
    }
    tradeControl.SetExpertMagicNumber(MAGIC_NUMBER);
@@ -50,16 +50,17 @@ int OnInit()
    tradeControl.SetAsyncMode(false);
    if(!InitializeWebSocketServer())
    {
-      Print("[EA V22.0] CRITICAL: bridge initialization failed on port ", HTTP_PORT);
+      Print("[EA V23.0] CRITICAL: bridge initialization failed on port ", HTTP_PORT);
       WSACleanup();
       return INIT_FAILED;
    }
    EventSetMillisecondTimer(TIMER_INTERVAL_MS);
    Print("==================================================");
-   Print(" FOREXSCALPERAPP MT5 EXECUTION BRIDGE V22.0");
-   Print(" Strategy authority: SWIFT | Protection authority: EA V22");
-   Print(" Position manager: TP1/TP2/TP3 + breakeven + forward-only trailing");
-   Print(" Runner: configuration-controlled; no Swift-side mutation");
+   Print(" FOREXSCALPERAPP MT5 EXECUTION BRIDGE V23.0");
+   Print(" Strategy authority: SWIFT | Protection authority: EA V23");
+   Print(" Position lifecycle: TP1/TP2/TP3 + breakeven + forward-only trailing");
+   Print(" Close/modify success requires broker retcode AND resulting-state verification");
+   Print(" Runner: TP3 closes the remaining broker position exactly once");
    Print(" Hard SL: mandatory emergency protection");
    Print(" Bridge port: ", HTTP_PORT, " | Magic: ", MAGIC_NUMBER);
    Print(" Status: ONLINE");
@@ -72,12 +73,12 @@ void OnDeinit(const int reason)
    EventKillTimer();
    CleanupHandlers();
    CloseAllConnections();
-   Print("FOREXSCALPERAPP EA V22.0 STOPPED. Reason=", reason);
+   Print("FOREXSCALPERAPP EA V23.0 STOPPED. Reason=", reason);
 }
 
 void OnTick()
 {
-   // Position management runs independently of WebSocket/UI connectivity.
+   // Position management is broker-side and continues independently of Swift/WebSocket availability.
    positionManager.ManageAll();
 
    if(dataManager == NULL) return;
@@ -116,7 +117,7 @@ void OnTimer()
    ProcessHttpClients();
    if((now - lastHeartbeat) >= 60)
    {
-      Print("[EA V22.0] heartbeat | WebSocket clients=", ArraySize(WebSocketClients),
+      Print("[EA V23.0] heartbeat | WebSocket clients=", ArraySize(WebSocketClients),
             " | MT5 positions=", PositionsTotal());
       lastHeartbeat = now;
    }
@@ -127,7 +128,7 @@ bool InitializeWebSocketServer()
    lastServerInitAttempt = TimeCurrent();
    if(!httpServer.CreateServer(HTTP_PORT))
    {
-      Print("[EA V22.0] Failed to bind bridge port ", HTTP_PORT);
+      Print("[EA V23.0] Failed to bind bridge port ", HTTP_PORT);
       return false;
    }
    CleanupHandlers();
@@ -135,13 +136,13 @@ bool InitializeWebSocketServer()
    dataManager = new CData();
    if(commandHandler == NULL || dataManager == NULL)
    {
-      Print("[EA V22.0] CRITICAL: handler allocation failed.");
+      Print("[EA V23.0] CRITICAL: handler allocation failed.");
       CleanupHandlers();
       httpServer.Close();
       return false;
    }
    commandHandler.SetPriceSender(dataManager);
-   Print("[EA V22.0] Bridge server listening on port ", HTTP_PORT);
+   Print("[EA V23.0] Bridge server listening on port ", HTTP_PORT);
    return true;
 }
 
@@ -178,7 +179,7 @@ void ProcessHttpClients()
                ArrayResize(WebSocketClients, count + 1);
                WebSocketClients[count] = socket;
                ArrayRemove(httpClientSockets, i);
-               Print("[EA V22.0] WebSocket connected. Clients=", count + 1);
+               Print("[EA V23.0] WebSocket connected. Clients=", count + 1);
             }
             else
             {
