@@ -28,7 +28,8 @@ actor CandlePersistenceManager {
         }
 
         let merged = mergedMap.values.sorted { $0.closeTime < $1.closeTime }
-        let final = Array(merged.suffix(5000))
+        let capacity = SignalRuntimeSettings.load().maxPersistedCandles
+        let final = Array(merged.suffix(capacity))
 
         do {
             let data = try JSONEncoder().encode(final)
