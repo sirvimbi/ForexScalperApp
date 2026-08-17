@@ -102,6 +102,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
                         const MqlTradeRequest &request,
                         const MqlTradeResult &result)
 {
+   if(protectionManager != NULL && trans.position > 0)
+      protectionManager.InitializePosition(trans.position);
+
    if(dataManager == NULL || !dataManager.isTrackingOrderEvent) return;
    for(int i = ArraySize(WebSocketClients) - 1; i >= 0; i--)
    {
