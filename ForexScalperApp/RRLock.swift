@@ -71,7 +71,9 @@ struct RRLock {
         let ratio = reward / max(risk, 0.00001)
 
         if ratio < minRatio {
-            print("❌ RRLock: R:R ratio \(String(format: \"%.2f\", ratio)) < \(String(format: \"%.1f\", minRatio))")
+            let ratioText = String(format: "%.2f", ratio)
+            let minRatioText = String(format: "%.1f", minRatio)
+            print("❌ RRLock: R:R ratio \(ratioText) < \(minRatioText)")
             return false
         }
 
@@ -94,7 +96,8 @@ struct RRLock {
             return false
         }
 
-        print("✅ RRLock: R:R \(String(format: \"%.2f\", ratio)):1 PASSED (Threshold: \(minRatio))")
+        let ratioText = String(format: "%.2f", ratio)
+        print("✅ RRLock: R:R \(ratioText):1 PASSED (Threshold: \(minRatio))")
         return true
     }
 }
