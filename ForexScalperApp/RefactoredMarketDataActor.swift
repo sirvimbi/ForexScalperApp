@@ -5,17 +5,11 @@ actor RefactoredMarketDataActor: MarketDataProvider {
     private var candleStore: [String: [Kline]] = [:]
     private var latestPrices: [String: Double] = [:]
     private var isHydrated: Set<String> = []
-
-    private let maxCandles = 3000
     private let priceCache = NSCache<NSString, NSNumber>()
-
-    private let diagnosticMinimums: [String: Int] = [
-        "1m": 100, "5m": 50, "15m": 30, "30m": 20,
-        "1h": 20, "4h": 20, "D1": 15, "W1": 1
-    ]
 
     func addCandles(symbol: String, timeframe: String, newCandles: [Kline]) async {
         let key = "\(symbol)_\(timeframe)"
+        let settings = SignalRuntimeSettings.load()
         if !isHydrated.contains(key) {
             let cached = await CandlePersistenceManager.shared.loadCandles(for: symbol, timeframe: timeframe)
             candleStore[key] = normalizeCandles(cached)
@@ -24,7 +18,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         }
 
         guard !newCandles.isEmpty else {
-            logCandleInventory(symbol: symbol, timeframe: timeframe, candles: candleStore[key] ?? [], added: 0)
+            logCandleInventory(symbol: symbol, timeframe: timeframe, candles: candleStore[key] ?? [], added: 0, minimum: settings.minimumHistoryCandles)
             godLog("⚠️ CANDLE FETCH EMPTY | \(symbol) | TF=\(timeframe) | existing cache preserved", level: .warning)
             return
         }
@@ -37,7 +31,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
             else { array.append(candle); addedCount += 1 }
         }
         array.sort { $0.closeTime < $1.closeTime }
-        if array.count > maxCandles { array.removeFirst(array.count - maxCandles) }
+        if array.count > settings.maxCachedCandles { array.removeFirst(array.count - settings.maxCachedCandles) }
         candleStore[key] = array
 
         if addedCount > 0 { await CandlePersistenceManager.shared.saveCandles(normalizedIncoming, for: symbol, timeframe: timeframe) }
@@ -45,7 +39,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
             latestPrices[symbol] = last.close
             priceCache.setObject(NSNumber(value: last.close), forKey: symbol as NSString)
         }
-        logCandleInventory(symbol: symbol, timeframe: timeframe, candles: array, added: addedCount)
+        logCandleInventory(symbol: symbol, timeframe: timeframe, candles: array, added: addedCount, minimum: settings.minimumHistoryCandles)
     }
 
     func addCandle(symbol: String, timeframe: String, candle: Kline) async {
@@ -55,7 +49,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
     func getCandles(symbol: String, timeframe: String) async -> [Kline] {
         let key = "\(symbol)_\(timeframe)"
         let candles = candleStore[key] ?? []
-        logCandleInventory(symbol: symbol, timeframe: timeframe, candles: candles, added: nil)
+        logCandleInventory(symbol: symbol, timeframe: timeframe, candles: candles, added: nil, minimum: SignalRuntimeSettings.load().minimumHistoryCandles)
         return candles
     }
 
@@ -71,8 +65,7 @@ actor RefactoredMarketDataActor: MarketDataProvider {
         }
     }
 
-    private func logCandleInventory(symbol: String, timeframe: String, candles: [Kline], added: Int?) {
-        let minimum = diagnosticMinimums[timeframe] ?? 1
+    private func logCandleInventory(symbol: String, timeframe: String, candles: [Kline], added: Int?, minimum: Int) {
         let count = candles.count
         let status = count == 0 ? "MISSING" : (count >= minimum ? "READY" : "PARTIAL")
         let level: LogLevel = count == 0 ? .warning : (count >= minimum ? .success : .info)
@@ -99,9 +92,10 @@ actor RefactoredMarketDataActor: MarketDataProvider {
     }
 
     func isReadyForSignals(symbol: String) async -> Bool {
-        let requirements: [(String, Int)] = [("1m", 100), ("5m", 50), ("15m", 30), ("30m", 20), ("1h", 20), ("4h", 20), ("D1", 15)]
+        let minimum = SignalRuntimeSettings.load().minimumHistoryCandles
+        let timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "D1"]
         var ready = true
-        for (tf, minimum) in requirements {
+        for tf in timeframes {
             let count = candleStore["\(symbol)_\(tf)"]?.count ?? 0
             if count < minimum {
                 ready = false
