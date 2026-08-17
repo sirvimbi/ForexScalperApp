@@ -22,7 +22,7 @@ struct RRLock {
                 ScalpingConfig.shared.enableRRCheck,
                 ScalpingConfig.shared.minRRRatio,
                 max(ScalpingConfig.shared.cooldownSeconds, 1.0),
-                RunnerContinuationSettings().validated
+                ScalpingConfig.shared.runnerContinuationConfiguration
             )
         }
 
