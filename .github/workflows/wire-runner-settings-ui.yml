@@ -22,22 +22,23 @@ jobs:
           from pathlib import Path
           p = Path('ForexScalperApp/SettingsView.swift')
           s = p.read_text()
-
           card_ref = 'RunnerContinuationSettingsCard(config: viewModel.scalpingConfig)'
+
           scalping = s.find('sectionHeader("SCALPING CONFIGURATION"')
           if scalping < 0:
               raise SystemExit('SCALPING CONFIGURATION anchor not found')
 
-          # The desktop scalping card ends at the first padding/GlassCard close after its header.
-          card_end = s.find('                                }.padding(16)\n                            }', scalping)
-          if card_end < 0:
-              raise SystemExit('scalping card closing sequence not found')
+          # In the desktop two-column layout, the scalping card is immediately followed
+          # by the next VStack column. Insert the runner card at that boundary.
+          boundary = '''                        }\n                        VStack(spacing: 20) {\n                            GlassCard {'''
+          pos = s.find(boundary, scalping)
+          if pos < 0:
+              raise SystemExit('scalping column boundary not found')
 
-          insert_at = card_end + len('                                }.padding(16)\n                            }')
-          if card_ref not in s[scalping:insert_at + 300]:
-              s = s[:insert_at] + '\n                            ' + card_ref + s[insert_at:]
+          if card_ref not in s[scalping:pos]:
+              s = s[:pos] + '                        }\n                        ' + card_ref + '\n                        VStack(spacing: 20) {\n                            GlassCard {' + s[pos + len(boundary):]
 
-          # iOS Settings Form: put the same card immediately below the scalping section.
+          # iOS Settings Form: put the same settings directly below scalpingConfigSection.
           ios_anchor = '                scalpingConfigSection\n                elitePrecisionSection'
           if ios_anchor in s and '                runnerContinuationSection\n' not in s:
               s = s.replace(ios_anchor, '                scalpingConfigSection\n                runnerContinuationSection\n                elitePrecisionSection', 1)
