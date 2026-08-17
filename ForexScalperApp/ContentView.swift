@@ -3,7 +3,6 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var modelBridge = TradingModelBridge()
     
-    // Your input fields (same as before)
     @State private var returns: String = ""
     @State private var highLowPct: String = ""
     @State private var closeOpenPct: String = ""
@@ -25,7 +24,6 @@ struct ContentView: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Prediction Result Card
                     VStack(spacing: 8) {
                         Text("Trading Signal")
                             .font(.headline)
@@ -39,7 +37,6 @@ struct ContentView: View {
                     .background(Color.gray.opacity(0.1))
                     .cornerRadius(12)
                     
-                    // Input Fields in a more organized grid
                     Group {
                         Text("Market Features")
                             .font(.title2)
@@ -75,8 +72,17 @@ struct ContentView: View {
                             InputField(label: "Volume Ratio", text: $volumeRatio)
                         }
                     }
+
+                    NavigationLink {
+                        RunnerContinuationSettingsView()
+                    } label: {
+                        Label("Runner Continuation Settings", systemImage: "chart.line.uptrend.xyaxis")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("Runner Continuation and Anti-Exhaustion Settings")
                     
-                    // Predict Button
                     Button(action: makePrediction) {
                         Text("Get Trading Signal")
                             .font(.headline)
