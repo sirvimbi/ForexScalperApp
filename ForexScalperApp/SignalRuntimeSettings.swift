@@ -7,18 +7,14 @@ struct SignalRuntimeSettings: Sendable, Equatable {
     var heartbeatIntervalSeconds: Double = 15.0
     var heartbeatCandleCount: Int = 2
     var minimumHistoryCandles: Int = 60
+    var maxCachedCandles: Int = 3000
 
     static func load(from defaults: UserDefaults = .standard) -> SignalRuntimeSettings {
         var settings = SignalRuntimeSettings()
-        settings.heartbeatEnabled = defaults.object(forKey: "signalRuntime.heartbeatEnabled") == nil
-            ? settings.heartbeatEnabled
-            : defaults.bool(forKey: "signalRuntime.heartbeatEnabled")
-        settings.heartbeatIntervalSeconds = max(1, defaults.object(forKey: "signalRuntime.heartbeatIntervalSeconds") == nil
-            ? settings.heartbeatIntervalSeconds
-            : defaults.double(forKey: "signalRuntime.heartbeatIntervalSeconds"))
-        settings.heartbeatCandleCount = max(1, defaults.object(forKey: "signalRuntime.heartbeatCandleCount") == nil
-            ? settings.heartbeatCandleCount
-            : defaults.integer(forKey: "signalRuntime.heartbeatCandleCount"))
+        settings.heartbeatEnabled = defaults.object(forKey: "signalRuntime.heartbeatEnabled") == nil ? settings.heartbeatEnabled : defaults.bool(forKey: "signalRuntime.heartbeatEnabled")
+        settings.heartbeatIntervalSeconds = max(1, defaults.object(forKey: "signalRuntime.heartbeatIntervalSeconds") == nil ? settings.heartbeatIntervalSeconds : defaults.double(forKey: "signalRuntime.heartbeatIntervalSeconds"))
+        settings.heartbeatCandleCount = max(1, defaults.object(forKey: "signalRuntime.heartbeatCandleCount") == nil ? settings.heartbeatCandleCount : defaults.integer(forKey: "signalRuntime.heartbeatCandleCount"))
+        settings.maxCachedCandles = max(100, defaults.object(forKey: "signalRuntime.maxCachedCandles") == nil ? settings.maxCachedCandles : defaults.integer(forKey: "signalRuntime.maxCachedCandles"))
 
         // Reuse the existing user-facing signal-accuracy setting when available.
         let configuredHistory = SignalAccuracyConfiguration.load(from: defaults).minimumHistoryCandles
@@ -30,5 +26,6 @@ struct SignalRuntimeSettings: Sendable, Equatable {
         defaults.set(heartbeatEnabled, forKey: "signalRuntime.heartbeatEnabled")
         defaults.set(heartbeatIntervalSeconds, forKey: "signalRuntime.heartbeatIntervalSeconds")
         defaults.set(heartbeatCandleCount, forKey: "signalRuntime.heartbeatCandleCount")
+        defaults.set(maxCachedCandles, forKey: "signalRuntime.maxCachedCandles")
     }
 }
