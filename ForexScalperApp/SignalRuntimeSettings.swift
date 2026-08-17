@@ -10,7 +10,9 @@ struct SignalRuntimeSettings: Sendable, Equatable {
     var maxCachedCandles: Int = 3000
     var maxPersistedCandles: Int = 5000
 
-    static func load(from defaults: UserDefaults = .standard) -> SignalRuntimeSettings {
+    /// This is a pure UserDefaults snapshot and is intentionally nonisolated so the MT5 actor
+    /// can read runtime settings without crossing the MainActor.
+    nonisolated static func load(from defaults: UserDefaults = .standard) -> SignalRuntimeSettings {
         var settings = SignalRuntimeSettings()
         settings.heartbeatEnabled = defaults.object(forKey: "signalRuntime.heartbeatEnabled") == nil ? settings.heartbeatEnabled : defaults.bool(forKey: "signalRuntime.heartbeatEnabled")
         settings.heartbeatIntervalSeconds = max(1, defaults.object(forKey: "signalRuntime.heartbeatIntervalSeconds") == nil ? settings.heartbeatIntervalSeconds : defaults.double(forKey: "signalRuntime.heartbeatIntervalSeconds"))
@@ -18,8 +20,12 @@ struct SignalRuntimeSettings: Sendable, Equatable {
         settings.maxCachedCandles = max(100, defaults.object(forKey: "signalRuntime.maxCachedCandles") == nil ? settings.maxCachedCandles : defaults.integer(forKey: "signalRuntime.maxCachedCandles"))
         settings.maxPersistedCandles = max(100, defaults.object(forKey: "signalRuntime.maxPersistedCandles") == nil ? settings.maxPersistedCandles : defaults.integer(forKey: "signalRuntime.maxPersistedCandles"))
 
-        // Reuse the existing user-facing signal-accuracy setting when available.
-        let configuredHistory = SignalAccuracyConfiguration.load(from: defaults).minimumHistoryCandles
+        // Read the persisted accuracy history directly. SignalAccuracyConfiguration.load is
+        // intentionally kept out of this hot actor path so Swift 6 cannot infer MainActor
+        // isolation through the Settings/UI layer.
+        let configuredHistory = defaults.object(forKey: "signalAccuracy.minimumHistoryCandles") == nil
+            ? settings.minimumHistoryCandles
+            : defaults.integer(forKey: "signalAccuracy.minimumHistoryCandles")
         settings.minimumHistoryCandles = max(1, configuredHistory)
         return settings
     }

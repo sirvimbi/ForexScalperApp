@@ -3,11 +3,11 @@ import Foundation
 enum SignalAccuracyEngine {
     struct Assessment {
         let approved: Bool; let confidenceAdjustment: Double; let regime: String; let choppiness: Double; let hurst: Double; let reasons: [String]
-        var insight: String { let text = reasons.isEmpty ? "No exceptional confirmation factors." : reasons.joined(separator: "; "); return "Accuracy layer | regime=\(regime) | H=\(String(format: "%.2f", hurst)) | chop=\(String(format: "%.1f", choppiness)) | \(text)" }
+        nonisolated var insight: String { let text = reasons.isEmpty ? "No exceptional confirmation factors." : reasons.joined(separator: "; "); return "Accuracy layer | regime=\(regime) | H=\(String(format: "%.2f", hurst)) | chop=\(String(format: "%.1f", choppiness)) | \(text)" }
     }
     private enum Divergence { case supporting, opposing, none }
 
-    static func assess(symbol: String, direction: SignalType, candles: [Kline]) -> Assessment {
+    nonisolated static func assess(symbol: String, direction: SignalType, candles: [Kline]) -> Assessment {
         let settings = SignalAccuracyRuntimeCache.shared.snapshot(); guard candles.count >= settings.minimumHistoryCandles, direction != .none else { return Assessment(approved: true, confidenceAdjustment: 0, regime: "unknown", choppiness: 50, hurst: 0.5, reasons: ["insufficient accuracy-layer history"]) }
         let hurst = hurstExponent(candles.map(\.close)), chop = choppinessIndex(candles, period: settings.choppinessPeriod), divergence = divergenceState(candles, direction: direction, settings: settings), reversal = microReversalConfirmation(candles, direction: direction), session = sessionMultiplier(for: Date(), settings: settings)
         var adjustment = 0.0, reasons: [String] = [], approved = true; let regime: String
