@@ -29,5 +29,8 @@ final class SettingsRuntimeBridge {
         config.saveConfig()
         UserDefaults.standard.set(config.useManualLot, forKey: manualLotKey)
         godLog("⚙️ SETTINGS APPLIED | confidence=\(config.confidenceThreshold) | minScore=\(config.minScore) | RR=\(config.minRRRatio) | maxDaily=\(config.maxDailyTrades) | maxConcurrent=\(config.maxConcurrentScalps)", level: .success)
+        Task { @MainActor in
+            await MT5PositionSettingsSync.shared.sync(config: config)
+        }
     }
 }
