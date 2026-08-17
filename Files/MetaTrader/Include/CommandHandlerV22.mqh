@@ -18,26 +18,25 @@
 #define V23_TP3_PERCENT_GV "FSV23_TP3_PERCENT"
 #define V23_TP3_PIPS_GV    "FSV23_TP3_PIPS"
 #define V23_TRAIL_ACTIVATION_GV "FSV23_TRAIL_ACTIVATION_PIPS"
-#define V23_BROKER_SUFFIX_GV "FSV23_BROKER_SUFFIX"
 
 class CCommandHandlerV22 : public CCommandHandler
 {
 public:
-   void HandleCommand(ulong sock, const HttpRequest &req)
+   void HandleCommand(ulong sock,const HttpRequest &req)
    {
-      if(req.path == "/v1/settings/trailing" || req.path == "/settings/trailing")
+      if(req.path=="/v1/settings/trailing" || req.path=="/settings/trailing")
       {
-         string response = HandleTrailingSettings(req);
-         SendSettingsResponse(sock, 200, response);
+         string response=HandleTrailingSettings(req);
+         SendSettingsResponse(sock,200,response);
          return;
       }
-      if(req.path == "/v1/settings/position-management" || req.path == "/settings/position-management")
+      if(req.path=="/v1/settings/position-management" || req.path=="/settings/position-management")
       {
-         string response = HandlePositionManagementSettings(req);
-         SendSettingsResponse(sock, 200, response);
+         string response=HandlePositionManagementSettings(req);
+         SendSettingsResponse(sock,200,response);
          return;
       }
-      CCommandHandler::HandleCommand(sock, req);
+      CCommandHandler::HandleCommand(sock,req);
    }
 
 private:
@@ -48,13 +47,13 @@ private:
 
    double ClampPercent(double value,double fallback)
    {
-      if(value < 0.0 || value > 1.0) return fallback;
+      if(value<0.0 || value>1.0) return fallback;
       return value;
    }
 
    double ClampPositive(double value,double fallback)
    {
-      return value > 0.0 ? value : fallback;
+      return value>0.0 ? value : fallback;
    }
 
    string HandlePositionManagementSettings(const HttpRequest &req)
@@ -66,9 +65,9 @@ private:
       double tp3Percent=ReadGV(V23_TP3_PERCENT_GV,0.20);
       double tp3Pips=ReadGV(V23_TP3_PIPS_GV,20.0);
       double activation=ReadGV(V23_TRAIL_ACTIVATION_GV,5.0);
-      string suffix=GlobalVariableCheck(V23_BROKER_SUFFIX_GV) ? GlobalVariableGetString(V23_BROKER_SUFFIX_GV) : "";
+      string suffix="";
 
-      if(req.method == "POST" || req.method == "PUT")
+      if(req.method=="POST" || req.method=="PUT")
       {
          CJAVal body;
          if(!body.Deserialize(req.body))
@@ -96,7 +95,6 @@ private:
          GlobalVariableSet(V23_TP3_PERCENT_GV,tp3Percent);
          GlobalVariableSet(V23_TP3_PIPS_GV,tp3Pips);
          GlobalVariableSet(V23_TRAIL_ACTIVATION_GV,activation);
-         GlobalVariableSetString(V23_BROKER_SUFFIX_GV,suffix);
          GlobalVariableSet(V22_TRAILING_ACTIVATION_GV,activation);
          GlobalVariablesFlush();
          PrintFormat("[EA V23] SETTINGS APPLIED | TP1 %.1f%%/%.1fp | TP2 %.1f%%/%.1fp | TP3 %.1f%%/%.1fp | trail %.1fp | suffix=%s",tp1Percent*100.0,tp1Pips,tp2Percent*100.0,tp2Pips,tp3Percent*100.0,tp3Pips,activation,suffix);
@@ -108,7 +106,7 @@ private:
    string HandleTrailingSettings(const HttpRequest &req)
    {
       double activation=ReadGV(V22_TRAILING_ACTIVATION_GV,5.0);
-      if(req.method == "POST" || req.method == "PUT")
+      if(req.method=="POST" || req.method=="PUT")
       {
          CJAVal body;
          if(!body.Deserialize(req.body))
