@@ -23,7 +23,6 @@ actor ScalpingTradeMonitor {
     private var onPendingReconciliation: ((TradeRecord) async -> Void)?
     private var onTradeClosed: ((TradeRecord) async -> Void)?
     private var onPartialClose: ((TradeRecord) async -> Void)?
-
     private let statePrefix = "positionManagement.state."
 
     init(marketData: MarketDataProvider,
@@ -44,14 +43,11 @@ actor ScalpingTradeMonitor {
                 await manageProfitableTrade(trade, price: price, profitPips: profit)
                 continue
             }
-
             if await checkTimeExit(trade) {
                 await closeTrade(trade, reason: "Time Expiry (unprofitable)")
                 continue
             }
-
-            if let indicators,
-               await shouldExitViaIndicatorReversal(trade, indicators: indicators) {
+            if let indicators, await shouldExitViaIndicatorReversal(trade, indicators: indicators) {
                 await closeTrade(trade, reason: "Indicator Reversal (unprofitable)")
             }
         }
@@ -61,18 +57,17 @@ actor ScalpingTradeMonitor {
         guard let ticket = positionTicket(for: trade), !inFlightTickets.contains(ticket) else { return }
         var state = loadState(for: ticket)
         let settings = PositionManagementSettings.load().validated()
-        let config = await MainActor.run { ScalpingConfig.shared }
+        let tp1Pips = await MainActor.run { max(0, ScalpingConfig.shared.partialTP1_Pips) }
+        let tp2Pips = await MainActor.run { max(tp1Pips, ScalpingConfig.shared.partialTP2_Pips) }
+        let tp3Pips = await MainActor.run { max(tp2Pips, ScalpingConfig.shared.partialTP3_Pips) }
+        let tp1Percent = await MainActor.run { ScalpingConfig.shared.partialTP1_Percent }
+        let tp2Percent = await MainActor.run { ScalpingConfig.shared.partialTP2_Percent }
         let originalVolume = trade.originalVolume ?? trade.positionSize ?? 0
         let remainingVolume = trade.remainingVolume ?? originalVolume
         guard originalVolume > 0, remainingVolume > 0 else { return }
 
-        let pip = pipSize(for: trade.symbol)
-        let tp1Pips = max(0, config.partialTP1_Pips)
-        let tp2Pips = max(tp1Pips, config.partialTP2_Pips)
-        let tp3Pips = max(tp2Pips, config.partialTP3_Pips)
-
         if !state.tp1Done && profitPips >= tp1Pips && tp1Pips > 0 {
-            if await executePartialClose(trade, ticket: ticket, targetFraction: config.partialTP1_Percent, stage: "TP1", remainingVolume: remainingVolume) {
+            if await executePartialClose(trade, ticket: ticket, targetFraction: tp1Percent, stage: "TP1", remainingVolume: remainingVolume, triggerProfitPips: profitPips) {
                 state.tp1Done = true
                 state.lastSL = state.lastSL ?? trade.stopLoss
                 saveState(state, for: ticket)
@@ -83,7 +78,7 @@ actor ScalpingTradeMonitor {
 
         if !state.tp2Done && profitPips >= tp2Pips && tp2Pips > 0 {
             let currentRemaining = activeTrades[trade.id]?.remainingVolume ?? remainingVolume
-            if await executePartialClose(trade, ticket: ticket, targetFraction: config.partialTP2_Percent, stage: "TP2", remainingVolume: currentRemaining) {
+            if await executePartialClose(trade, ticket: ticket, targetFraction: tp2Percent, stage: "TP2", remainingVolume: currentRemaining, triggerProfitPips: profitPips) {
                 state.tp2Done = true
                 saveState(state, for: ticket)
                 await notifyPartialClose(trade)
@@ -93,7 +88,7 @@ actor ScalpingTradeMonitor {
 
         if !state.tp3Done && profitPips >= tp3Pips && tp3Pips > 0 {
             let currentRemaining = activeTrades[trade.id]?.remainingVolume ?? remainingVolume
-            if await executeFinalClose(trade, ticket: ticket, remainingVolume: currentRemaining) {
+            if await executeFinalClose(trade, ticket: ticket, remainingVolume: currentRemaining, triggerProfitPips: profitPips) {
                 state.tp3Done = true
                 saveState(state, for: ticket)
                 return
@@ -101,7 +96,7 @@ actor ScalpingTradeMonitor {
         }
 
         if settings.breakevenEnabled && !state.breakevenDone && profitPips >= settings.breakevenTriggerPips {
-            let offset = settings.breakevenOffsetPips * pip
+            let offset = settings.breakevenOffsetPips * pipSize(for: trade.symbol)
             let candidate = trade.type == .buy ? trade.entryPrice + offset : trade.entryPrice - offset
             if await improveStop(ticket: ticket, trade: trade, candidateSL: candidate, state: &state, reason: "BREAKEVEN") {
                 state.breakevenDone = true
@@ -110,7 +105,7 @@ actor ScalpingTradeMonitor {
         }
 
         if profitPips >= settings.trailingActivationPips {
-            let distance = settings.trailingDistancePips * pip
+            let distance = settings.trailingDistancePips * pipSize(for: trade.symbol)
             let candidate = trade.type == .buy ? price - distance : price + distance
             if await improveStop(ticket: ticket, trade: trade, candidateSL: candidate, state: &state, reason: "TRAIL") {
                 saveState(state, for: ticket)
@@ -122,7 +117,8 @@ actor ScalpingTradeMonitor {
                                      ticket: Int64,
                                      targetFraction: Double,
                                      stage: String,
-                                     remainingVolume: Double) async -> Bool {
+                                     remainingVolume: Double,
+                                     triggerProfitPips: Double) async -> Bool {
         let fraction = max(0, min(1, targetFraction))
         guard fraction > 0, remainingVolume > 0 else { return false }
         let originalVolume = max(trade.originalVolume ?? trade.positionSize ?? remainingVolume, remainingVolume)
@@ -135,7 +131,7 @@ actor ScalpingTradeMonitor {
 
         inFlightTickets.insert(ticket)
         defer { inFlightTickets.remove(ticket) }
-        godLog("🎯 POSITION MGMT | \(trade.symbol) | \(stage) trigger | profit=\(String(format: "%.2f", profitPips(trade, trade.entryPrice)))pips | close=\(String(format: "%.4f", volume))", level: .info)
+        godLog("🎯 POSITION MGMT | \(trade.symbol) | \(stage) trigger | profit=\(String(format: "%.2f", triggerProfitPips))pips | close=\(String(format: "%.4f", volume))", level: .info)
         do {
             let success = try await MT5Service.shared.closePosition(ticket: ticket, volume: volume)
             guard success else {
@@ -144,7 +140,7 @@ actor ScalpingTradeMonitor {
             }
             if var tracked = activeTrades[trade.id] {
                 tracked.remainingVolume = max(0, (tracked.remainingVolume ?? remainingVolume) - volume)
-                tracked.isPartialClosed = tracked.remainingVolume ?? 0 > 0
+                tracked.isPartialClosed = (tracked.remainingVolume ?? 0) > 0
                 activeTrades[trade.id] = tracked
             }
             godLog("✅ POSITION MGMT | \(trade.symbol) | \(stage) partial close accepted | volume=\(String(format: "%.4f", volume))", level: .success)
@@ -155,11 +151,11 @@ actor ScalpingTradeMonitor {
         }
     }
 
-    private func executeFinalClose(_ trade: TradeRecord, ticket: Int64, remainingVolume: Double) async -> Bool {
+    private func executeFinalClose(_ trade: TradeRecord, ticket: Int64, remainingVolume: Double, triggerProfitPips: Double) async -> Bool {
         guard remainingVolume > 0 else { return false }
         inFlightTickets.insert(ticket)
         defer { inFlightTickets.remove(ticket) }
-        godLog("🎯 POSITION MGMT | \(trade.symbol) | TP3 trigger | closing runner remainder=\(String(format: "%.4f", remainingVolume))", level: .info)
+        godLog("🎯 POSITION MGMT | \(trade.symbol) | TP3 trigger | profit=\(String(format: "%.2f", triggerProfitPips))pips | closing remainder=\(String(format: "%.4f", remainingVolume))", level: .info)
         do {
             let success = try await MT5Service.shared.closePosition(ticket: ticket, volume: remainingVolume)
             if success {
@@ -186,7 +182,6 @@ actor ScalpingTradeMonitor {
         default: return false
         }
         guard improves else { return false }
-
         let settings = PositionManagementSettings.load().validated()
         let step = settings.trailingStepPips * pipSize(for: trade.symbol)
         if currentSL > 0 && abs(candidateSL - currentSL) < step { return false }
@@ -264,17 +259,12 @@ actor ScalpingTradeMonitor {
         if copy.remainingVolume == nil { copy.remainingVolume = original }
         activeTrades[trade.id] = copy
         if let indicators { tradeEntryIndicators[trade.id] = indicators }
-        if let ticket = positionTicket(for: trade) {
-            let persisted = loadState(for: ticket)
-            managementState[ticket] = persisted
-        }
+        if let ticket = positionTicket(for: trade) { managementState[ticket] = loadState(for: ticket) }
         godLog("📊 POSITION OBSERVED | \(trade.symbol) \(trade.type) @ \(String(format: "%.5f", trade.entryPrice)) | Swift management active", level: .trade)
     }
 
     func removeTrade(id: UUID) {
-        if let trade = activeTrades.removeValue(forKey: id), let ticket = positionTicket(for: trade) {
-            managementState.removeValue(forKey: ticket)
-        }
+        if let trade = activeTrades.removeValue(forKey: id), let ticket = positionTicket(for: trade) { managementState.removeValue(forKey: ticket) }
         tradeEntryIndicators.removeValue(forKey: id)
     }
 
@@ -283,16 +273,13 @@ actor ScalpingTradeMonitor {
     func setPendingReconciliationCallback(_ callback: @escaping (TradeRecord) async -> Void) { onPendingReconciliation = callback }
     func setOnTradeClosedCallback(_ callback: @escaping (TradeRecord) async -> Void) { onTradeClosed = callback }
     func setOnPartialCloseCallback(_ callback: @escaping (TradeRecord) async -> Void) { onPartialClose = callback }
-
     private func notifyPartialClose(_ trade: TradeRecord) async { await onPartialClose?(activeTrades[trade.id] ?? trade) }
 
     private func loadState(for ticket: Int64) -> ManagementState {
         if let cached = managementState[ticket] { return cached }
         let key = statePrefix + String(ticket)
         guard let data = UserDefaults.standard.data(forKey: key), let state = try? JSONDecoder().decode(ManagementState.self, from: data) else {
-            let state = ManagementState()
-            managementState[ticket] = state
-            return state
+            let state = ManagementState(); managementState[ticket] = state; return state
         }
         managementState[ticket] = state
         return state
