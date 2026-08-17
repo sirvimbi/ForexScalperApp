@@ -1,9 +1,6 @@
 //+------------------------------------------------------------------+
 //| PositionManagerV22.mqh                                           |
 //| Production position-management authority for ForexScalperApp.   |
-//|                                                                  |
-//| Owns: TP1/TP2/TP3, breakeven and forward-only trailing SL.       |
-//| Configuration is supplied by Swift through terminal globals.    |
 //+------------------------------------------------------------------+
 #ifndef POSITION_MANAGER_V22_MQH
 #define POSITION_MANAGER_V22_MQH
@@ -15,7 +12,6 @@
 #define PM_STAGE_TP1 1
 #define PM_STAGE_TP2 2
 #define PM_STAGE_TP3 3
-#define PM_STAGE_BE  4
 
 class CPositionManagerV22
 {
@@ -25,8 +21,7 @@ private:
    double ReadSetting(string name, double fallback)
    {
       string key = PM_PREFIX + name;
-      if(!GlobalVariableCheck(key))
-         return fallback;
+      if(!GlobalVariableCheck(key)) return fallback;
       return GlobalVariableGet(key);
    }
 
@@ -69,8 +64,7 @@ private:
       if(requested <= 0.0 || current <= 0.0) return 0.0;
       requested = MathMin(requested, current);
       if(maxVolume > 0.0) requested = MathMin(requested, maxVolume);
-      if(step > 0.0)
-         requested = MathFloor((requested + step * 0.000001) / step) * step;
+      if(step > 0.0) requested = MathFloor((requested + step * 0.000001) / step) * step;
       requested = NormalizeDouble(requested, VolumeDigits(step));
       if(requested < minVolume) return 0.0;
       return requested;
@@ -94,24 +88,33 @@ private:
       return current;
    }
 
-   int Stage(ulong ticket)
+   int TPStage(ulong ticket)
    {
-      string key = StateKey(ticket, "STAGE");
+      string key = StateKey(ticket, "TP_STAGE");
       if(!GlobalVariableCheck(key)) return 0;
       return (int)GlobalVariableGet(key);
    }
 
-   void SetStage(ulong ticket, int stage)
+   void SetTPStage(ulong ticket, int stage)
    {
-      GlobalVariableSet(StateKey(ticket, "STAGE"), stage);
+      GlobalVariableSet(StateKey(ticket, "TP_STAGE"), stage);
+      GlobalVariablesFlush();
+   }
+
+   bool BreakevenDone(ulong ticket)
+   {
+      return GlobalVariableCheck(StateKey(ticket, "BE_DONE")) && GlobalVariableGet(StateKey(ticket, "BE_DONE")) > 0.5;
+   }
+
+   void SetBreakevenDone(ulong ticket)
+   {
+      GlobalVariableSet(StateKey(ticket, "BE_DONE"), 1.0);
       GlobalVariablesFlush();
    }
 
    bool SuccessfulRetcode(uint retcode)
    {
-      return retcode == TRADE_RETCODE_DONE ||
-             retcode == TRADE_RETCODE_DONE_PARTIAL ||
-             retcode == TRADE_RETCODE_PLACED;
+      return retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_DONE_PARTIAL || retcode == TRADE_RETCODE_PLACED;
    }
 
    bool IsStopDistanceValid(string symbol, ENUM_POSITION_TYPE type, double sl)
@@ -125,8 +128,7 @@ private:
       long freezeLevel = SymbolInfoInteger(symbol, SYMBOL_TRADE_FREEZE_LEVEL);
       double minimumDistance = MathMax((double)stopsLevel, (double)freezeLevel) * point;
 
-      if(type == POSITION_TYPE_BUY)
-         return sl < bid && (minimumDistance <= 0.0 || (bid - sl) >= minimumDistance);
+      if(type == POSITION_TYPE_BUY) return sl < bid && (minimumDistance <= 0.0 || (bid - sl) >= minimumDistance);
       return sl > ask && (minimumDistance <= 0.0 || (sl - ask) >= minimumDistance);
    }
 
@@ -159,7 +161,6 @@ private:
       bool callOK = m_trade.PositionModify(ticket, newSL, currentTP);
       uint retcode = m_trade.ResultRetcode();
       bool serverOK = SuccessfulRetcode(retcode);
-
       PrintFormat("[EA V22 PM] SL MODIFY | ticket=%I64d | reason=%s | old=%s | new=%s | retcode=%u | %s",
                   ticket, reason, DoubleToString(oldSL, digits), DoubleToString(newSL, digits), retcode,
                   m_trade.ResultRetcodeDescription());
@@ -176,36 +177,23 @@ private:
       double step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
       double minVolume = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
       int digits = VolumeDigits(step);
-
       m_trade.SetExpertMagicNumber(PM_MAGIC_NUMBER);
       m_trade.SetTypeFillingBySymbol(symbol);
       m_trade.SetAsyncMode(false);
 
       bool callOK = false;
       ENUM_ACCOUNT_MARGIN_MODE mode = (ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE);
-
-      // If the requested close would leave less than the broker minimum,
-      // close the entire remaining position instead of creating an invalid residue.
       double remainder = currentVolume - closeVolume;
-      bool closeAll = remainder > 0.0 && minVolume > 0.0 && remainder < minVolume;
-      if(closeAll) closeVolume = currentVolume;
+      if(remainder > 0.0 && minVolume > 0.0 && remainder < minVolume) closeVolume = currentVolume;
 
       if(closeVolume >= currentVolume - (step > 0.0 ? step * 0.25 : 0.00000001))
-      {
          callOK = m_trade.PositionClose(ticket);
-      }
       else if(mode == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
-      {
          callOK = m_trade.PositionClosePartial(ticket, closeVolume);
-      }
+      else if(type == POSITION_TYPE_BUY)
+         callOK = m_trade.Sell(closeVolume, symbol, 0.0, 0.0, 0.0, "GOD_MODE_V22_TP");
       else
-      {
-         // Netting/exchange: reduce the position with the opposite market deal.
-         if(type == POSITION_TYPE_BUY)
-            callOK = m_trade.Sell(closeVolume, symbol, 0.0, 0.0, 0.0, "GOD_MODE_V22_TP");
-         else
-            callOK = m_trade.Buy(closeVolume, symbol, 0.0, 0.0, 0.0, "GOD_MODE_V22_TP");
-      }
+         callOK = m_trade.Buy(closeVolume, symbol, 0.0, 0.0, 0.0, "GOD_MODE_V22_TP");
 
       uint retcode = m_trade.ResultRetcode();
       bool serverOK = SuccessfulRetcode(retcode);
@@ -232,7 +220,7 @@ private:
       if(profitPips <= 0.0) return;
 
       double original = OriginalVolume(ticket, currentVolume);
-      int stage = Stage(ticket);
+      int stage = TPStage(ticket);
 
       double tp1Pips = MathMax(0.0, ReadSetting("TP1_PIPS", 10.0));
       double tp2Pips = MathMax(tp1Pips, ReadSetting("TP2_PIPS", 15.0));
@@ -241,60 +229,44 @@ private:
       double tp2Pct = Clamp(ReadSetting("TP2_PCT", 0.30), 0.0, 1.0);
       double tp3Pct = Clamp(ReadSetting("TP3_PCT", 0.20), 0.0, 1.0);
 
-      // TP levels are evaluated in ascending order and each stage is persisted
-      // before the next tick can attempt it again.
       if(stage < PM_STAGE_TP1 && tp1Pips > 0.0 && profitPips >= tp1Pips)
       {
-         double target = original * tp1Pct;
-         if(CloseVolume(ticket, symbol, type, target, "TP1"))
+         if(CloseVolume(ticket, symbol, type, original * tp1Pct, "TP1"))
          {
-            SetStage(ticket, PM_STAGE_TP1);
+            SetTPStage(ticket, PM_STAGE_TP1);
             stage = PM_STAGE_TP1;
          }
       }
 
-      if(stage >= PM_STAGE_TP1 && stage < PM_STAGE_TP2 && tp2Pips > 0.0 && profitPips >= tp2Pips)
+      if(stage >= PM_STAGE_TP1 && stage < PM_STAGE_TP2 && tp2Pips > 0.0 && profitPips >= tp2Pips && PositionSelectByTicket(ticket))
       {
-         if(PositionSelectByTicket(ticket))
+         currentVolume = PositionGetDouble(POSITION_VOLUME);
+         if(CloseVolume(ticket, symbol, type, MathMin(currentVolume, original * tp2Pct), "TP2"))
          {
-            currentVolume = PositionGetDouble(POSITION_VOLUME);
-            double target = MathMin(currentVolume, original * tp2Pct);
-            if(CloseVolume(ticket, symbol, type, target, "TP2"))
-            {
-               SetStage(ticket, PM_STAGE_TP2);
-               stage = PM_STAGE_TP2;
-            }
+            SetTPStage(ticket, PM_STAGE_TP2);
+            stage = PM_STAGE_TP2;
          }
       }
 
-      if(stage >= PM_STAGE_TP2 && stage < PM_STAGE_TP3 && tp3Pips > 0.0 && profitPips >= tp3Pips)
+      if(stage >= PM_STAGE_TP2 && stage < PM_STAGE_TP3 && tp3Pips > 0.0 && profitPips >= tp3Pips && PositionSelectByTicket(ticket))
       {
-         if(PositionSelectByTicket(ticket))
+         currentVolume = PositionGetDouble(POSITION_VOLUME);
+         if(CloseVolume(ticket, symbol, type, MathMin(currentVolume, original * tp3Pct), "TP3"))
          {
-            currentVolume = PositionGetDouble(POSITION_VOLUME);
-            double target = MathMin(currentVolume, original * tp3Pct);
-            if(CloseVolume(ticket, symbol, type, target, "TP3"))
-            {
-               SetStage(ticket, PM_STAGE_TP3);
-               stage = PM_STAGE_TP3;
-            }
+            SetTPStage(ticket, PM_STAGE_TP3);
+            stage = PM_STAGE_TP3;
          }
       }
 
-      // Optional breakeven is independent of the TP stages and can therefore
-      // protect a trade even when partial TP is disabled.
       bool breakevenEnabled = ReadBool("BE_ENABLED", true);
       double beTrigger = MathMax(0.0, ReadSetting("BE_TRIGGER_PIPS", tp1Pips));
       double beOffset = ReadSetting("BE_OFFSET_PIPS", 0.0);
-      if(breakevenEnabled && beTrigger > 0.0 && profitPips >= beTrigger && Stage(ticket) < PM_STAGE_BE)
+      if(breakevenEnabled && beTrigger > 0.0 && profitPips >= beTrigger && !BreakevenDone(ticket))
       {
          double beSL = type == POSITION_TYPE_BUY ? entry + beOffset * pip : entry - beOffset * pip;
-         if(ModifySL(ticket, symbol, type, beSL, "BREAKEVEN"))
-            SetStage(ticket, PM_STAGE_BE);
+         if(ModifySL(ticket, symbol, type, beSL, "BREAKEVEN")) SetBreakevenDone(ticket);
       }
 
-      // Trailing only activates after its configured profit threshold. The
-      // requested SL is always forward-only and is never allowed to loosen.
       bool trailingEnabled = ReadBool("TRAIL_ENABLED", true);
       double activation = MathMax(0.0, ReadSetting("TRAIL_ACTIVATION_PIPS", 5.0));
       double distance = MathMax(0.0, ReadSetting("TRAIL_DISTANCE_PIPS", 6.0));
@@ -325,12 +297,7 @@ public:
       }
    }
 
-   void ClearClosedState()
-   {
-      // Global variables are intentionally retained across restarts. A ticket
-      // is unique for the lifecycle of the position and retaining state makes
-      // duplicate partial closes impossible after EA/app restarts.
-   }
+   void ClearClosedState() {}
 };
 
 #endif
