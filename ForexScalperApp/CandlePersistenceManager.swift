@@ -20,11 +20,10 @@ actor CandlePersistenceManager {
 
         let fileURL = getFileURL(symbol: symbol, timeframe: timeframe)
         let existing = await loadCandles(for: symbol, timeframe: timeframe)
-        var mergedMap = Dictionary(grouping: existing, by: { normalizeEpochMilliseconds($0.closeTime) }).mapValues { $0.first! }
+        var mergedMap = Dictionary(grouping: existing, by: { $0.closeTime }).mapValues { $0.first! }
 
         for candle in candles {
-            var normalized = candle
-            normalized.closeTime = normalizeEpochMilliseconds(candle.closeTime)
+            let normalized = normalizedCandle(candle)
             mergedMap[normalized.closeTime] = normalized
         }
 
@@ -47,11 +46,7 @@ actor CandlePersistenceManager {
         do {
             let data = try Data(contentsOf: fileURL)
             let candles = try JSONDecoder().decode([Kline].self, from: data)
-            return candles.map { candle in
-                var normalized = candle
-                normalized.closeTime = normalizeEpochMilliseconds(candle.closeTime)
-                return normalized
-            }.sorted { $0.closeTime < $1.closeTime }
+            return candles.map(normalizedCandle).sorted { $0.closeTime < $1.closeTime }
         } catch {
             godLog("⚠️ Persistence: Failed to load \(symbol) \(timeframe): \(error.localizedDescription)", level: .warning)
             return []
@@ -60,7 +55,20 @@ actor CandlePersistenceManager {
 
     func getLatestCandleTime(for symbol: String, timeframe: String) async -> Int? {
         let candles = await loadCandles(for: symbol, timeframe: timeframe)
-        return candles.last.map { normalizeEpochMilliseconds($0.closeTime) }
+        return candles.last?.closeTime
+    }
+
+    private func normalizedCandle(_ candle: Kline) -> Kline {
+        Kline(
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+            volume: candle.volume,
+            closeTime: normalizeEpochMilliseconds(candle.closeTime),
+            spread: candle.spread,
+            isClosed: candle.isClosed
+        )
     }
 
     private func normalizeEpochMilliseconds(_ timestamp: Int) -> Int {
