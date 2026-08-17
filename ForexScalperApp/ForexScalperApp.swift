@@ -21,6 +21,7 @@ struct ForexScalperApp: App {
         SignalDiagnostics.install()
         _ = DailyNewsIntelligence.shared
         _ = TradeOutcomeBayesianBridge.shared
+        _ = SettingsRuntimeBridge.shared
         
         // Request notification permissions via the manager
         NotificationManager.shared.requestAuthorization()
