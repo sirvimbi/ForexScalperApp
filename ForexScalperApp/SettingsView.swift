@@ -38,7 +38,11 @@ struct SettingsView: View {
                         }.buttonStyle(.plain)
                     }.padding(.horizontal, 20).padding(.vertical, 14)
                     Divider().background(Color.borderSubtle)
-                    HStack(alignment: .top, spacing: 24) {
+                    LazyVGrid(columns: [
+                        GridItem(.flexible(minimum: 280), spacing: 20),
+                        GridItem(.flexible(minimum: 400), spacing: 20),
+                        GridItem(.flexible(minimum: 280), spacing: 20)
+                    ], alignment: .leading, spacing: 20) {
                         VStack(spacing: 20) {
                             GlassCard {
                                 VStack(alignment: .leading, spacing: 16) {
