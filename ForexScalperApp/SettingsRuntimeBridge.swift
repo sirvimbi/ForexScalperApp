@@ -22,6 +22,10 @@ final class SettingsRuntimeBridge {
                 godLog("⚙️ SETTINGS APPLIED | useManualLot=\(value) | manualLot=\(String(format: "%.4f", config.manualLotSize))", level: .info)
             }
             .store(in: &cancellables)
+
+        Task { @MainActor in
+            await MT5PositionSettingsSync.shared.sync(config: config)
+        }
     }
 
     func saveAll() {
