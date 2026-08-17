@@ -1,0 +1,98 @@
+name: Apply critical signal fix
+
+on:
+  push:
+    branches:
+      - fix/critical-signal-direction-dedup
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: fix/critical-signal-direction-dedup
+
+      - name: Patch signal engine
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('ForexScalperApp/ScalpingSignalEngine.swift')
+          text = path.read_text()
+
+          def once(old, new, label):
+              global text
+              if new in text:
+                  return
+              if old not in text:
+                  raise SystemExit(f'Missing expected source pattern: {label}')
+              text = text.replace(old, new, 1)
+
+          once(
+              '    private var lastSignalTime: [String: Date] = [:]\n',
+              '    private var lastSignalTime: [String: Date] = [:]\n    // Prevent overlapping full/fast evaluations for the same symbol.\n    private var inFlightEvaluations: Set<String> = []\n',
+              'inFlight property'
+          )
+
+          once(
+              '    func evaluateScalpingSignal(symbol: String) async -> ScalpingSignal? {\n        let started = Date()\n',
+              '    func evaluateScalpingSignal(symbol: String) async -> ScalpingSignal? {\n        let started = Date()\n        guard inFlightEvaluations.insert(symbol).inserted else {\n            godLog("🛑 SIGNAL GATE | \\(symbol) | duplicate evaluation already in flight", level: .warning)\n            return nil\n        }\n        defer { inFlightEvaluations.remove(symbol) }\n',
+              'full reservation'
+          )
+
+          fast = re.search(r'(    func evaluateFastSignal\(symbol: String, currentPrice: Double\) async -> ScalpingSignal\? \{\n)([\\s\\S]*?)(?=\n    private func getCachedTrend)', text)
+          if not fast:
+              raise SystemExit('Missing fast evaluation function')
+          block = fast.group(0)
+          if 'inFlightEvaluations.insert(symbol)' not in block:
+              block = block.replace(
+                  '    func evaluateFastSignal(symbol: String, currentPrice: Double) async -> ScalpingSignal? {\n',
+                  '    func evaluateFastSignal(symbol: String, currentPrice: Double) async -> ScalpingSignal? {\n        guard inFlightEvaluations.insert(symbol).inserted else {\n            godLog("🛑 FAST SIGNAL GATE | \\(symbol) | duplicate evaluation already in flight", level: .warning)\n            return nil\n        }\n        defer { inFlightEvaluations.remove(symbol) }\n', 1)
+          if 'cooldown active' not in block:
+              block = block.replace(
+                  '        let riskAllowed = await riskManager.canOpenTrade(for: symbol)\n        godLog("🧱 FAST GATE | \\(symbol) | riskManager=\\(riskAllowed ? "PASS" : "FAIL")", level: .info)\n        guard riskAllowed else { return nil }\n',
+                  '        let riskAllowed = await riskManager.canOpenTrade(for: symbol)\n        godLog("🧱 FAST GATE | \\(symbol) | riskManager=\\(riskAllowed ? "PASS" : "FAIL")", level: .info)\n        guard riskAllowed else { return nil }\n\n        let cooldown = await MainActor.run { ScalpingConfig.shared.cooldownSeconds }\n        if let lastSignal = lastSignalTime[symbol], Date().timeIntervalSince(lastSignal) < cooldown {\n            let remaining = Int(ceil(cooldown - Date().timeIntervalSince(lastSignal)))\n            godLog("⏱ FAST SIGNAL GATE | \\(symbol) | FAIL | cooldown active | remaining=\\(remaining)s", level: .info)\n            return nil\n        }\n', 1)
+          text = text[:fast.start()] + block + text[fast.end():]
+
+          once(
+              '        // Final Confidence Calculation\n        let type: SignalType = buyScore > sellScore ? .buy : (sellScore > buyScore ? .sell : .none)\n',
+              '        // CRITICAL DIRECTION LOCK: H4 + D1 are the authoritative regime direction.\n        // Counter-trend score accumulation must never flip a bearish regime into BUY\n        // (or a bullish regime into SELL).\n        let htfDirection = indicators.h4Trend\n        guard htfDirection == .buy || htfDirection == .sell else {\n            godLog("🛑 SIGNAL DIRECTION GUARD | \\(symbol) | invalid HTF direction=\\(htfDirection)", level: .warning)\n            return ScalpingSignal(type: .none, symbol: symbol, price: indicators.currentPrice, confidence: 0, score: 0, sellScore: Int(sellScore), indicators: indicators, confidenceFactors: factors, timestamp: Date())\n        }\n        let scoredType: SignalType = buyScore > sellScore ? .buy : (sellScore > buyScore ? .sell : .none)\n        if scoredType != .none && scoredType != htfDirection {\n            godLog("🛑 SIGNAL DIRECTION GUARD | \\(symbol) | HTF=\\(htfDirection) | scored=\\(scoredType) | B=\\(String(format: \"%.1f\", buyScore)) S=\\(String(format: \"%.1f\", sellScore)) | counter-trend rejected", level: .warning)\n        }\n        let type: SignalType = scoredType == htfDirection ? htfDirection : .none\n\n        // Final Confidence Calculation\n',
+              'direction lock'
+          )
+
+          old = '''        if adjustedSignal.confidence < threshold {\n            let warning = "Self-Learning adjusted confidence from \\(Int(finalSignal.confidence))% to \\(Int(adjustedSignal.confidence))% (Win Rate < 50%)"\n            godLog("🧠 SIGNAL ADJUSTMENT | \\(symbol) | \\(warning)", level: .info)\n            // We don't block anymore, but we keep the insight\n            return adjustedSignal.withSelfLearningInsight(warning)\n        }'''
+          new = '''        if adjustedSignal.confidence < threshold {\n            let warning = "Self-Learning adjusted confidence from \\(Int(finalSignal.confidence))% to \\(Int(adjustedSignal.confidence))% (Win Rate < 50%)"\n            godLog("🧠 SIGNAL ADJUSTMENT | \\(symbol) | \\(warning) | REJECTED", level: .warning)\n            return nil\n        }'''
+          once(old, new, 'historical confidence bypass')
+
+          # Re-check risk immediately before publishing a signal. The initial risk check\n          # happens before asynchronous candle/indicator work and is therefore not atomic.\n          marker = '        lastSignalTime[symbol] = Date()\n'
+          replacement = '''        let finalRiskAllowed = await riskManager.canOpenTrade(for: symbol)\n        guard finalRiskAllowed else {\n            godLog("🛑 SIGNAL GATE | \\(symbol) | risk state changed during evaluation; signal not published", level: .warning)\n            return nil\n        }\n\n        lastSignalTime[symbol] = Date()\n'''
+          if text.count(marker) < 2:
+              raise SystemExit('Expected full and fast lastSignalTime publication points')
+          text = text.replace(marker, replacement, 2)
+
+          path.write_text(text)
+
+      - name: Verify critical guards exist
+        run: |
+          grep -n "inFlightEvaluations" ForexScalperApp/ScalpingSignalEngine.swift
+          grep -n "SIGNAL DIRECTION GUARD" ForexScalperApp/ScalpingSignalEngine.swift
+          grep -n "finalRiskAllowed" ForexScalperApp/ScalpingSignalEngine.swift
+          grep -n "adjustedSignal.confidence < threshold" ForexScalperApp/ScalpingSignalEngine.swift
+
+      - name: Commit and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ForexScalperApp/ScalpingSignalEngine.swift
+          git commit -m "fix: enforce HTF signal direction and deduplicate evaluations"
+          rm .github/workflows/critical-signal-fix.yml
+          git add .github/workflows/critical-signal-fix.yml
+          git commit -m "chore: remove temporary signal fix workflow"
+          git push origin fix/critical-signal-direction-dedup
