@@ -1,0 +1,38 @@
+name: Apply Bidirectional Signal Bias Fix
+on:
+  push:
+    branches:
+      - fix/bidirectional-signal-balance
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Patch acceleration scoring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('ForexScalperApp/ScalpingSignalEngine.swift')
+          s = p.read_text()
+          old = '''        // PILLAR 8: Momentum Acceleration (V10.0)\n        let accelWeight = weights["Accel"] ?? 12.0\n        if indicators.isAccelerating {\n            if buyScore > sellScore { buyScore += accelWeight }\n            else if sellScore > buyScore { sellScore += accelWeight }\n            factors["Momentum Surge"] = accelWeight\n        }\n        tracePillar(symbol: symbol, pillar: "Momentum Surge", passed: indicators.isAccelerating, detail: "accelerating=\\(indicators.isAccelerating) ROC=\\(String(format: "%.4f", indicators.momentumScore))", contribution: indicators.isAccelerating ? accelWeight : 0, buyScore: buyScore, sellScore: sellScore)'''
+          new = '''        // PILLAR 8: Momentum Acceleration (V10.0)\n        // Direction is derived from the signed momentum score, never from the\n        // direction that is already leading. This prevents acceleration from\n        // reinforcing a pre-existing BUY/SELL scoring bias.\n        let accelWeight = weights["Accel"] ?? 12.0\n        let accelerationDirection: SignalType =\n            indicators.momentumScore > 0 ? .buy :\n            (indicators.momentumScore < 0 ? .sell : .none)\n        if indicators.isAccelerating {\n            switch accelerationDirection {\n            case .buy:\n                buyScore += accelWeight\n                factors["Momentum Surge"] = accelWeight\n            case .sell:\n                sellScore += accelWeight\n                factors["Momentum Surge"] = accelWeight\n            case .none:\n                break\n            }\n        }\n        let accelDirectionLabel = accelerationDirection == .buy ? "BUY" : accelerationDirection == .sell ? "SELL" : "NONE"\n        tracePillar(symbol: symbol, pillar: "Momentum Surge", passed: indicators.isAccelerating && accelerationDirection != .none, detail: "accelerating=\\(indicators.isAccelerating) ROC=\\(String(format: "%.4f", indicators.momentumScore)) direction=\\(accelDirectionLabel)", contribution: indicators.isAccelerating && accelerationDirection != .none ? accelWeight : 0, buyScore: buyScore, sellScore: sellScore)'''
+          if old not in s:
+              raise SystemExit('Expected acceleration scoring block not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ForexScalperApp/ScalpingSignalEngine.swift
+          git commit -m "fix: make momentum acceleration direction-neutral" || exit 0
+          git push
+      - name: Remove temporary workflow
+        run: |
+          git rm .github/workflows/apply-bidirectional-bias-fix.yml
+          git commit -m "chore: remove temporary bias fix workflow"
+          git push
