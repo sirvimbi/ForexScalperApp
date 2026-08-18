@@ -16,12 +16,9 @@ struct SettingsView: View {
                     GlassCard {
                         VStack(alignment: .leading, spacing: 16) {
                             sectionHeader("RISK MANAGEMENT", icon: "shield.fill", color: .accentRed)
-                            // ...
                         }
                     }
                 }
-                // (Omitted iOS detailed sections for brevity in this manual fix, 
-                // but we primarily care about the macOS layout fix requested)
             }
             .navigationTitle("Settings")
         }
@@ -39,7 +36,7 @@ struct SettingsView: View {
                 Divider().background(Color.borderSubtle)
                 
                 HStack(alignment: .top, spacing: 20) {
-                    // COLUMN 1: Risk, MT5, Notifications
+                    // COLUMN 1: Risk, MT5, Notifications, News Gate, Strategy Weights
                     VStack(spacing: 20) {
                         GlassCard {
                             VStack(alignment: .leading, spacing: 16) {
@@ -84,6 +81,40 @@ struct SettingsView: View {
                         }
 
                         GlassCard { VStack(alignment: .leading, spacing: 16) { sectionHeader("NOTIFICATIONS & SYSTEM", icon: "bell.badge.fill", color: .accentCyan); Divider().background(Color.borderSubtle); Toggle("Signal Alerts", isOn: $viewModel.notifyOnSignal).toggleStyle(SwitchToggleStyle(tint: .accentCyan)).foregroundColor(.textSecondary); Toggle("Trade Executions", isOn: $viewModel.notifyOnTrade).toggleStyle(SwitchToggleStyle(tint: .accentCyan)).foregroundColor(.textSecondary); Toggle("Trade Closures", isOn: $viewModel.notifyOnClose).toggleStyle(SwitchToggleStyle(tint: .accentCyan)).foregroundColor(.textSecondary); Divider().background(Color.borderSubtle); Button(action: { NotificationManager.shared.requestAuthorization(); Task { @MainActor in let content = UNMutableNotificationContent(); content.title = "Stellas System Check"; content.body = "Notification pipe is now active and synced."; content.sound = .default; let request = UNNotificationRequest(identifier: "test_mac", content: content, trigger: nil); try? await UNUserNotificationCenter.current().add(request) } }) { HStack { Image(systemName: "exclamationmark.shield.fill"); Text("FORCE NOTIFY") }.font(.system(size: 10, weight: .bold, design: .monospaced)).frame(maxWidth: .infinity).padding(.vertical, 8).background(Color.accentCyan.opacity(0.1)).foregroundColor(.accentCyan).cornerRadius(6).overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentCyan.opacity(0.3), lineWidth: 1)) }.buttonStyle(.plain) }.padding(16) }
+                        
+                        // MOVED HERE: News Gate
+                        GlassCard {
+                            VStack(alignment: .leading, spacing: 14) {
+                                sectionHeader("NEWS GATE", icon: "globe.americas.fill", color: .accentGold)
+                                Divider().background(Color.borderSubtle)
+                                Toggle("Enable Protection", isOn: $viewModel.scalpingConfig.enableNewsFilter).toggleStyle(SwitchToggleStyle(tint: .accentGold)).labelsHidden()
+                                settingsRow("Pause High") { HStack(spacing: 6) { Slider(value: $viewModel.scalpingConfig.pauseBeforeHighImpactMinutes, in: 0...120, step: 15).frame(width: 100); Text("\(Int(viewModel.scalpingConfig.pauseBeforeHighImpactMinutes))m").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundColor(.accentGold).frame(width: 35, alignment: .trailing) } }
+                                settingsRow("Pause Med") { HStack(spacing: 6) { Slider(value: $viewModel.scalpingConfig.pauseBeforeMediumImpactMinutes, in: 0...60, step: 5).frame(width: 100); Text("\(Int(viewModel.scalpingConfig.pauseBeforeMediumImpactMinutes))m").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundColor(.accentGold).frame(width: 35, alignment: .trailing) } }
+                                Toggle("Auto-Spread Bump", isOn: $viewModel.scalpingConfig.autoRaiseSpreadDuringNews).font(.system(size: 10)).foregroundColor(.textSecondary)
+                            }.padding(16)
+                        }
+                        
+                        // MOVED HERE: Strategy Weights
+                        GlassCard {
+                            VStack(alignment: .leading, spacing: 16) {
+                                sectionHeader("STRATEGY WEIGHTS", icon: "scalemass", color: .accentCyan)
+                                Divider().background(Color.borderSubtle)
+                                ScrollView {
+                                    VStack(spacing: 12) {
+                                        settingsRow("HTF Align") { weightStepper($viewModel.scalpingConfig.weightHTFAlignment) }
+                                        settingsRow("Mom Exhaust") { weightStepper($viewModel.scalpingConfig.weightMomentumExhaustion) }
+                                        settingsRow("Vol Surge") { weightStepper($viewModel.scalpingConfig.weightVolumeSurge) }
+                                        settingsRow("EMA Stack") { weightStepper($viewModel.scalpingConfig.weightEMAStack) }
+                                        settingsRow("BB Reject") { weightStepper($viewModel.scalpingConfig.weightBollingerRejection) }
+                                        settingsRow("CCI Cycle") { weightStepper($viewModel.scalpingConfig.weightCCICycle) }
+                                        settingsRow("SAR Trend") { weightStepper($viewModel.scalpingConfig.weightSARTrend) }
+                                        settingsRow("Mom Surge") { weightStepper($viewModel.scalpingConfig.weightMomentumSurge) }
+                                        settingsRow("Order Flow") { weightStepper($viewModel.scalpingConfig.weightOrderFlow) }
+                                        settingsRow("ML Confirm") { weightStepper($viewModel.scalpingConfig.weightMLConfirmed) }
+                                    }
+                                }.frame(maxHeight: 250)
+                            }.padding(16)
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     
@@ -140,7 +171,6 @@ struct SettingsView: View {
                                 sectionHeader("ACTIVE PAIRS", icon: "chart.line.uptrend.xyaxis", color: .accentCyan)
                                 Divider().background(Color.borderSubtle)
                                 
-                                let allSymbols = TradingPair.allCases.map { $0.rawValue }.sorted()
                                 let majorPairs = TradingPair.allCases.filter { tp in 
                                     let r = tp.rawValue
                                     return !tp.isExotic && !["XAUUSD", "XAGUSD", "USOIL", "UKOIL", "US30", "NAS100", "US500", "GER30"].contains(r)
@@ -190,43 +220,11 @@ struct SettingsView: View {
                     }
                     .frame(maxWidth: .infinity)
                     
-                    // COLUMN 3: Runner, V22, News
+                    // COLUMN 3: Runner, V22
                     VStack(spacing: 20) {
                         RunnerContinuationSettingsCard(config: viewModel.scalpingConfig)
-                        
                         V22TrailingActivationSettingsCard(controller: v22TrailingController)
-                        
-                        GlassCard {
-                            VStack(alignment: .leading, spacing: 14) {
-                                sectionHeader("NEWS GATE", icon: "globe.americas.fill", color: .accentGold)
-                                Divider().background(Color.borderSubtle)
-                                Toggle("Enable Protection", isOn: $viewModel.scalpingConfig.enableNewsFilter).toggleStyle(SwitchToggleStyle(tint: .accentGold)).labelsHidden()
-                                settingsRow("Pause High") { HStack(spacing: 6) { Slider(value: $viewModel.scalpingConfig.pauseBeforeHighImpactMinutes, in: 0...120, step: 15).frame(width: 100); Text("\(Int(viewModel.scalpingConfig.pauseBeforeHighImpactMinutes))m").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundColor(.accentGold).frame(width: 35, alignment: .trailing) } }
-                                settingsRow("Pause Med") { HStack(spacing: 6) { Slider(value: $viewModel.scalpingConfig.pauseBeforeMediumImpactMinutes, in: 0...60, step: 5).frame(width: 100); Text("\(Int(viewModel.scalpingConfig.pauseBeforeMediumImpactMinutes))m").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundColor(.accentGold).frame(width: 35, alignment: .trailing) } }
-                                Toggle("Auto-Spread Bump", isOn: $viewModel.scalpingConfig.autoRaiseSpreadDuringNews).font(.system(size: 10)).foregroundColor(.textSecondary)
-                            }.padding(16)
-                        }
-                        
-                        GlassCard {
-                            VStack(alignment: .leading, spacing: 16) {
-                                sectionHeader("STRATEGY WEIGHTS", icon: "scalemass", color: .accentCyan)
-                                Divider().background(Color.borderSubtle)
-                                ScrollView {
-                                    VStack(spacing: 12) {
-                                        settingsRow("HTF Align") { weightStepper($viewModel.scalpingConfig.weightHTFAlignment) }
-                                        settingsRow("Mom Exhaust") { weightStepper($viewModel.scalpingConfig.weightMomentumExhaustion) }
-                                        settingsRow("Vol Surge") { weightStepper($viewModel.scalpingConfig.weightVolumeSurge) }
-                                        settingsRow("EMA Stack") { weightStepper($viewModel.scalpingConfig.weightEMAStack) }
-                                        settingsRow("BB Reject") { weightStepper($viewModel.scalpingConfig.weightBollingerRejection) }
-                                        settingsRow("CCI Cycle") { weightStepper($viewModel.scalpingConfig.weightCCICycle) }
-                                        settingsRow("SAR Trend") { weightStepper($viewModel.scalpingConfig.weightSARTrend) }
-                                        settingsRow("Mom Surge") { weightStepper($viewModel.scalpingConfig.weightMomentumSurge) }
-                                        settingsRow("Order Flow") { weightStepper($viewModel.scalpingConfig.weightOrderFlow) }
-                                        settingsRow("ML Confirm") { weightStepper($viewModel.scalpingConfig.weightMLConfirmed) }
-                                    }
-                                }.frame(maxHeight: 250)
-                            }.padding(16)
-                        }
+                        Spacer()
                     }
                     .frame(maxWidth: .infinity)
                 }
