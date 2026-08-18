@@ -114,10 +114,10 @@ actor BinanceService: MarketDataProvider {
                     }
                 }
             } else {
-                godLog("⚠️ Failed to fetch Binance historical data for \(symbol) (\(binanceSymbol)) \(interval): \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                godLog("⚠️ Failed to fetch Binance historical data for \(symbol) (\(binanceSymbol)) \(interval): \((response as? HTTPURLResponse)?.statusCode ?? 0)", level: .info)
             }
         } catch {
-            godLog("❌ Error fetching historical data for \(symbol) \(interval): \(error)")
+            godLog("❌ Error fetching historical data for \(symbol) \(interval): \(error)", level: .info)
         }
     }
 
@@ -132,7 +132,7 @@ actor BinanceService: MarketDataProvider {
         let streams = buildStreams()
 
         if streams.isEmpty {
-            godLog("ℹ️ No symbols available for Binance WebSocket")
+            godLog("ℹ️ No symbols available for Binance WebSocket", level: .info)
             return
         }
 
@@ -140,10 +140,10 @@ actor BinanceService: MarketDataProvider {
             stream.contains("@kline_1m") || stream.contains("@kline_5m")
         }
 
-        godLog("📊 Subscribing to \(filteredStreams.count) streams (1m & 5m only)")
+        godLog("📊 Subscribing to \(filteredStreams.count) streams (1m & 5m only)", level: .info)
 
         if filteredStreams.isEmpty {
-            godLog("ℹ️ No 1m or 5m streams available for Binance WebSocket")
+            godLog("ℹ️ No 1m or 5m streams available for Binance WebSocket", level: .info)
             return
         }
 
@@ -152,11 +152,11 @@ actor BinanceService: MarketDataProvider {
         let urlString = "\(wsBaseURL)?streams=\(streamString)"
 
         guard let url = URL(string: urlString) else {
-            godLog("❌ Failed to create Binance WebSocket URL")
+            godLog("❌ Failed to create Binance WebSocket URL", level: .info)
             return
         }
 
-        godLog("🌐 Connecting to Binance WebSocket: \(url.absoluteString.prefix(200))...")
+        godLog("🌐 Connecting to Binance WebSocket: \(url.absoluteString.prefix(200))...", level: .info)
         webSocketTask?.cancel(with: .goingAway, reason: nil)
 
         let task = session.webSocketTask(with: url)
@@ -313,12 +313,20 @@ actor BinanceService: MarketDataProvider {
             "EURUSD": "EURUSDT",
             "GBPUSD": "GBPUSDT",
             "AUDUSD": "AUDUSDT",
+            "NZDUSD": "NZDUSDT",
+            "USDCAD": "USDCAD",
+            "USDCHF": "USDCHF",
+            "USDJPY": "USDJPY",
+            "XAUUSD": "XAUUSDT",
+            "XAGUSD": "XAGUSDT",
+            "USOIL": "USOILUSDT",
+            "UKOIL": "UKOILUSDT",
+            "NAS100": "NAS100USDT",
+            "US30": "US30USDT",
+            "US500": "US500USDT",
+            "GER30": "GER30USDT",
             "BTCUSDT": "BTCUSDT",
-            "ETHUSDT": "ETHUSDT",
-            "XRPUSDT": "XRPUSDT",
-            "LTCUSDT": "LTCUSDT",
-            "ADAUSDT": "ADAUSDT",
-            "SOLUSDT": "SOLUSDT"
+            "ETHUSDT": "ETHUSDT"
         ]
 
         if let mapped = whitelist[symbol] {

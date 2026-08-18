@@ -4,7 +4,6 @@
     <mapping directory="" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/5" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/DerivedData/SourcePackages/checkouts/Starscream" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/build/SourcePackages/checkouts/Starscream" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/build_check/SourcePackages/checkouts/Starscream" vcs="Git" />
   </component>
 </project>
