@@ -111,6 +111,11 @@ class ScalpingConfig: ObservableObject {
 
     // MARK: - RUNNER CONTINUATION / ANTI-EXHAUSTION
     @Published var enableRunnerContinuation: Bool = true
+    
+    // MARK: - SYMMETRY CONTROLS
+    @Published var enableDirectionalBiasCorrection: Bool = true
+    @Published var minSignalRatio: Double = 0.35 // Minimum 35% signals in either direction
+    @Published var maxSignalRatio: Double = 0.65 // Maximum 65% signals in either direction
     @Published var runnerCandleLookback: Int = 4
     @Published var runnerMinimumAlignedCandles: Int = 3
     @Published var runnerRequireLatestCandleAlignment: Bool = true

@@ -28,14 +28,26 @@ struct RRLock {
 
         let h4 = signal.indicators.h4Trend
         let d1 = signal.indicators.d1Trend
-        let expectedDirection: SignalType?
-        if h4 == .buy && d1 == .buy { expectedDirection = .buy }
-        else if h4 == .sell && d1 == .sell { expectedDirection = .sell }
-        else { expectedDirection = nil }
 
-        guard let expectedDirection, signal.type == expectedDirection else {
-            print("🛑 RRLock: Direction guard rejected \(signal.symbol) | signal=\(signal.type) | H4=\(h4) D1=\(d1)")
-            return false
+        // SYMMETRIC FIX: Allow BOTH buy AND sell alignment
+        let expectedDirection: SignalType?
+        if h4 == .buy && d1 == .buy {
+            expectedDirection = .buy
+        } else if h4 == .sell && d1 == .sell {
+            expectedDirection = .sell
+        } else {
+            expectedDirection = nil
+        }
+
+        // Allow signals that match OR if no clear HTF trend (flexible but logged)
+        if let expected = expectedDirection {
+            guard signal.type == expected else {
+                print("🛑 RRLock: Direction guard rejected \(signal.symbol) | signal=\(signal.type) | H4=\(h4) D1=\(d1)")
+                return false
+            }
+        } else {
+            // Mixed trend — we allow but log as lower probability
+            print("⚖️ RRLock: Mixed HTF Trend (\(h4)/\(d1)) for \(signal.symbol) — evaluating short-term momentum")
         }
 
         let priceBucket = Int((signal.price * 100000.0).rounded())

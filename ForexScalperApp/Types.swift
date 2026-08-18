@@ -610,7 +610,7 @@ struct ScalpingSignal: Sendable {
             stopLoss: stopLoss,
             takeProfit: takeProfit,
             volume: volume,
-            orderType: orderType,
+            orderType: orderType ?? (type == .buy ? .buy : (type == .sell ? .sell : nil)),
             fillingType: fillingType,
             executionMode: executionMode,
             optimalEntryPrice: optimalEntryPrice,

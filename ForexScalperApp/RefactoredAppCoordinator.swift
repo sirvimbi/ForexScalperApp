@@ -1104,7 +1104,7 @@ class RefactoredAppCoordinator: ObservableObject {
                 confidence: trade.confidence,
                 wasWin: wasWin
             )
-            await scalpingEngine.updateSymbolPerformance(symbol: trade.symbol, pnl: trade.pnl ?? 0)
+            await scalpingEngine.updateSymbolPerformance(symbol: trade.symbol, direction: trade.type, pnl: trade.pnl ?? 0)
         }
 
         await PerformanceAnalyzer.shared.recordTrade(trade)

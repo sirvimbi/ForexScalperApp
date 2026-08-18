@@ -64,12 +64,20 @@ actor ScalpingTradeMonitor {
     private func shouldExitViaIndicatorReversal(_ trade: TradeRecord, indicators: IndicatorSet) async -> Bool {
         let enabled = await MainActor.run { ScalpingConfig.shared.enableIndicatorExit }
         guard enabled, let entry = tradeEntryIndicators[trade.id] else { return false }
+        
+        // SYMMETRIC FIX: Use proper overbought/oversold for BOTH directions
         if trade.type == .buy {
-            return (indicators.rsi > 70 && indicators.rsi < entry.rsi - 3) ||
-                   (indicators.bbPosition > 1 && indicators.stochasticK > 80)
+            // Exit BUY when overbought (RSI > 70 AND Stoch > 80)
+            let overbought = indicators.rsi > 70 && indicators.stochasticK > 80
+            // Only exit if we've actually moved significantly from entry levels
+            let movedIntoOverbought = indicators.rsi > entry.rsi + 5
+            return overbought && movedIntoOverbought
+        } else {
+            // Exit SELL when oversold (RSI < 30 AND Stoch < 20)
+            let oversold = indicators.rsi < 30 && indicators.stochasticK < 20
+            let movedIntoOversold = indicators.rsi < entry.rsi - 5
+            return oversold && movedIntoOversold
         }
-        return (indicators.rsi < 30 && indicators.rsi > entry.rsi + 3) ||
-               (indicators.bbPosition < 0 && indicators.stochasticK < 20)
     }
 
     private func closeTrade(_ trade: TradeRecord, reason: String) async {
