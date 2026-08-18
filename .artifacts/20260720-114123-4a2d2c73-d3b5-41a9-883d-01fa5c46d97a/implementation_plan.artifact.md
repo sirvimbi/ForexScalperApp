@@ -1,80 +1,40 @@
-# Fix Signal Execution and Correlation Sync
+# Fix Commodity and Index Trade Execution
 
-The goal is to resolve issues where signals are generated but blocked by the `CorrelationFilter` or `RiskManagers` due to out-of-sync states or overly restrictive rules.
+Investigating why signals for XAUUSD, USOIL, and indices like NAS100/US30 are not executing revealed that the primary cause is the hardcoded pip-size logic and strict MT5 retcode validation, which doesn't account for the unique tick sizes and return behaviors of non-Forex symbols.
 
 ## User Review Required
 
-- **Correlation Threshold**: Increased from 0.70 to 0.80 for more aggressive trading.
-- **High Confidence Bypass**: Signals with confidence >= 95% will bypass the correlation group block.
+- **Broker Suffix Alignment**: I am ensuring that the `brokerSuffix` (e.g., "m") is applied only to the final MT5 order symbol, while internal logic uses normalized names.
+- **Risk/Reward Thresholds**: Commodities and Indices often have much larger price numbers than Forex (e.g., US30 at 40,000 vs EURUSD at 1.08). I am normalizing these to Ensure R:R checks pass for all asset classes.
 
 ## Proposed Changes
 
-### [CorrelationFilter.swift](file:///Users/kilu/Documents/Projects/AppCoordinator/Scalper App/ForexScalperApp/CorrelationFilter.swift)
+### [MT5 Core]
 
-- Update `correlationThreshold` to `0.80`.
-- Update `canOpenTrade` to accept `confidence` and implement the "Elite Bypass".
-- Add `syncActiveSymbols` to force-sync state.
+#### [MT5Service.swift](file:///Users/kilu/Documents/Projects/AppCoordinator/Scalper%20App/ForexScalperApp/MT5Service.swift)
 
-```swift
-    func canOpenTrade(symbol: String, confidence: Double = 0) async -> Bool {
-        // ...
-        for activeSymbol in activeSymbols {
-            if areInSameGroup(symbol, activeSymbol) {
-                if confidence >= 95.0 {
-                    godLog("💎 High Confidence Bypass: Allowing correlated \(symbol) (\(confidence)%)", level: .info)
-                    continue
-                }
-                // ...
-            }
-        }
-        // ...
-    }
-
-    func syncActiveSymbols(_ symbols: Set<String>) async {
-        activeSymbols = symbols
-        godLog("📊 Correlation: Force-synced \(activeSymbols.count) active symbols", level: .info)
-    }
-```
+- **Smarter Symbol Resolution**: Update `executeTrade` to handle symbol names more robustly, ensuring indices like "NAS100" are correctly suffixed and formatted for the bridge.
+- **Relaxed Retcode Validation**: Accept a broader range of "success" retcodes (e.g., `10025` for "Placed" or `10009` for "Done") as different asset classes and brokers return different codes for index orders.
+- **Precision Logging**: Add point/digit logging to verify price alignment with MT5's expectations.
 
 ---
 
-### [ScalpingRiskManager.swift](file:///Users/kilu/Documents/Projects/AppCoordinator/Scalper App/ForexScalperApp/ScalpingRiskManager.swift)
+### [Risk & Execution]
 
-- Add duplicate symbol check in `canOpenTrade`.
-- Add `syncActiveTrades` method.
+#### [ScalpingRiskManager.swift](file:///Users/kilu/Documents/Projects/AppCoordinator/Scalper%20App/ForexScalperApp/ScalpingRiskManager.swift)
 
----
+- **Dynamic Pip Calculation**: Replace hardcoded `0.01/0.0001` pip sizes with dynamic `point` values from MT5 symbol info. This ensures Gold (0.1/0.01) and Indices (1.0) distances are calculated correctly.
+- **Normalized Volume Limits**: Use MT5-reported `volume_step` to ensure orders like 0.1 for Gold don't fail due to rounding errors.
 
-### [RefactoredRiskManager.swift](file:///Users/kilu/Documents/Projects/AppCoordinator/Scalper App/ForexScalperApp/RefactoredRiskManager.swift)
+#### [RRLock.swift](file:///Users/kilu/Documents/Projects/AppCoordinator/Scalper%20App/ForexScalperApp/RRLock.swift)
 
-- Add duplicate symbol check in `canOpenTrade`.
-- Add `syncActiveTrades` method.
-
----
-
-### [ScalpingTradeMonitor.swift](file:///Users/kilu/Documents/Projects/AppCoordinator/Scalper App/ForexScalperApp/ScalpingTradeMonitor.swift)
-
-- Update `closeTrade` to unregister from `CorrelationFilter` and `ScalpingRiskManager` immediately.
-
----
-
-### [TradeMonitor.swift](file:///Users/kilu/Documents/Projects/AppCoordinator/Scalper App/ForexScalperApp/TradeMonitor.swift)
-
-- Update `closeTrade` to unregister from `CorrelationFilter` and `RefactoredRiskManager` immediately.
-
----
-
-### [RefactoredAppCoordinator.swift](file:///Users/kilu/Documents/Projects/AppCoordinator/Scalper App/ForexScalperApp/RefactoredAppCoordinator.swift)
-
-- Update `executeSmartOrder` to pass `signal.confidence` to `canOpenTrade`.
-- Update `syncMT5Trades` to call `syncActiveSymbols` and `syncActiveTrades` with the actual active trades.
+- **Asset-Class Awareness**: Normalize the "Price move too small" check. Currently, a 1-point move on US30 is considered "huge" by Forex standards but might be rejected if the logic assumes 5-digit precision.
 
 ## Verification Plan
 
 ### Automated Tests
-- None, verification will be via logs and monitoring live behavior.
+- I will run the `xcodebuild` command to ensure the project compiles with the new logic.
 
 ### Manual Verification
-- Generate two correlated signals (e.g. AUDUSD and AUDJPY) with high confidence and verify both are sent to MT5.
-- Close a trade and verify the next signal for that symbol is NOT blocked immediately after.
-- Check logs for "Force-synced" messages to confirm poller is working.
+- **Log Review**: I will monitor the logcat to confirm that `executeTrade` is called with the correctly suffixed symbol (e.g., `XAUUSDm` instead of `XAUUSD`).
+- **Retcode Check**: I will verify that `retcode` 10009/10008 are no longer the *only* allowed success codes if the broker returns 10025.

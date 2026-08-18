@@ -113,10 +113,11 @@ struct RRLock {
             return false
         }
 
-        let pipSize = signal.symbol.contains("JPY") ? 0.01 : 0.0001
-        let minPriceMove = pipSize
+        // ASSET-AWARE MIN MOVE: Don't use hardcoded 0.0001 for indices
+        let pointSize = try? await MT5Service.shared.getSymbolInfo(signal.symbol).point ?? 0.00001
+        let minPriceMove = (pointSize ?? 0.00001) * 2.0
         guard risk >= minPriceMove && reward >= minPriceMove else {
-            print("❌ RRLock: Price move too small (\(risk) / \(reward))")
+            print("❌ RRLock: Price move too small (\(risk) / \(reward)) | min required=\(minPriceMove)")
             return false
         }
 

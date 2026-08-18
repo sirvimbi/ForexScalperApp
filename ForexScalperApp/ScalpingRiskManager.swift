@@ -103,9 +103,27 @@ actor ScalpingRiskManager: RiskManagerProtocol {
     /// Analysis-stage gate: signal calculation continues even when execution risk is blocked.
     /// Actual execution is re-checked immediately before position sizing/order placement.
     func canOpenTrade(for symbol: String) async -> Bool {
-        let details = await riskGateDetails(for: symbol)
-        godLog("🔬 SIGNAL ANALYSIS GATE | \(symbol) | riskExecution=\(details.allowed ? "AVAILABLE" : "BLOCKED") | continuing analysis", level: details.allowed ? .info : .warning)
+        // Diagnostic check - we don't block here because the coordinator handles the accept/deny flow
         return true
+    }
+
+    private func getPipSize(for symbol: String) async -> Double {
+        do {
+            let info = try await MT5Service.shared.getSymbolInfo(symbol)
+            if let point = info.point, point > 0 {
+                // For standard FX, 1 pip = 10 points. For indices/gold, we usually treat 1 point as 1 pip equivalent in this engine's math
+                let normalizedSymbol = symbol.uppercased()
+                if normalizedSymbol.contains("JPY") || normalizedSymbol.contains("XAU") || normalizedSymbol.contains("XAG") {
+                    return point * 10.0 // Gold 0.1, JPY 0.01
+                } else if normalizedSymbol.contains("OIL") || normalizedSymbol.contains("US30") || normalizedSymbol.contains("NAS") || normalizedSymbol.contains("GER") {
+                    return point // 1.0 or 0.1 depending on broker
+                }
+                return point * 10.0 // Default 0.0001
+            }
+        } catch {
+            godLog("⚠️ RISK | Could not get dynamic point size for \(symbol), using fallback", level: .warning)
+        }
+        return symbol.contains("JPY") || symbol.contains("XAU") ? 0.01 : 0.0001
     }
 
     func calculatePositionSize(for signal: Signal) async -> PositionSize? {
@@ -122,7 +140,7 @@ actor ScalpingRiskManager: RiskManagerProtocol {
         let balance = parameters.accountBalance
         let baseRiskAmount = balance * parameters.riskPerTrade
         let atr = await getATR(symbol: signal.symbol)
-        let pipSize = signal.symbol.contains("JPY") ? 0.01 : 0.0001
+        let pipSize = await getPipSize(for: signal.symbol)
         let atrPips = atr / pipSize
         let volatilityMultiplier = getATRMultiplier(symbol: signal.symbol, currentATR: atr, minMult: minMult, maxMult: maxMult)
         let adjustedRiskAmount = baseRiskAmount * volatilityMultiplier

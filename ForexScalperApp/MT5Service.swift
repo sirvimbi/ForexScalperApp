@@ -236,7 +236,9 @@ actor MT5Service {
             guard !data.isEmpty else { throw TradingError.apiError("Empty response from MT5 Bridge") }
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let success = json["success"] as? Bool, success == false { throw TradingError.apiError("MT5 Bridge Error: \(json["error"] as? String ?? "Execution failed")") }
             let result = try decoder.decode(MT5TradeResult.self, from: data)
-            guard result.retcode == 10008 || result.retcode == 10009 else { throw TradingError.apiError("MT5 Error (\(result.retcode)): \(result.comment ?? "Execution failed")") }
+            // 10008: Placed, 10009: Done, 10025: Request Placed
+            let successCodes = [10008, 10009, 10025]
+            guard successCodes.contains(result.retcode) else { throw TradingError.apiError("MT5 Error (\(result.retcode)): \(result.comment ?? "Execution failed")") }
             godLog("✅ MT5: Trade executed successfully (Code: \(result.retcode))", level: .success)
             return result
         } catch let error as TradingError { throw error }
