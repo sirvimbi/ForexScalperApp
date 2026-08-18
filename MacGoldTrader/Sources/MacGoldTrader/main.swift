@@ -1,5 +1,6 @@
 import SwiftUI
 import Foundation
+import Combine
 
 struct OrderRequest: Encodable {
     let symbol: String
@@ -12,11 +13,6 @@ struct OrderRequest: Encodable {
     let comment: String
     let magic: Int
     let deviation: Int
-}
-
-struct OrderResponse: Decodable {
-    let code: Int?
-    let message: String?
 }
 
 @main
@@ -89,13 +85,13 @@ final class TraderViewModel: ObservableObject {
 
         do {
             let body = try JSONEncoder().encode(order)
-            let request = NSMutableURLRequest(url: url)
+            var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = body
 
             lastCommand = makeCurlCommand(url: url, body: body)
-            let (data, response) = try await URLSession.shared.data(for: request as URLRequest)
+            let (data, response) = try await URLSession.shared.data(for: request)
 
             if let httpResponse = response as? HTTPURLResponse {
                 let responseText = String(data: data, encoding: .utf8) ?? ""
@@ -144,7 +140,6 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                     TextField("http://127.0.0.1:8890/v1/order", text: $model.endpoint)
                         .textFieldStyle(.roundedBorder)
-                        .onChange(of: model.endpoint) { _, _ in model.saveSettings() }
                 }
                 .padding(4)
             }
