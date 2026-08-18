@@ -59,32 +59,20 @@ actor ScalpingSignalEngine {
         if totalTrades < minTradesForAdaptation { return true }
         let winRate = Double(perf.wins) / Double(totalTrades)
         
-        // SYMMETRIC IMPROVEMENT: Instead of blocking completely, we use winRate to adjust confidence later.
+        // SYMMETRIC IMPROVEMENT: Instead of blocking completely, we allow the engine to proceed 
+        // but the learning adjustment will naturally penalize this direction.
         // We only hard-block if win rate is extremely low (< 25%).
         return winRate >= 0.25
     }
 
     func evaluateScalpingSignal(symbol: String) async -> ScalpingSignal? {
         let started = Date()
-        godLog("🧪 SIGNAL EVAL START | \(symbol) | mode=FULL | requestedTFs=1m,5m,1h,4h,D1,W1", level: .info)
+        godLog("🧪 SIGNAL EVAL START | \(symbol) | mode=FULL", level: .info)
 
         // WHITELIST CHECK
         guard allowedSymbols.contains(symbol) else {
             godLog("🛑 SIGNAL GATE | \(symbol) | FAIL | symbol not in scalping whitelist", level: .warning)
             return nil
-        }
-
-        // PERFORMANCE CHECK (Directional)
-        // Note: For initial gate, we check both buy and sell collectively for general symbol health
-        let totalWins = (symbolPerformance[symbol]?.values.map(\.wins).reduce(0, +) ?? 0)
-        let totalLosses = (symbolPerformance[symbol]?.values.map(\.losses).reduce(0, +) ?? 0)
-        let totalTrades = totalWins + totalLosses
-        if totalTrades >= minTradesForAdaptation {
-            let winRate = Double(totalWins) / Double(totalTrades)
-            if winRate < 0.30 {
-                godLog("🧠 SIGNAL CONTEXT | \(symbol) | overall historical win rate too low (\(Int(winRate * 100))%)", level: .info)
-                // We don't block here anymore to remain symmetric and allow recovery
-            }
         }
 
         // MT5 TRADABLE CHECK
@@ -160,7 +148,7 @@ actor ScalpingSignalEngine {
         var finalSignal = await generateSignal(symbol: symbol, indicators: indicators, candles1m: candlesByTimeframe["1m"]!)
 
         // V23 signal-accuracy layer
-        let accuracy = SignalAccuracyEngine.assess(
+        let accuracy = await SignalAccuracyEngine.assess(
             symbol: symbol,
             direction: finalSignal.type,
             candles: candlesByTimeframe["1m"]!
@@ -190,13 +178,16 @@ actor ScalpingSignalEngine {
 
         // SYMMETRY CHECK: Check for directional bias imbalance
         let symmetry = await validateSignalSymmetry(symbol: symbol)
-        let config = await MainActor.run { ScalpingConfig.shared }
+        let (enableCorrection, maxRatio, minRatio) = await MainActor.run {
+            let config = ScalpingConfig.shared
+            return (config.enableDirectionalBiasCorrection, config.maxSignalRatio, config.minSignalRatio)
+        }
         
-        if config.enableDirectionalBiasCorrection {
-            if symmetry.ratio > config.maxSignalRatio && adjustedSignal.type == .buy {
+        if enableCorrection {
+            if symmetry.ratio > maxRatio && adjustedSignal.type == .buy {
                 godLog("⚖️ SYMMETRY | \(symbol) | Skipping BUY signal to correct balance (Ratio=\(String(format: "%.1f", symmetry.ratio * 100))%)", level: .warning)
                 return nil
-            } else if symmetry.ratio < config.minSignalRatio && adjustedSignal.type == .sell {
+            } else if symmetry.ratio < minRatio && adjustedSignal.type == .sell {
                 godLog("⚖️ SYMMETRY | \(symbol) | Skipping SELL signal to correct balance (Ratio=\(String(format: "%.1f", (1 - symmetry.ratio) * 100))%)", level: .warning)
                 return nil
             }
@@ -218,9 +209,9 @@ actor ScalpingSignalEngine {
     private func logEvaluation(symbol: String, signal: ScalpingSignal, threshold: Double) {
         let metPillars = signal.confidenceFactors.keys.sorted()
         let allPillars = [
-            "HTF Power Alignment", "Elite Dip Buy", "Elite Rally Sell", "Smart Money Volume",
-            "Structural Support", "Structural Resistance", "BB Lower Sweep", "BB Upper Sweep",
-            "Cyclical Strength", "SAR Support", "SAR Resistance", "Momentum Surge",
+            "Institutional Alignment", "Dip Buy", "Rally Sell", "Institutional Volume",
+            "Structural Strength", "Bollinger Rejection", "Cyclical Strength", 
+            "SAR Support", "SAR Resistance", "Momentum Surge",
             "ML Confirmed", "ML Divergence", "Order Flow Buy", "Order Flow Sell"
         ]
 
@@ -447,7 +438,7 @@ actor ScalpingSignalEngine {
     }
 
     private func generateSignal(symbol: String, indicators: IndicatorSet, candles1m: [Kline]) async -> ScalpingSignal {
-        let (deltaThreshold, mlThreshold, newsMultiplierVal, _, pullbackEMAPeriod, weights) = await MainActor.run {
+        let (deltaThreshold, mlThreshold, weights, pullbackEMAPeriod) = await MainActor.run {
             let config = ScalpingConfig.shared
             let weights = [
                 "HTF": config.weightHTFAlignment,
@@ -464,10 +455,8 @@ actor ScalpingSignalEngine {
             ]
             return (config.orderFlowThreshold,
                 config.mlConfidenceThreshold,
-                config.newsSpreadMultiplier,
-                config.swingLookback,
-                config.pullbackEMAPeriod,
-                weights)
+                weights,
+                config.pullbackEMAPeriod)
         }
 
         var buyScore: Double = 0
@@ -478,48 +467,71 @@ actor ScalpingSignalEngine {
         let htfWeight = weights["HTF"] ?? 25.0
         if indicators.h4Trend == .buy && indicators.d1Trend == .buy {
             buyScore += htfWeight
-            factors["HTF Power Alignment"] = htfWeight
-            tracePillar(symbol: symbol, pillar: "HTF Power Alignment", passed: true, detail: "H4=BUY D1=BUY", contribution: htfWeight, buyScore: buyScore, sellScore: sellScore)
+            factors["Institutional Alignment"] = htfWeight
+            tracePillar(symbol: symbol, pillar: "Institutional Alignment", passed: true, detail: "H4=BUY D1=BUY", contribution: htfWeight, buyScore: buyScore, sellScore: sellScore)
         } else if indicators.h4Trend == .sell && indicators.d1Trend == .sell {
             sellScore += htfWeight
-            factors["HTF Power Alignment"] = htfWeight
-            tracePillar(symbol: symbol, pillar: "HTF Power Alignment", passed: true, detail: "H4=SELL D1=SELL", contribution: htfWeight, buyScore: buyScore, sellScore: sellScore)
+            factors["Institutional Alignment"] = htfWeight
+            tracePillar(symbol: symbol, pillar: "Institutional Alignment", passed: true, detail: "H4=SELL D1=SELL", contribution: htfWeight, buyScore: buyScore, sellScore: sellScore)
         } else {
-            tracePillar(symbol: symbol, pillar: "HTF Power Alignment", passed: false, detail: "H4=\(indicators.h4Trend) D1=\(indicators.d1Trend) — mixed trend skipped", contribution: 0, buyScore: buyScore, sellScore: sellScore)
+            tracePillar(symbol: symbol, pillar: "Institutional Alignment", passed: false, detail: "H4=\(indicators.h4Trend) D1=\(indicators.d1Trend) — mixed trend skipped", contribution: 0, buyScore: buyScore, sellScore: sellScore)
             return ScalpingSignal(type: .none, symbol: symbol, price: indicators.currentPrice, confidence: 0, score: 0, sellScore: 0, indicators: indicators, confidenceFactors: [:], timestamp: Date())
         }
 
-        // PILLAR 2: Momentum & Exhaustion (RSI + Stoch)
+        // PILLAR 2: Momentum & Exhaustion (RSI + Stoch) - ADAPTIVE VOLATILITY
         let momWeight = weights["Momentum"] ?? 15.0
-        let dipBuy = indicators.rsi < 32 && indicators.stochasticK < 15
-        let rallySell = indicators.rsi > 68 && indicators.stochasticK > 85
+        let volatilityRegime = indicators.atr / indicators.currentPrice
+        let isHighVol = volatilityRegime > 0.01 // 1% ATR
+        let rsiOversold = isHighVol ? 28.0 : 32.0
+        let rsiOverbought = isHighVol ? 72.0 : 68.0
+        let stochOversold = isHighVol ? 10.0 : 15.0
+        let stochOverbought = isHighVol ? 90.0 : 85.0
+
+        let dipBuy = indicators.rsi < rsiOversold && indicators.stochasticK < stochOversold
+        let rallySell = indicators.rsi > rsiOverbought && indicators.stochasticK > stochOverbought
+        
         if dipBuy {
             buyScore += momWeight
-            factors["Elite Dip Buy"] = momWeight
+            factors["Dip Buy"] = momWeight
+            tracePillar(symbol: symbol, pillar: "Momentum / Exhaustion", passed: true, detail: "Dip Buy RSI=\(String(format: "%.1f", indicators.rsi)) StochK=\(String(format: "%.1f", indicators.stochasticK))", contribution: momWeight, buyScore: buyScore, sellScore: sellScore)
         } else if rallySell {
             sellScore += momWeight
-            factors["Elite Rally Sell"] = momWeight
+            factors["Rally Sell"] = momWeight
+            tracePillar(symbol: symbol, pillar: "Momentum / Exhaustion", passed: true, detail: "Rally Sell RSI=\(String(format: "%.1f", indicators.rsi)) StochK=\(String(format: "%.1f", indicators.stochasticK))", contribution: momWeight, buyScore: buyScore, sellScore: sellScore)
         }
 
-        // PILLAR 3: Institutional Volume Surge
+        // PILLAR 3: Institutional Volume Surge (SYMMETRIC)
         let volWeight = weights["Volume"] ?? 12.0
-        let volumePass = indicators.volumeRatio >= 1.5
-        if volumePass {
-            buyScore += volWeight
-            sellScore += volWeight
-            factors["Smart Money Volume"] = volWeight
+        if indicators.volumeRatio >= 1.5 {
+            if indicators.currentPrice > indicators.ema21 {
+                buyScore += volWeight
+                factors["Institutional Volume"] = volWeight
+                tracePillar(symbol: symbol, pillar: "Institutional Volume", passed: true, detail: "Bullish Volume Ratio=\(String(format: "%.2f", indicators.volumeRatio))", contribution: volWeight, buyScore: buyScore, sellScore: sellScore)
+            } else if indicators.currentPrice < indicators.ema21 {
+                sellScore += volWeight
+                factors["Institutional Volume"] = volWeight
+                tracePillar(symbol: symbol, pillar: "Institutional Volume", passed: true, detail: "Bearish Volume Ratio=\(String(format: "%.2f", indicators.volumeRatio))", contribution: volWeight, buyScore: buyScore, sellScore: sellScore)
+            }
         }
 
-        // PILLAR 4: EMA Stack Confluence (M1 + M5)
+        // PILLAR 4: EMA Stack Confluence (M1 + M5) - SYMMETRIC FIX
         let emaWeight = weights["EMA"] ?? 18.0
-        let buyStack = indicators.ema9 > indicators.ema21 && indicators.ema21 > indicators.ema50
-        let sellStack = indicators.ema9 < indicators.ema21 && indicators.ema21 < indicators.ema50
+        let buyStack1m = indicators.ema9 > indicators.ema21 && indicators.ema21 > indicators.ema50
+        let buyStack5m = indicators.ema9_5m > indicators.ema21_5m && indicators.ema21_5m > indicators.ema50_5m
+        let sellStack1m = indicators.ema9 < indicators.ema21 && indicators.ema21 < indicators.ema50
+        let sellStack5m = indicators.ema9_5m < indicators.ema21_5m && indicators.ema21_5m < indicators.ema50_5m
+
+        let buyStack = buyStack1m && buyStack5m
+        let sellStack = sellStack1m && sellStack5m
+
         if buyStack {
             buyScore += emaWeight
-            factors["Structural Support"] = emaWeight
+            factors["Structural Strength"] = emaWeight
+            tracePillar(symbol: symbol, pillar: "EMA Stack Confluence", passed: true, detail: "M1/M5 Buy Stack Aligned", contribution: emaWeight, buyScore: buyScore, sellScore: sellScore)
         } else if sellStack {
             sellScore += emaWeight
-            factors["Structural Resistance"] = emaWeight
+            factors["Structural Strength"] = emaWeight
+            tracePillar(symbol: symbol, pillar: "EMA Stack Confluence", passed: true, detail: "M1/M5 Sell Stack Aligned", contribution: emaWeight, buyScore: buyScore, sellScore: sellScore)
         }
 
         // PILLAR 5: Bollinger Rejection (SYMMETRIC)
@@ -528,34 +540,40 @@ actor ScalpingSignalEngine {
         let bbSell = indicators.bbPosition > 0.95
         if bbBuy {
             buyScore += bbWeight
-            factors["BB Lower Sweep"] = bbWeight
+            factors["Bollinger Rejection"] = bbWeight
+            tracePillar(symbol: symbol, pillar: "Bollinger Rejection", passed: true, detail: "Oversold position=\(String(format: "%.3f", indicators.bbPosition))", contribution: bbWeight, buyScore: buyScore, sellScore: sellScore)
         } else if bbSell {
             sellScore += bbWeight
-            factors["BB Upper Sweep"] = bbWeight
+            factors["Bollinger Rejection"] = bbWeight
+            tracePillar(symbol: symbol, pillar: "Bollinger Rejection", passed: true, detail: "Overbought position=\(String(format: "%.3f", indicators.bbPosition))", contribution: bbWeight, buyScore: buyScore, sellScore: sellScore)
         }
 
         // PILLAR 6: CCI Cycle Alignment (SYMMETRIC)
         let cciWeight = weights["CCI"] ?? 10.0
-        let cciBuy = indicators.cci > 100
-        let cciSell = indicators.cci < -100
-        if cciBuy {
+        if indicators.cci > 100 {
             buyScore += cciWeight
-            factors["CCI Bullish Momentum"] = cciWeight
-        } else if cciSell {
+            factors["Cyclical Strength"] = cciWeight
+        } else if indicators.cci < -100 {
             sellScore += cciWeight
-            factors["CCI Bearish Momentum"] = cciWeight
+            factors["Cyclical Strength"] = cciWeight
         }
 
-        // PILLAR 7: SAR Trend Confirmation
+        // PILLAR 7: SAR Trend Confirmation (VOLATILITY-NORMALIZED)
         let sarWeight = weights["SAR"] ?? 10.0
-        let sarBuy = indicators.sar < indicators.currentPrice
-        let sarSell = indicators.sar > indicators.currentPrice
-        if sarBuy {
-            buyScore += sarWeight
-            factors["SAR Support"] = sarWeight
-        } else if sarSell {
-            sellScore += sarWeight
-            factors["SAR Resistance"] = sarWeight
+        let sarDistance = abs(indicators.currentPrice - indicators.sar)
+        let atrNormalizedDistance = indicators.atr > 0 ? sarDistance / indicators.atr : 0
+        let significantDistance = atrNormalizedDistance > 0.4 // Buffer for significance
+
+        if significantDistance {
+            if indicators.sar < indicators.currentPrice {
+                buyScore += sarWeight
+                factors["SAR Support"] = sarWeight
+                tracePillar(symbol: symbol, pillar: "SAR Confirmation", passed: true, detail: "SAR Support dist=\(String(format: "%.2f", atrNormalizedDistance))ATR", contribution: sarWeight, buyScore: buyScore, sellScore: sellScore)
+            } else if indicators.sar > indicators.currentPrice {
+                sellScore += sarWeight
+                factors["SAR Resistance"] = sarWeight
+                tracePillar(symbol: symbol, pillar: "SAR Confirmation", passed: true, detail: "SAR Resistance dist=\(String(format: "%.2f", atrNormalizedDistance))ATR", contribution: sarWeight, buyScore: buyScore, sellScore: sellScore)
+            }
         }
 
         // PILLAR 8: Momentum Acceleration (SYMMETRIC FIX)
@@ -567,21 +585,19 @@ actor ScalpingSignalEngine {
         if indicators.isAccelerating {
             if momentumDirection == .buy {
                 buyScore += accelWeight
-                factors["Momentum Surge Buy"] = accelWeight
+                factors["Momentum Surge"] = accelWeight
             } else if momentumDirection == .sell {
                 sellScore += accelWeight
-                factors["Momentum Surge Sell"] = accelWeight
+                factors["Momentum Surge"] = accelWeight
             }
         }
 
-        // PILLAR 9: L2 Order Flow Imbalance (V10.0)
+        // PILLAR 9: L2 Order Flow Imbalance (SYMMETRIC)
         let flowWeight = weights["OrderFlow"] ?? 15.0
-        let flowBuy = indicators.deltaVolume > deltaThreshold
-        let flowSell = indicators.deltaVolume < -deltaThreshold
-        if flowBuy {
+        if indicators.deltaVolume > deltaThreshold {
             buyScore += flowWeight
             factors["Order Flow Buy"] = flowWeight
-        } else if flowSell {
+        } else if indicators.deltaVolume < -deltaThreshold {
             sellScore += flowWeight
             factors["Order Flow Sell"] = flowWeight
         }
@@ -603,17 +619,15 @@ actor ScalpingSignalEngine {
             factors["ML Divergence"] = -30
         }
 
-        // V10.0: FIXED STOP LOSS
+        // Position sizing logic derivation (Stop Loss & Take Profit)
         let pipSize = symbol.contains("JPY") ? 0.01 : 0.0001
         let slPips = weights["FixedSL"] ?? 30.0
         let sl = type == .buy ? indicators.currentPrice - (slPips * pipSize) : indicators.currentPrice + (slPips * pipSize)
 
-        // Dynamic Take Profit
         let atrPips = indicators.atr / pipSize
         let tpPips = max(8.0, min(25.0, atrPips * 2.5))
         let tp = type == .buy ? indicators.currentPrice + (tpPips * pipSize) : indicators.currentPrice - (tpPips * pipSize)
 
-        // Optimal Entry
         let optimalEntry = findOptimalEntry(symbol: symbol, type: type, basePrice: indicators.currentPrice, candles: candles1m, atr: indicators.atr, fvgGaps: indicators.fvgGaps, emaPeriod: pullbackEMAPeriod)
 
         return ScalpingSignal(
