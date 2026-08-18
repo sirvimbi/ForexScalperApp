@@ -1,20 +1,23 @@
 name: Apply Settings Layout Fix
 on:
   push:
-    branches:
-      - fix/settings-scroll-layout
 permissions:
   contents: write
 jobs:
   transform:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 1
-      - name: Rebuild settings card layout
-        shell: python
+          fetch-depth: 0
+          ref: main
+      - name: Transform fix branch
+        shell: bash
         run: |
+          git fetch origin fix/settings-scroll-layout
+          git checkout fix/settings-scroll-layout
+          python3 - <<'PY'
           from pathlib import Path
           p = Path('ForexScalperApp/SettingsView.swift')
           s = p.read_text()
@@ -96,15 +99,16 @@ jobs:
           if old2 not in s: raise SystemExit('active-pairs ScrollView closing anchor not found')
           s = s.replace(old2, '''                                    }\n                                    .frame(maxHeight: 250)\n                                    .clipped()''', 1)
           p.write_text(s)
-      - name: Commit layout fix
-        run: |
+          PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add ForexScalperApp/SettingsView.swift
           git commit -m "fix: stabilize and rebalance settings layout"
-          git push
-      - name: Remove temporary workflow
+          git push origin fix/settings-scroll-layout
+      - name: Remove temporary workflow from main
+        if: always()
         run: |
-          git rm .github/workflows/settings-layout-fix.yml
-          git commit -m "chore: remove temporary settings layout workflow"
-          git push
+          git checkout main
+          git rm .github/workflows/settings-layout-fix.yml || true
+          git commit -m "chore: remove temporary settings layout workflow" || true
+          git push origin main || true
