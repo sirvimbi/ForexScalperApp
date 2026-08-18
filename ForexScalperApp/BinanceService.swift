@@ -319,12 +319,12 @@ actor BinanceService: MarketDataProvider {
             "USDJPY": "USDJPY",
             "XAUUSD": "XAUUSDT",
             "XAGUSD": "XAGUSDT",
-            "USOIL": "USOILUSDT",
-            "UKOIL": "UKOILUSDT",
-            "NAS100": "NAS100USDT",
-            "US30": "US30USDT",
-            "US500": "US500USDT",
-            "GER30": "GER30USDT",
+            "USOIL": "WTIUSDT",
+            "UKOIL": "BRENTUSDT",
+            "NAS100": "NDXUSDT",
+            "US30": "DJIUSDT",
+            "US500": "SPXUSDT",
+            "GER30": "DAXUSDT",
             "BTCUSDT": "BTCUSDT",
             "ETHUSDT": "ETHUSDT"
         ]
