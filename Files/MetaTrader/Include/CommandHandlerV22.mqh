@@ -36,6 +36,48 @@ public:
          SendSettingsResponse(sock,200,response);
          return;
       }
+
+      // Compatibility layer for direct bridge clients and older Swift
+      // payloads. The V23 parent handler expects action=market and
+      // order_type=buy/sell. Direct callers commonly send action=BUY/SELL
+      // (plus type=MARKET). Normalize those requests without changing the
+      // authoritative SignalType -> order_type path used by Swift.
+      if((req.path=="/v1/order" || req.path=="/order") && req.method=="POST")
+      {
+         HttpRequest normalizedReq;
+         normalizedReq.method=req.method;
+         normalizedReq.path=req.path;
+         normalizedReq.query=req.query;
+         normalizedReq.body=req.body;
+         normalizedReq.isWebSocket=req.isWebSocket;
+
+         CJAVal body;
+         if(body.Deserialize(req.body))
+         {
+            string action=body["action"].ToStr();
+            string orderType=body["order_type"].ToStr();
+            StringToLower(action);
+            StringToLower(orderType);
+
+            if((action=="buy" || action=="sell") && orderType=="")
+            {
+               body["order_type"]=action;
+               body["action"]="market";
+               normalizedReq.body=body.Serialize();
+               PrintFormat("[EA V23] ORDER COMPAT | action=%s -> action=market order_type=%s",action,action);
+            }
+            else if((action=="buy" || action=="sell") && (orderType=="buy" || orderType=="sell") && action!=orderType)
+            {
+               string error=StringFormat("{\"success\":false,\"error\":\"Conflicting order direction\",\"action\":\"%s\",\"order_type\":\"%s\"}",JsonEscape(action),JsonEscape(orderType));
+               SendSettingsResponse(sock,400,error);
+               return;
+            }
+         }
+
+         CCommandHandler::HandleCommand(sock,normalizedReq);
+         return;
+      }
+
       CCommandHandler::HandleCommand(sock,req);
    }
 
