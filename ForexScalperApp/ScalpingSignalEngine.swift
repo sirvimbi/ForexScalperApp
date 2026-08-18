@@ -584,13 +584,27 @@ actor ScalpingSignalEngine {
         tracePillar(symbol: symbol, pillar: "SAR Trend Confirmation", passed: sarBuy || sarSell, detail: "SAR=\(String(format: "%.5f", indicators.sar)) price=\(String(format: "%.5f", indicators.currentPrice))", contribution: (sarBuy || sarSell) ? sarWeight : 0, buyScore: buyScore, sellScore: sellScore)
 
         // PILLAR 8: Momentum Acceleration (V10.0)
+        // Direction is derived from the signed momentum score, never from the
+        // direction that is already leading. This prevents acceleration from
+        // reinforcing a pre-existing BUY/SELL scoring bias.
         let accelWeight = weights["Accel"] ?? 12.0
+        let accelerationDirection: SignalType =
+            indicators.momentumScore > 0 ? .buy :
+            (indicators.momentumScore < 0 ? .sell : .none)
         if indicators.isAccelerating {
-            if buyScore > sellScore { buyScore += accelWeight }
-            else if sellScore > buyScore { sellScore += accelWeight }
-            factors["Momentum Surge"] = accelWeight
+            switch accelerationDirection {
+            case .buy:
+                buyScore += accelWeight
+                factors["Momentum Surge"] = accelWeight
+            case .sell:
+                sellScore += accelWeight
+                factors["Momentum Surge"] = accelWeight
+            case .none:
+                break
+            }
         }
-        tracePillar(symbol: symbol, pillar: "Momentum Surge", passed: indicators.isAccelerating, detail: "accelerating=\(indicators.isAccelerating) ROC=\(String(format: "%.4f", indicators.momentumScore))", contribution: indicators.isAccelerating ? accelWeight : 0, buyScore: buyScore, sellScore: sellScore)
+        let accelDirectionLabel = accelerationDirection == .buy ? "BUY" : accelerationDirection == .sell ? "SELL" : "NONE"
+        tracePillar(symbol: symbol, pillar: "Momentum Surge", passed: indicators.isAccelerating && accelerationDirection != .none, detail: "accelerating=\(indicators.isAccelerating) ROC=\(String(format: "%.4f", indicators.momentumScore)) direction=\(accelDirectionLabel)", contribution: indicators.isAccelerating && accelerationDirection != .none ? accelWeight : 0, buyScore: buyScore, sellScore: sellScore)
 
         // PILLAR 9: L2 Order Flow Imbalance (V10.0)
         let flowWeight = weights["OrderFlow"] ?? 15.0
